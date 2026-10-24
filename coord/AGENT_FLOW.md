@@ -109,4 +109,4 @@ request; checks that `motion` drops.
 
 - **Szymon:** Supabase tables for pillow state, events, commands, `agent_log`, contacts (with phone
   numbers) and config; owner of the schema. Agent code lives in the backend under `app/agents/`.
-- **Keanu / Adyan:** `keys.fine` from the hit sensor on the one pillow.
+- **Keanu / Adyan:** `keys.fine` from the hit sensor on Mum's pillow; path light and motor on Mum's pillow.

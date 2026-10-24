@@ -67,7 +67,7 @@ not device commands. Guardian caps brightness, volume and intensity before a com
 
 | `pillow_id` | Who | Hardware |
 |---|---|---|
-| `mum` | the resident (persona TBD: elderly parent, or the anxious student) | Keanu's ESP32-S3 AMOLED + sensors |
+| `mum` | the resident (older adult living alone) | booth ESP32 + sensors (`firmware/pillow/`) |
 
 There is no second pillow. The adult child / carer uses only the family app: live status card,
 in-app alerts and an "I'm on it" button (see the decisions log in `coord/CONTEXT.md`).
