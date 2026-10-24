@@ -26,7 +26,8 @@ off by itself when those stop (the bridge died), instead of streaming forever.
   uv run sim/audio_bridge.py --server https://pillow.keanuc.net --pillow-id mum
                                                       # also forward the pillow's lines ("UNO {...}",
                                                       # firmware/pillow_node) as pillow state, and
-                                                      # pass `buzz` commands on to the voice unit
+                                                      # pass `buzz` and `set_light` commands on to
+                                                      # the voice unit (its screen is the light)
 """
 
 import argparse
@@ -65,6 +66,8 @@ MIC_KEEPALIVE_S = 2  # the relay gives up on the mic after 6 s without MIC ON
 COMMAND_POLL_S = 0.5  # coord/CONTRACT.md 3
 BUZZ_PATTERNS = ("chime", "alert")
 BUZZ_REPEAT_MAX = 3
+LIGHT_COLORS = ("warm", "amber", "off")
+LIGHT_FADE_MAX_S = 60
 
 
 def ulaw_encode(pcm: bytes) -> bytes:
@@ -94,7 +97,7 @@ class Board:
         self.watchers: list[queue.Queue] = []
 
     def command(self, cmd: str) -> None:
-        """MIC ON / MIC OFF / VOL n / GAIN n / BUZZ pattern n. Raises OSError when the board isn't
+        """MIC ON / MIC OFF / VOL n / GAIN n / BUZZ pattern n / LIGHT pct colour fade_s. Raises OSError when the board isn't
         connected."""
         raise NotImplementedError
 
@@ -348,10 +351,31 @@ def buzz_line(args: object) -> str | None:
     return f"BUZZ {args['pattern']} {min(max(repeat, 1), BUZZ_REPEAT_MAX)}"
 
 
+def _clamped_int(value: object, lo: int, hi: int) -> int:
+    try:
+        return min(max(int(value), lo), hi)
+    except (TypeError, ValueError):
+        return lo
+
+
+def light_line(args: object) -> str | None:
+    """A set_light command's args ({"brightness_pct": 20, "color": "warm", "fade_s": 3}) as the voice
+    unit's "LIGHT 20 warm 3", or None if they aren't a light it can show. Colour "off" is dark."""
+    if not isinstance(args, dict) or args.get("color", "warm") not in LIGHT_COLORS:
+        return None
+    color = args.get("color", "warm")
+    pct = 0 if color == "off" else _clamped_int(args.get("brightness_pct", 0), 0, 100)
+    return f"LIGHT {pct} {color} {_clamped_int(args.get('fade_s', 0), 0, LIGHT_FADE_MAX_S)}"
+
+
+DEVICE_LINES = {"buzz": buzz_line, "set_light": light_line}  # server command -> voice unit line
+
+
 def poll_commands(board: Board, server: str, pillow_id: str) -> None:
-    """GET /api/pillows/{id}/commands (coord/CONTRACT.md 3) and pass `buzz` on to the voice unit, which
-    makes the sound itself (firmware/libraries/PillowBuzz): on the pillow's buzzer, or its speaker.
-    The other commands are for the pillow's motor and lights, which nothing here drives: ignored.
+    """GET /api/pillows/{id}/commands (coord/CONTRACT.md 3) and pass `buzz` and `set_light` on to the
+    voice unit, which makes the sound itself (firmware/libraries/PillowBuzz: on the pillow's buzzer,
+    or its speaker) and shows the light on its screen. The other commands are for the pillow's motor,
+    which nothing here drives: ignored.
     Like sim/serial_bridge.py, skips the backlog on start so a restart doesn't replay old buzzes."""
     url = f"{server.rstrip('/')}/api/pillows/{pillow_id}/commands?after="
     last_id = None
@@ -376,17 +400,18 @@ def poll_commands(board: Board, server: str, pillow_id: str) -> None:
             continue
         for cmd in commands:
             last_id = max(last_id, int(cmd.get("id", 0)))
-            if cmd.get("cmd") != "buzz":
+            to_line = DEVICE_LINES.get(cmd.get("cmd"))
+            if to_line is None:
                 continue
-            line = buzz_line(cmd.get("args"))
+            line = to_line(cmd.get("args"))
             if line is None:
-                print(f"audio_bridge: buzz with bad args {cmd.get('args')!r}; skipped", flush=True)
+                print(f"audio_bridge: {cmd.get('cmd')} with bad args {cmd.get('args')!r}; skipped", flush=True)
                 continue
             print(f"audio_bridge: {line}", flush=True)
             try:
                 board.command(line)
             except OSError as err:
-                print(f"audio_bridge: buzz: {err}", file=sys.stderr, flush=True)
+                print(f"audio_bridge: {cmd.get('cmd')}: {err}", file=sys.stderr, flush=True)
 
 
 def stream(board: Board, kind: list, conn: socket.socket) -> None:

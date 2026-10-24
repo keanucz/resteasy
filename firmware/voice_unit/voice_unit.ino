@@ -26,17 +26,23 @@
 //
 // USB serial (fallback, when the board is plugged into the laptop): the same as text lines.
 //   board -> laptop:  MIC <base64 of 100 ms 16 kHz mono s16le>,  KEY talk,  UNO <line>,  boot log
-//   laptop -> board:  SPK <base64 s16le>,  MIC ON|OFF,  VOL n,  GAIN n,  BUZZ <pattern> <repeat>
+//   laptop -> board:  SPK <base64 s16le>,  MIC ON|OFF,  VOL n,  GAIN n,  BUZZ <pattern> <repeat>,
+//                     LIGHT <0-100> <warm|amber|off> <fade_s>
 //
 // BUZZ: the server's `buzz` command (coord/CONTRACT.md 3; sounds in firmware/libraries/PillowBuzz),
 // made here, not streamed. With PILLOW_LINK=1 and a pillow node that says (in its hellos) it has a
 // buzzer, it goes on to the pillow and the buzzer plays it; otherwise this unit's speaker does.
+//
+// LIGHT: the server's `set_light` (coord/CONTRACT.md 3), e.g. Night Watch's path light. The AMOLED
+// screen is the light: filled with one colour, its brightness faded. Black pixels are off, so no
+// glow when dark.
 //
 // Uno passthrough: the Arduino Uno R3 with the pillow's sensors has no radio, so its serial output
 // (pin 1, TX) comes in on UNO_RX, through a 1k/2k divider (the Uno is 5 V, the S3 3.3 V). Each line
 // goes on over the wireless link and USB as "UNO <line>", unchanged.
 //
 // Build: arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc --libraries firmware/libraries firmware/voice_unit
+//   needs the "GFX Library for Arduino" library (Arduino_GFX), as firmware/kid_pillow does
 //   radio: add --build-property compiler.cpp.extra_flags=-DPILLOW_LINK=1
 // Codec driver es8311.* is Espressif's (Apache-2.0), as shipped in Waveshare's 15_ES8311 example.
 
@@ -47,6 +53,7 @@
 #include "freertos/stream_buffer.h"
 #include "es8311.h"
 #include <PillowBuzz.h>
+#include <Arduino_GFX_Library.h>
 
 #ifndef PILLOW_LINK
 #define PILLOW_LINK 0
@@ -71,6 +78,7 @@
 #define QMI8658_ADDR 0x6B
 #define UNO_RX 44    // header pad U0RXD <- Uno pin 1 (TX) via 1k/2k divider; Uno GND to GND
 #define UNO_TX 43    // header pad U0TXD, unused (leave unwired: the ROM boot log comes out here)
+// AMOLED (CO5300, 368x448) on QSPI: CS 12, SCK 11, SDIO0-3 = 4-7 (as firmware/kid_pillow)
 
 // GATT UUIDs: shared with sim/audio_bridge.py
 #define SERVICE_UUID "6e9d0001-5a1c-4c5e-9b7e-70696c6c6f77"
@@ -91,6 +99,8 @@ const size_t UNO_LINE_MAX = 200;
 const float CHIME_LEVEL = 0.25, ALERT_LEVEL = 0.35;  // of full scale: soft, it plays in a bedroom at night
 const uint8_t HELLO_HAS_BUZZER = 2;          // bit in the pillow node's hellos (firmware/pillow_node)
 const size_t BUZZ_CMD_MAX = 24;
+const uint16_t LIGHT_WARM = 0xFDAC, LIGHT_AMBER = 0xFBC0, LIGHT_BLACK = 0x0000;  // RGB565
+const uint32_t LIGHT_STEP_MS = 20;
 
 I2SClass i2s;
 es8311_handle_t codec;
@@ -101,6 +111,15 @@ volatile bool pillowBuzzer = false;  // the paired pillow node has a buzzer
 volatile bool micSerial = false, micLink = false;  // mic asked for over USB / the wireless link
 volatile uint32_t lastPlayMs = 0;
 bool imuOk = false;
+
+Arduino_DataBus *displayBus = new Arduino_ESP32QSPI(12 /*CS*/, 11 /*SCK*/, 4, 5, 6, 7 /*SDIO0-3*/);
+Arduino_CO5300 *gfx = new Arduino_CO5300(displayBus, GFX_NOT_DEFINED, 0, 368, 448, 16, 0, 0, 0);
+bool screenOk = false;
+// The light asked for; set by handleCommand (any task), drawn by updateLight in loop()
+volatile uint8_t lightTarget = 0;  // brightness 0-255
+volatile uint16_t lightColour = LIGHT_WARM;
+volatile uint32_t lightFadeMs = 0;
+volatile bool lightChanged = false;
 
 #if PILLOW_LINK == 0
 volatile bool bleConnected = false;
@@ -224,6 +243,51 @@ void handleCommand(const String &cmd, bool fromLink) {
     char text[BUZZ_CMD_MAX] = {};
     cmd.substring(0, BUZZ_CMD_MAX - 1).toCharArray(text, BUZZ_CMD_MAX);
     if (xQueueSend(buzzQueue, text, 0) != pdTRUE) Serial.print("buzz: busy, dropped\r\n");
+  } else if (cmd.startsWith("LIGHT ")) {
+    setLight(cmd.substring(6));
+  }
+}
+
+// ---------- light ----------
+// "<pct> <warm|amber|off> <fade_s>" from LIGHT; updateLight draws it.
+void setLight(const String &args) {
+  int a = args.indexOf(' '), b = args.indexOf(' ', a + 1);
+  String colour = args.substring(a + 1, b < 0 ? args.length() : b);
+  if (a < 0 || (colour != "warm" && colour != "amber" && colour != "off")) {
+    Serial.printf("light: bad command '%s'\r\n", args.c_str());
+    return;
+  }
+  int pct = colour == "off" ? 0 : constrain(args.substring(0, a).toInt(), 0, 100);
+  lightColour = colour == "amber" ? LIGHT_AMBER : LIGHT_WARM;
+  lightTarget = pct * 255 / 100;
+  lightFadeMs = b < 0 ? 0 : constrain(args.substring(b + 1).toInt(), 0, 60) * 1000UL;
+  lightChanged = true;
+  Serial.printf("light: %d%% %s over %u ms\r\n", pct, colour.c_str(), (unsigned)lightFadeMs);
+}
+
+// Fades the screen's brightness toward lightTarget, one step every LIGHT_STEP_MS. The display is only
+// drawn from here (loop()), never from the radio or BLE callbacks.
+void updateLight() {
+  static float level = 0, step = 0;
+  static uint16_t shown = LIGHT_BLACK;
+  static uint32_t last = 0;
+  if (!screenOk || millis() - last < LIGHT_STEP_MS) return;
+  last = millis();
+  if (lightChanged) {
+    lightChanged = false;
+    step = fabsf(lightTarget - level) / max(1.0f, lightFadeMs / (float)LIGHT_STEP_MS);
+    if (lightTarget > 0 && shown != lightColour) {
+      shown = lightColour;
+      gfx->fillScreen(shown);
+    }
+  }
+  float target = lightTarget;
+  if (level == target) return;
+  level = fabsf(target - level) <= step ? target : level + (target > level ? step : -step);
+  gfx->setBrightness((uint8_t)level);
+  if (level == 0 && shown != LIGHT_BLACK) {
+    shown = LIGHT_BLACK;
+    gfx->fillScreen(LIGHT_BLACK);
   }
 }
 
@@ -498,6 +562,11 @@ void setup() {
   digitalWrite(PA_EN, LOW);
   Wire.begin(IIC_SDA, IIC_SCL);
   imuInit();
+  screenOk = gfx->begin();
+  if (screenOk) {
+    gfx->fillScreen(LIGHT_BLACK);
+    gfx->setBrightness(0);
+  }
   i2s.setPins(I2S_BCK, I2S_WS, I2S_DOUT, I2S_DIN, I2S_MCK);
   bool i2sOk = i2s.begin(I2S_MODE_STD, RATE, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO, I2S_STD_SLOT_BOTH);
   bool codecOk = i2sOk && codecInit();
@@ -508,8 +577,9 @@ void setup() {
   Serial1.begin(UNO_BAUD, SERIAL_8N1, UNO_RX, UNO_TX);
   gpio_pullup_en((gpio_num_t)UNO_RX);  // idle high when no Uno is wired: no garbage lines
   linkInit();
-  Serial.printf("voice_unit: i2s %s, es8311 %s, imu %s, link %d, uno rx gpio %d @ %u\n", i2sOk ? "ok" : "FAILED",
-                codecOk ? "ok" : "FAILED", imuOk ? "ok" : "missing", PILLOW_LINK, UNO_RX, (unsigned)UNO_BAUD);
+  Serial.printf("voice_unit: i2s %s, es8311 %s, imu %s, screen %s, link %d, uno rx gpio %d @ %u\n",
+                i2sOk ? "ok" : "FAILED", codecOk ? "ok" : "FAILED", imuOk ? "ok" : "missing",
+                screenOk ? "ok" : "FAILED", PILLOW_LINK, UNO_RX, (unsigned)UNO_BAUD);
   xTaskCreatePinnedToCore(speakerTask, "spk", 4096, NULL, 5, NULL, 1);
   xTaskCreatePinnedToCore(micTask, "mic", 8192, NULL, 4, NULL, 1);
   xTaskCreatePinnedToCore(buzzTask, "buzz", 4096, NULL, 3, NULL, 1);
@@ -523,5 +593,6 @@ void loop() {
     lastImu = millis();
     checkTap();
   }
+  updateLight();
   delay(1);
 }
