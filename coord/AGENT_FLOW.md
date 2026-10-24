@@ -47,12 +47,13 @@ Claude also writes the spoken lines and the family message. It never decides tim
 
 ## 4. Family Liaison ladder (least intrusive first)
 
-1. Kid pillow glows "Check on Mum" and vibrates (`glow_presence`, `vibrate`). Wait 2 min.
+1. In-app alert / push "Check on Mum" to the family app. Wait 2 min.
 2. SMS to contact 1. Wait 2 min.
 3. Phone call to contact 1. Wait 2 min.
 4. Repeat from step 2 with the next contact.
 
-The first contact tried is whoever looks awake (their pillow `head_on` false) when that is known.
+Contacts are tried in `resident_contacts.priority` order, skipping anyone off call or in their quiet
+hours. An "I'm on it" tap in the app acknowledges the incident and stops the ladder.
 **Never auto-calls 911**; the message tells the contact to call if they can't reach her.
 
 ## 5. Guardian (plain code, checks every tool call before it is queued)
@@ -100,7 +101,7 @@ request; checks that `motion` drops.
 
 1. Event deriver + Night Watch against `sim/pillow_sim.py --scenario no_return`.
 2. Check-in: Cartesia voice + Claude classify.
-3. Guardian + ladder to the kid pillow (`glow_presence`), then SMS.
+3. Guardian + ladder: in-app alert first, then SMS.
 4. `agent_log` live in the family app.
 5. Morning Brief Droid. 6. Fetch family agent. 7. Settle.
 
@@ -108,4 +109,4 @@ request; checks that `motion` drops.
 
 - **Szymon:** Supabase tables for pillow state, events, commands, `agent_log`, contacts (with phone
   numbers) and config; owner of the schema. Agent code lives in the backend under `app/agents/`.
-- **Keanu / Adyan:** `keys.fine` from the hit sensor and the kid pillow's touch; `vibrate` on the kid pillow.
+- **Keanu / Adyan:** `keys.fine` from the hit sensor on the one pillow.
