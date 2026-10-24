@@ -214,7 +214,8 @@ void bleInit() {
   BLEAdvertising *adv = BLEDevice::getAdvertising();
   adv->addServiceUUID(SERVICE_UUID);
   adv->setScanResponse(true);
-  BLEDevice::startAdvertising();
+  bool ok = adv->start();
+  Serial.printf("ble: advertising %s, address %s\n", ok ? "started" : "FAILED", BLEDevice::getAddress().toString().c_str());
 }
 
 // ---------- IMU tap (QMI8658, raw registers) ----------

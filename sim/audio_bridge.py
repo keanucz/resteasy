@@ -211,6 +211,8 @@ class BleBoard(Board):
                     continue
                 gone = asyncio.Event()
                 async with BleakClient(device, disconnected_callback=lambda _: gone.set()) as client:
+                    if hasattr(client._backend, "_acquire_mtu"):  # BlueZ reports 23 until asked
+                        await client._backend._acquire_mtu()
                     await client.start_notify(MIC_UUID, lambda _, data: self._mic(ulaw_decode(data)))
                     await client.start_notify(EVENT_UUID, lambda _, data: data == b"talk" and self._talk())
                     self.client = client
