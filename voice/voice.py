@@ -12,8 +12,10 @@ talking (not after a fixed window): a quick "I'm fine" returns at once, a slow s
 cut off, and silence is recognised as no answer.
 
     export CARTESIA_API_KEY=sk_car_...          # never commit it
-    uv run voice/voice.py                      # one check-in round trip: ask, listen, print
     uv run voice/voice.py --say "Light's on, take your time."
+    uv run voice/voice.py --debug              # listen once, print the reply + mic level and events
+
+The full check-in conversation lives in voice/checkin.py.
 """
 
 from __future__ import annotations
@@ -58,10 +60,11 @@ def _key() -> str:
     return key
 
 
-def speak(text: str, *, speed: float = 0.85, emotion: str = "calm") -> None:
+def speak(text: str, *, speed: float = 0.85, emotion: str = "calm", volume: float = 1.0) -> None:
     """Say `text` through the laptop speaker and block until it finishes.
 
-    Slower than default and calm: the listener is likely older and just woken up.
+    Slower than default and calm: the listener is likely older and just woken up. `volume` is
+    Cartesia's 0.5-2.0 scale.
     """
     body = {
         "model_id": TTS_MODEL,
@@ -69,7 +72,7 @@ def speak(text: str, *, speed: float = 0.85, emotion: str = "calm") -> None:
         "voice": {"id": VOICE_ID},
         "language": "en",
         "output_format": {"container": "raw", "encoding": "pcm_s16le", "sample_rate": TTS_RATE},
-        "generation_config": {"speed": speed, "emotion": emotion},
+        "generation_config": {"speed": speed, "emotion": emotion, "volume": volume},
     }
     headers = {"Authorization": f"Bearer {_key()}", "Cartesia-Version": VERSION}
     r = httpx.post(f"{API}/tts/bytes", headers=headers, json=body, timeout=30)
@@ -163,23 +166,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--say", help="just speak this line and exit")
     parser.add_argument("--no-answer-s", type=float, default=8.0, help="silence before counting it as no answer")
-    parser.add_argument("--debug", action="store_true", help="print mic level and Cartesia turn events")
-    args = parser.parse_args()
+    parser.add_argument("--debug", action="store_true", help="print mic level and Cartesia turn events")    args = parser.parse_args()
 
     if args.say:
         speak(args.say)
         return
-    prompt = "Are you alright?"
-    for attempt in (1, 2):
-        speak(prompt)
-        print(f"listening (no answer after {args.no_answer_s:.0f} s of silence) ...", flush=True)
-        reply = listen(no_answer_s=args.no_answer_s, debug=args.debug)
-        print(f"attempt {attempt}: {reply}")
-        if reply.text:
-            return
-        prompt = ("Sorry, I didn't quite catch that. Are you alright?" if reply.spoke
-                  else "I just want to check you're OK. Are you alright?")
-    print("no clear answer after 2 tries (Night Watch would escalate here)")
+    print(f"listening once (no answer after {args.no_answer_s:.0f} s of silence) ...", flush=True)
+    print(listen(no_answer_s=args.no_answer_s, debug=args.debug))
 
 
 if __name__ == "__main__":
