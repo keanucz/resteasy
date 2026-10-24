@@ -8,6 +8,7 @@
 #include <Wire.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include <DHT.h>
 #include <ArduinoJson.h>
 #include "secrets.h"  // WIFI_SSID, WIFI_PASS, SERVER_URL, PILLOW_ID
 
@@ -17,6 +18,7 @@
 #define PIN_SCL 22          // MPU6050 SCL
 #endif
 #define PIN_ONEWIRE 4       // KY-001 / DS18B20 data (needs its 4.7k pull-up; the module has it)
+#define PIN_DHT 32          // DHT11 data, inside the pillow under the head (humidity = head on)
 #define PIN_HIT 27          // hit sensor digital out (tap = "I'm fine")
 #define PIN_TRIG 5          // ultrasonic trigger
 #define PIN_ECHO 18         // ultrasonic echo: 5 V signal, use a 1k/2k divider to 3.3 V
@@ -27,18 +29,22 @@
 // ---- Tuning (defaults; the server owns event thresholds, these are only sensor cleanup) ----
 const uint32_t LOOP_MS = 500;
 const float HEAD_DELTA_C = 1.5;      // pillow probe this much above its 10-min minimum = head on
+const float HEAD_DELTA_RH = 6.0;     // DHT11 humidity this much above its 10-min minimum = head on
 const float ROOM_NEAR_CM = 80;       // ultrasonic closer than this = someone standing by the bed
 const float MOTION_FULL_SCALE = 0.6; // accel change (g) that maps to motion = 1.0
 
 OneWire oneWire(PIN_ONEWIRE);
+DHT dht(PIN_DHT, DHT11);
 DallasTemperature probe(&oneWire);
 
 bool imuOk = false;
 float lastAx = 0, lastAy = 0, lastAz = 0;
 float motionAvg = 0;            // ~10 s exponential average of accel change
 float probeMinC = 100;          // rolling minimum of the pillow probe
-uint32_t probeMinResetAt = 0;
+float humidMinRh = 100;         // rolling minimum of the in-pillow humidity
+uint32_t baselineResetAt = 0;
 bool headOn = false;
+bool warmHead = false, humidHead = false;
 uint32_t fineUntil = 0;         // hit sensor latch so a tap survives one state message
 long lastCommandId = 0;
 
@@ -95,16 +101,29 @@ float readProbeC() {
   return c == DEVICE_DISCONNECTED_C ? NAN : c;
 }
 
-void updateHeadOn(float probeC) {
-  if (isnan(probeC)) return;
-  if (millis() > probeMinResetAt) {  // let the baseline follow the room every 10 min
-    probeMinC = probeC;
-    probeMinResetAt = millis() + 600000UL;
+// Head on pillow = warmth (KY-001) OR breath/skin humidity (DHT11) above a rolling baseline.
+// Humidity responds faster than the probe's temperature, so either sensor alone can say "on";
+// each has hysteresis so it doesn't flicker. Baselines follow the room every 10 min.
+void hysteresis(bool &state, float delta, float threshold) {
+  if (!state && delta > threshold) state = true;
+  else if (state && delta < threshold * 0.5) state = false;
+}
+
+void updateHeadOn(float probeC, float humidRh) {
+  if (millis() > baselineResetAt) {
+    if (!isnan(probeC)) probeMinC = probeC;
+    if (!isnan(humidRh)) humidMinRh = humidRh;
+    baselineResetAt = millis() + 600000UL;
   }
-  probeMinC = min(probeMinC, probeC);
-  float delta = probeC - probeMinC;
-  if (!headOn && delta > HEAD_DELTA_C) headOn = true;            // hysteresis: on at +1.5
-  else if (headOn && delta < HEAD_DELTA_C * 0.5) headOn = false;  // off below +0.75
+  if (!isnan(probeC)) {
+    probeMinC = min(probeMinC, probeC);
+    hysteresis(warmHead, probeC - probeMinC, HEAD_DELTA_C);
+  }
+  if (!isnan(humidRh)) {
+    humidMinRh = min(humidMinRh, humidRh);
+    hysteresis(humidHead, humidRh - humidMinRh, HEAD_DELTA_RH);
+  }
+  headOn = warmHead || humidHead;
 }
 
 float readDistanceCm() {
@@ -168,7 +187,7 @@ void ensureWifi() {
                 WiFi.localIP().toString().c_str());
 }
 
-void postState(float motion, float probeC, float distCm, float light) {
+void postState(float motion, float probeC, float humidRh, float distCm, float light) {
   JsonDocument doc;
   doc["pillow_id"] = PILLOW_ID;
   doc["ts"] = millis() / 1000.0;  // device clock; the server stamps arrival time too
@@ -177,7 +196,7 @@ void postState(float motion, float probeC, float distCm, float light) {
   doc["room_motion"] = !isnan(distCm) && distCm < ROOM_NEAR_CM;
   doc["light"] = light;
   if (isnan(probeC)) doc["temp_c"] = nullptr; else doc["temp_c"] = probeC;
-  doc["humidity"] = nullptr;
+  if (isnan(humidRh)) doc["humidity"] = nullptr; else doc["humidity"] = humidRh;
   JsonObject keys = doc["keys"].to<JsonObject>();
   keys["talk"] = false; keys["family"] = false;  // the USB keypad goes to the base laptop
   keys["fine"] = millis() < fineUntil;
@@ -219,6 +238,7 @@ void setup() {
   ledcAttach(PIN_LED, 5000, 8);
   imuInit();
   probe.begin();
+  dht.begin();
   probe.setWaitForConversion(true);
   tls.setInsecure();
   ensureWifi();
@@ -229,12 +249,13 @@ void loop() {
   if (digitalRead(PIN_HIT) == HIGH) fineUntil = millis() + 1200;  // flip to LOW if your module is active-low
   float motion = readMotion();
   float probeC = readProbeC();
-  updateHeadOn(probeC);
+  float humidRh = dht.readHumidity();  // NAN if not wired; the library rate-limits to every 2 s
+  updateHeadOn(probeC, humidRh);
   float distCm = readDistanceCm();
   float light = analogRead(PIN_LDR) / 4095.0;
   ensureWifi();
   if (WiFi.status() == WL_CONNECTED) {
-    postState(motion, probeC, distCm, light);
+    postState(motion, probeC, humidRh, distCm, light);
     pollCommands();
   }
   applyActuators();
