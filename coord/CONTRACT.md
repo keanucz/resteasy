@@ -6,7 +6,7 @@ both speak it, so agents and backend never care which one is plugged in. Change 
 
 Transport for the weekend: plain HTTP JSON. The device pushes state and polls for commands
 (an ESP32 handles that more reliably than holding a WebSocket open). Szymon owns the server side;
-if Spacetime replaces the HTTP endpoints, keep these message shapes.
+the backend stores them in Supabase but the HTTP endpoints and message shapes stay as below.
 
 ## 1. Device → cloud: state (about 2 per second, and on any change)
 

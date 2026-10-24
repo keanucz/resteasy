@@ -3,6 +3,11 @@
     "hivemind": {
       "command": "python3",
       "args": ["coord/bus_channel.py"]
+    },
+      "supabase": {
+      "type": "http",
+      "url": "https://mcp.supabase.com/mcp?project_ref=bcsrfqebcsbybpylnqmc&features=docs%2Caccount%2Cdatabase%2Cdebugging%2Cdevelopment%2Cfunctions%2Cbranching"
     }
   }
 }
+
