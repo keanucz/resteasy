@@ -71,6 +71,9 @@ bool beginRequest(HTTPClient &http, const String &url) {
 // Actuator state, updated by commands and advanced every loop
 struct Pulse { bool on; float startBpm, endBpm; uint32_t startMs, durMs; } pulse = {false};
 uint8_t lightPct = 0, fanPct = 0;
+// set_light fades: the target is lightPct; shownPct moves toward it over fadeMs (warm, not startling).
+float shownPct = 0, fadeFromPct = 0;
+uint32_t fadeStartMs = 0, fadeMs = 0;
 uint32_t vibrateUntil = 0;
 bool presenceGlow = false;
 
@@ -156,7 +159,11 @@ float readDistanceCm() {
 
 // ---------- actuators ----------
 void applyActuators() {
-  uint8_t motorDuty = 0, ledDuty = map(lightPct, 0, 100, 0, 255);
+  uint32_t sinceFade = millis() - fadeStartMs;
+  shownPct = (fadeMs == 0 || sinceFade >= fadeMs)
+                 ? lightPct
+                 : fadeFromPct + (lightPct - fadeFromPct) * (sinceFade / (float)fadeMs);
+  uint8_t motorDuty = 0, ledDuty = map((long)shownPct, 0, 100, 0, 255);
   if (pulse.on) {
     uint32_t t = millis() - pulse.startMs;
     if (t >= pulse.durMs) {
@@ -183,6 +190,9 @@ void runCommand(JsonObject c) {
   Serial.printf("cmd %ld %s\n", (long)(c["id"] | 0), cmd);
   if (!strcmp(cmd, "set_light")) {
     lightPct = strcmp(a["color"] | "warm", "off") ? constrain(a["brightness_pct"] | 0, 0, 100) : 0;
+    fadeFromPct = shownPct;
+    fadeStartMs = millis();
+    fadeMs = (uint32_t)constrain(a["fade_s"] | 0, 0, 60) * 1000UL;
   } else if (!strcmp(cmd, "pulse")) {
     pulse = {true, a["start_bpm"] | 12.0f, a["end_bpm"] | 6.0f, millis(),
              (uint32_t)constrain(a["duration_min"] | 5, 1, 30) * 60000UL};
