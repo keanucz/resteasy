@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.agents.guardian import Guardian
 from app.agents.night_summary import last_night_window, pending_goodnight, summarize_night
-from app.core.dependencies import PillowDep, SupabaseDep, require_checkin_token
+from app.core.dependencies import PillowDep, SupabaseDep, require_checkin_token, resident_of
 from app.crud.night_log import (
     add_event,
     latest_log_row,
@@ -21,7 +21,7 @@ from app.crud.night_log import (
     list_recent_events_of_type,
     log_action,
 )
-from app.crud.residents import get_resident, update_resident
+from app.crud.residents import update_resident
 from app.schemas.family import (
     Brief,
     BriefCreate,
@@ -31,7 +31,6 @@ from app.schemas.family import (
     SettingsPatch,
     SettingsResult,
 )
-from app.schemas.pillow import Pillow
 
 router = APIRouter(prefix="/pillows/{pillow_id}", tags=["family"])
 
@@ -42,17 +41,10 @@ SETTINGS_KEYS = ("checkin_timeout_min", "quiet_start", "quiet_end")  # residents
 _guardian = Guardian()  # config checks need no per-resident settings
 
 
-async def _resident(db, pillow: Pillow) -> dict:
-    resident = await get_resident(db, str(pillow.resident_id)) if pillow.resident_id else None
-    if resident is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Pillow {pillow.id} has no resident")
-    return resident
-
-
 @router.get("/night")
 async def read_night(pillow: PillowDep, db: SupabaseDep) -> NightReport:
     """Last night: summary (trips, check-ins, alerts), events and the agent log. The droid's input."""
-    resident = await _resident(db, pillow)
+    resident = await resident_of(db, pillow)
     start, end = last_night_window(clock.time(), resident["timezone"])
     events = await list_events_between(db, pillow.id, start.isoformat(), end.isoformat())
     log = await list_agent_log_between(db, pillow.id, start.isoformat(), end.isoformat())
@@ -76,7 +68,7 @@ async def read_brief(pillow: PillowDep, db: SupabaseDep) -> Brief:
 @router.post("/brief", dependencies=[Depends(require_checkin_token)], status_code=status.HTTP_201_CREATED)
 async def write_brief(pillow: PillowDep, brief: BriefCreate, db: SupabaseDep) -> Brief:
     """Store the droid's note and apply its settings diff, limited to what the Guardian allows."""
-    resident = await _resident(db, pillow)
+    resident = await resident_of(db, pillow)
     verdict = _guardian.check_config(brief.config_diff)
     allowed = brief.config_diff if verdict.allowed else (verdict.replacement or {})
     await update_resident(db, resident["id"], {k: v for k, v in allowed.items() if k in SETTINGS_KEYS})
@@ -91,7 +83,7 @@ async def write_brief(pillow: PillowDep, brief: BriefCreate, db: SupabaseDep) ->
 @router.patch("/settings", dependencies=[Depends(require_checkin_token)])
 async def patch_settings(pillow: PillowDep, patch: SettingsPatch, db: SupabaseDep) -> SettingsResult:
     """The family agent changes quiet hours or the timeout; the Guardian bounds it."""
-    resident = await _resident(db, pillow)
+    resident = await resident_of(db, pillow)
     diff = patch.model_dump(exclude_none=True)
     verdict = _guardian.check_config(diff)
     allowed = diff if verdict.allowed else (verdict.replacement or {})

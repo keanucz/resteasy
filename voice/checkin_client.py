@@ -11,6 +11,8 @@ and mic) can. It polls GET /api/pillows/{id}/state about once a second and react
     up          -> "The light's on. Take your time."
     check_in    -> run voice/checkin.py, then POST /api/pillows/{id}/checkin with the result
     in_bed      -> "You're back in bed. Goodnight." (only after an alert)
+    awake       -> every 10 s, say any due reminder (GET /reminders/due, voice/reminder.py), then
+                   POST /reminders/{occurrence_id}/result
 
     export CARTESIA_API_KEY=sk_car_...  ANTHROPIC_API_KEY=sk-ant-...  CHECKIN_TOKEN=<same as the server>
     uv run voice/checkin_client.py                                # mum on https://pillow.keanuc.net
@@ -35,6 +37,7 @@ POLL_S = 1.0
 PATH_LIGHT_LINE = "The light's on. Take your time."
 GOODNIGHT_LINE = "You're back in bed. Goodnight."
 ALERTED = {"check_in", "escalating"}
+REMINDER_CHECK_S = 10.0  # the server only marks reminders due while she's awake
 
 Action = tuple  # ("say", text) | ("checkin",) | ("goodnight",)
 
@@ -68,6 +71,11 @@ class Watcher:
         return []
 
 
+def reminders_due(state: str | None, now: float, last_check: float) -> bool:
+    """Whether to ask the server for due reminders now: only by day, and not every poll."""
+    return state == "awake" and now - last_check >= REMINDER_CHECK_S
+
+
 def _headers() -> dict[str, str]:
     return {"User-Agent": "calhacks-checkin-client/1.0"}
 
@@ -90,6 +98,7 @@ def main() -> None:
 
     import checkin
     import judge
+    import reminder
 
     if args.text:
         def speak(text: str, volume: float = 1.0) -> None:
@@ -106,13 +115,29 @@ def main() -> None:
         speak, listen = voice.speak, voice.listen
 
     if args.keywords:
-        judge_fn = judge.keyword_judge
+        judge_fn, reminder_judge = judge.keyword_judge, judge.keyword_reminder_judge
     else:
         judge.warm_up_in_background()
-        judge_fn = judge.claude_judge
+        judge_fn, reminder_judge = judge.claude_judge, judge.claude_reminder_judge
 
     base = f"{args.server.rstrip('/')}/api/pillows/{args.pillow_id}"
     watcher = Watcher()
+    auth = {"Authorization": f"Bearer {token}"}
+    last_reminder_check = 0.0
+
+    def post_result(http, url: str, body: dict) -> object | None:
+        """POST a result with retries; the server's own timers cover a result that never arrives."""
+        for attempt in range(5):
+            try:
+                resp = http.post(url, json=body, headers=auth)
+                resp.raise_for_status()
+                return resp.json()
+            except httpx.HTTPError as err:
+                print(f"[client] posting to {url} failed ({err}); retry {attempt + 1}/5",
+                      file=sys.stderr, flush=True)
+                time.sleep(2)
+        return None
+
     print(f"watching {base}/state (night_state) ...", flush=True)
     with httpx.Client(timeout=10, headers=_headers()) as http:
         while True:
@@ -140,8 +165,7 @@ def main() -> None:
                         print(f"{stamp}  say      {line!r}", flush=True)
                         speak(line)
                         try:
-                            http.post(f"{base}/goodnight/played",
-                                      headers={"Authorization": f"Bearer {token}"})
+                            http.post(f"{base}/goodnight/played", headers=auth)
                         except httpx.HTTPError as err:
                             print(f"[client] could not mark it played: {err}", file=sys.stderr, flush=True)
                 else:
@@ -150,18 +174,25 @@ def main() -> None:
                     out = checkin.run_checkin(speak, listen, judge=judge_fn, contact=args.contact,
                                               log=lambda m: print(f"          {m}", flush=True))
                     body = {"escalate": out.escalate, "reason": out.reason[:300]}
-                    for attempt in range(5):
-                        try:
-                            resp = http.post(f"{base}/checkin", json=body,
-                                             headers={"Authorization": f"Bearer {token}"})
-                            resp.raise_for_status()
-                            print(f"{stamp}  check-in {'ESCALATE' if out.escalate else 'STAND DOWN'}: "
-                                  f"{out.reason} -> {resp.json()}", flush=True)
-                            break
-                        except httpx.HTTPError as err:
-                            print(f"[client] posting the result failed ({err}); retry {attempt + 1}/5",
-                                  file=sys.stderr, flush=True)
-                            time.sleep(2)
+                    resp = post_result(http, f"{base}/checkin", body)
+                    print(f"{stamp}  check-in {'ESCALATE' if out.escalate else 'STAND DOWN'}: "
+                          f"{out.reason} -> {resp}", flush=True)
+            if reminders_due(watcher.state, time.monotonic(), last_reminder_check):
+                last_reminder_check = time.monotonic()
+                try:
+                    due = http.get(f"{base}/reminders/due").json()
+                except (httpx.HTTPError, ValueError) as err:
+                    print(f"[client] reminder check failed: {err}", file=sys.stderr, flush=True)
+                    due = []
+                for item in due:
+                    stamp = time.strftime("%H:%M:%S")
+                    print(f"{stamp}  reminder {item['text']!r}", flush=True)
+                    out = reminder.run_reminder(speak, listen, text=item["text"], confirm=item["confirm"],
+                                                judge=reminder_judge,
+                                                log=lambda m: print(f"          {m}", flush=True))
+                    resp = post_result(http, f"{base}/reminders/{item['occurrence_id']}/result",
+                                       {"outcome": out.outcome, "reply": out.reply})
+                    print(f"{stamp}  reminder {out.outcome} -> {resp}", flush=True)
             time.sleep(POLL_S)
 
 

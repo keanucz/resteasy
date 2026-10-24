@@ -34,10 +34,11 @@ _COMMANDS: dict[str, dict[str, tuple]] = {  # cmd -> arg -> (lo, hi) or allowed 
     "pulse": {"start_bpm": (4, 14), "end_bpm": (4, 14), "duration_min": (1, 30)},
     "vibrate": {"pattern": ("tap", "double", "long"), "repeat": (1, 5)},
     "fan": {"speed_pct": (0, 100)},
+    "buzz": {"pattern": ("chime", "alert"), "repeat": (1, 3)},
     "stop_all": {},
 }
 _CLAMPABLE = {("set_light", "brightness_pct"), ("set_light", "fade_s"), ("vibrate", "repeat"),
-              ("fan", "speed_pct")}
+              ("fan", "speed_pct"), ("buzz", "repeat")}
 
 MEDICAL = re.compile(
     r"\b(strokes?|heart attack|cardiac|seizures?|dementia|alzheimer'?s?|delirium|concussion|"

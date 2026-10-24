@@ -124,6 +124,7 @@ class NightWatch:
         self._next_step_at = math.inf
         self._alerted: list[str] = []  # contacts told so far, to tell them when she's okay
         self._reason = ""  # why we escalated, repeated in every alert
+        self._distress = False  # escalated on something she said, not a no-return
         self._acked = False  # a family member acknowledged this escalation
 
     # ---------- inputs ----------
@@ -184,6 +185,16 @@ class NightWatch:
             return []  # cancelled meanwhile (back in bed, or tapped)
         out: list[Action] = [Event(ts, "checkin_result", {"escalate": escalate, "reason": reason})]
         return out + (self._escalate(ts, reason) if escalate else self._said_fine(ts))
+
+    def distress_heard(self, ts: float, reason: str) -> list[Action]:
+        """She said something alarming outside a check-in (answering a reminder, say): escalate now,
+        day or night. Never ignored, so it works in any state; an escalation already running goes on."""
+        if self.state is State.ESCALATING:
+            return []
+        out: list[Action] = [Event(ts, "distress_heard", {"reason": reason, "state": str(self.state)})]
+        if self.state is State.CHECK_IN:
+            out.append(CancelCheckin())
+        return out + self._escalate(ts, reason, distress=True)
 
     def family_acknowledged(self, ts: float, contact: str) -> list[Action]:
         """A family member pressed "I'm on it" in the app: stop alerting anyone else."""
@@ -271,9 +282,10 @@ class NightWatch:
                 Alert(contact, "sms", f"Heads-up, no action needed: {self.cfg.resident} has been up "
                                       f"{away} min but says she's fine.")]
 
-    def _escalate(self, ts: float, reason: str) -> list[Action]:
+    def _escalate(self, ts: float, reason: str, distress: bool = False) -> list[Action]:
         self.state = State.ESCALATING
         self._acked = False
+        self._distress = distress
         # Least intrusive first: an in-app alert to every contact at once, then SMS and a call to
         # each contact in turn.
         self._ladder = [[("app", c) for c in self.cfg.contacts]]
@@ -288,11 +300,15 @@ class NightWatch:
             return [Event(ts, "ladder_exhausted", {})]
         step = self._ladder.pop(0)
         self._next_step_at = ts + self.cfg.step_wait_min * 60
-        left = datetime.fromtimestamp(self._left_at, ZoneInfo(self.cfg.timezone)).strftime("%H:%M")
-        away = round((ts - self._left_at) / 60)
-        message = (f"{self.cfg.resident} got up at {left} and hasn't come back to bed ({away} min). "
-                   f"{self._reason}")
-        out: list[Action] = [Event(ts, "escalation_step", {"channel": step[0][0],
+        if self._distress:
+            message = f"{self.cfg.resident} may need help. {self._reason}"
+        else:
+            left = datetime.fromtimestamp(self._left_at, ZoneInfo(self.cfg.timezone)).strftime("%H:%M")
+            away = round((ts - self._left_at) / 60)
+            message = (f"{self.cfg.resident} got up at {left} and hasn't come back to bed ({away} min). "
+                       f"{self._reason}")
+        kind = "distress" if self._distress else "no_return"
+        out: list[Action] = [Event(ts, "escalation_step", {"channel": step[0][0], "kind": kind,
                                                             "contacts": [c for _, c in step]})]
         for channel, contact in step:
             out.append(Alert(contact, channel, message))

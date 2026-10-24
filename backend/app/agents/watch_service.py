@@ -122,6 +122,17 @@ class WatchService:
             await self._apply(db, pillow.id, w, actions, before, w.last_ts)
             return str(w.nw.state)
 
+    async def report_distress(self, db: AsyncClient, pillow: Pillow, reason: str) -> str:
+        """She sounded in trouble outside a check-in (e.g. answering a reminder): escalate now.
+        Return the new night state."""
+        w = await self._watch(db, pillow)
+        async with w.lock:
+            before = w.nw.state
+            ts = w.last_ts + (clock.monotonic() - w.last_seen) if w.last_seen else clock.time()
+            actions = w.nw.distress_heard(ts, reason)
+            await self._apply(db, pillow.id, w, actions, before, ts)
+            return str(w.nw.state)
+
     async def tick_all(self, db: AsyncClient) -> None:
         """Run every watch's due timers, so a silent pillow or a check-in that never reports back
         still moves the ladder. Device time is extrapolated from each pillow's last report."""
@@ -238,8 +249,11 @@ class WatchService:
         """Mirror the escalation into the incidents table the family app watches."""
         if e.type == "escalation_step":
             if w.incident_id is None:
-                summary = f"{w.nw.cfg.resident} got up and hasn't come back to bed."
-                w.incident_id = await open_incident(db, pillow_id, "no_return", summary)
+                kind = e.data.get("kind", "no_return")
+                who = w.nw.cfg.resident
+                summary = (f"{who} said something that sounds like she needs help." if kind == "distress"
+                           else f"{who} got up and hasn't come back to bed.")
+                w.incident_id = await open_incident(db, pillow_id, kind, summary)
             w.incident_step += 1
             await update_incident(db, w.incident_id, {"step": w.incident_step})
         elif w.incident_id is not None and e.type == "family_ack":

@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.routers import commands, connection, contacts, family, health, items, pillows
+from app.routers import commands, connection, contacts, family, health, items, pillows, reminders
 
 api_router = APIRouter()
 api_router.include_router(health.router)
@@ -12,3 +12,4 @@ api_router.include_router(pillows.router)
 api_router.include_router(commands.router)
 api_router.include_router(contacts.router)
 api_router.include_router(family.router)
+api_router.include_router(reminders.router)

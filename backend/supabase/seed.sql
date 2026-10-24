@@ -27,6 +27,13 @@ on conflict do nothing;
 insert into pillow_state (pillow_id, head_on) values ('mum', false)
 on conflict do nothing;
 
+-- One reminder in each mode: she confirms her tablets; the dog walk is only announced.
+insert into reminders (resident_id, label, kind, time_of_day, confirm)
+select '00000000-0000-0000-0000-000000000001', label, kind, time_of_day::time, confirm
+from (values ('take your heart tablets', 'meds', '08:00', true),
+             ('take Biscuit for his walk', 'custom', '16:00', false)) as r (label, kind, time_of_day, confirm)
+where not exists (select 1 from reminders where resident_id = '00000000-0000-0000-0000-000000000001');
+
 -- Test household -----------------------------------------------------------------------------
 
 insert into residents (id, full_name, preferred_name)

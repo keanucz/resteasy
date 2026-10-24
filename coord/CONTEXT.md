@@ -43,7 +43,8 @@ Somnox 2 is a $600 breathing cushion on a fixed program. Nobody owns the night w
 4. **Guardian**: checks every action (quiet-hour caps, max alerts, no medical claims, no raw audio).
    Show one blocked action in the demo.
 5. Settle (calm loop: breathing pulses 12→6/min, a grandkid's recorded goodnight, music; checks
-   that restlessness drops). 6. Routine (asks about evening meds, never advises dosing).
+   that restlessness drops). 6. Routine: recurring reminders (meds, call family, walk the dog),
+   buzzer then voice, never advises dosing. Built, see the decisions log (Sat 24 Oct, reminders).
 7. Environment (DHT11 room temp). 8. Goodnight Messenger (ASI:One → plays when she lies down).
 9. Story Keeper (Moss, opt-in). 10. Morning Brief (Factory Droid at 06:00: family note, trend
    flag, config diff limited to whitelisted keys).
@@ -183,3 +184,21 @@ Defaults in brackets are what's built; settle together, then log the answer belo
   app = `POST /api/pillows/{id}/ack`. Built in Night Watch (PR #21).
 - Sat 24 Oct: no base / pedestal box (Keanu). The booth ESP32, its power and USB sit on the
   nightstand, still outside the pillow; nothing else changes. Parts list in `firmware/PARTS.md`.
+- Sat 24 Oct: reminders = the Routine agent (Adam; from talking to two older women outside the
+  venue: what they forget is recurring commitments). Adam builds backend + voice; Szymon builds the
+  app page, Keanu the buzzer. **Schema (live, migration `20261024185028_reminders`):** `reminders`
+  (per resident: `label` as an action phrase, `kind` meds/call/custom, `time_of_day` in her
+  timezone, `days` ISO 1=Mon..7=Sun, `confirm`, `active`) and `reminder_occurrences` (one per due
+  time, unique `(reminder_id, due_at)`; `status` waiting/due/announced/done/missed, `attempts`,
+  `reply` as a transcript, never audio). Both are app-readable and in Realtime. `commands.cmd` gains
+  `buzz` (CONTRACT.md §3). Rules (plain code, `backend/app/agents/reminders.py`): a due reminder
+  waits until `night_state` is `awake` (never wakes her, never talks over a check-in). Per
+  reminder, `confirm` off = buzz + say once; on = buzz, say, listen, Claude judges (keyword
+  fallback); "not yet" or silence → one retry 10 min later, then missed; anything open 3 h after its
+  time → missed. Distress in a reply escalates through Night Watch (incident kind `distress`).
+  Laptop side in `voice/checkin_client.py` + `voice/reminder.py`. API: `GET|POST
+  /api/pillows/{id}/reminders`, `PATCH|DELETE .../reminders/{rid}`, `GET .../reminders/today`,
+  `GET .../reminders/due`, `POST .../reminders/{occurrence_id}/result` (bearer `CHECKIN_TOKEN`).
+- Sat 24 Oct: repo migrations now match live Supabase. `link_contacts_to_auth_users` (adds
+  `contacts.user_id` → `auth.users`) and `drop_glow_presence` had been applied live without being
+  committed; both are added to `backend/supabase/migrations/` under their live versions.

@@ -9,6 +9,11 @@ EVENTS_TABLE = "events"
 INCIDENTS_TABLE = "incidents"
 NOTIFICATIONS_TABLE = "notifications"
 AGENT_LOG_TABLE = "agent_log"
+REMINDERS_TABLE = "reminders"
+REMINDER_OCCURRENCES_TABLE = "reminder_occurrences"
+
+# Conflict target that makes creating a reminder's occurrence for a due time idempotent
+OCCURRENCE_KEY = "reminder_id,due_at"
 
 # Conflict target for the one-row-per-pillow upsert into pillow_state
 PILLOW_STATE_KEY = "pillow_id"

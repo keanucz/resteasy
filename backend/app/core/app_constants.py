@@ -28,5 +28,8 @@ SUPABASE_NOT_CONFIGURED = "Supabase is not configured on this server"
 # Seconds between Night Watch timer runs when no pillow reports
 NIGHT_WATCH_TICK_S = 5
 
+# Seconds between runs of the reminder schedule (the Routine agent)
+REMINDERS_TICK_S = 15
+
 # Detail returned with a 503 when CHECKIN_TOKEN is not set (POST /checkin fails closed)
 CHECKIN_TOKEN_NOT_CONFIGURED = "CHECKIN_TOKEN is not configured on this server"

@@ -58,6 +58,7 @@ The device polls every 500 ms, runs each command, then remembers its `id`.
 | `pulse` | `start_bpm`, `end_bpm` (4–14), `duration_min` (1–30) | motor + glow breathing ramp |
 | `vibrate` | `pattern` `tap`/`double`/`long`, `repeat` 1–5 | motor |
 | `fan` | `speed_pct` 0–100 | kit fan motor |
+| `buzz` | `pattern` `chime`/`alert`, `repeat` 1–3 | passive buzzer: `chime` = two soft rising notes (~1 s), `alert` = 3 beeps. Queued ~2 s before a reminder is spoken |
 | `stop_all` | none | everything off |
 
 Speech and audio (`say`, `play_audio`) play from `voice/voice.py` on the laptop, not the ESP32, so they are
