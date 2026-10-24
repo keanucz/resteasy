@@ -52,10 +52,27 @@ checks in with her, then tells her daughter. No wearable, no button."
   routing", not "proven to save lives".
 - **Existing systems alert a call centre or staff.** We found no study of alerts going straight
   to family. That's our design choice (least intrusive first, matches the burden findings).
-- **Why a pillow and not a mattress pad:** telecare pads are prescribed after something has
-  already gone wrong (e.g. after a hospital stay) and cover only the bed. The pillow adds voice and
-  a family link and can be bought before the first fall. That's our argument; there's no study
-  for it.
+- **Why a pillow and not a mattress pad:** *not* because the hardware is cheaper. A basic US bed-exit
+  pad + pager is $45–120 ([Walmart listings](https://www.walmart.com/ip/17327397), [AliMed $56 pad](https://www.alimed.com/products/skil-care-overmattress-bed-sensor-pad)),
+  similar to our parts cost. The difference is everything around the sensor:
+  - **Access:** in the UK, bed sensors are an add-on that usually needs a council assessment
+    ([Perth & Kinross](https://www.pkc.gov.uk:443/article/14642/Telecare-service), [Coventry](https://www.coventry.gov.uk/care-support/telecare/print)),
+    i.e. typically after something has already gone wrong.
+  - **Ongoing cost:** UK councils charge £1.40–6.77/week for the sensor on top of a £4–7/week
+    lifeline ([Derby 2024](https://derby.gov.uk/media/derbycitycouncil/contentassets/documents/healthandsocialcare/adultsocialcare/ylyc/Charges-for-telecare-April-2024.pdf), [Bracknell Forest](https://www.bracknell-forest.gov.uk/health-and-social-care/forestcare/range-sensors/bed-or-chair-occupancy-sensor), [Haringey](https://haringey.gov.uk/node/7143)),
+    roughly £300–700/year. Our pitch is no subscription.
+  - **What happens after the alert:** a pad beeps a pager in the house, or calls a call centre.
+    The pillow talks to her first, then picks the family member who's awake.
+  - **Reach:** ~1.8M people in the UK use any telecare, 1.3M of them at home
+    ([Centre for Care 2025, citing DHSC 2023](https://centreforcare.ac.uk/wp-content/uploads/2025/06/On-hold_KH_GW_May-2025_FINAL.pdf)),
+    out of roughly 13M people 65+ in the UK (ONS order of magnitude, not looked up here; verify
+    before quoting). Every user gets a pendant; bed sensors are a
+    smaller, assessed subset, and we found no national count of them. So most older people
+    living alone, including those with no diagnosis yet, have no bed-exit detection at all.
+- **Honest weakness:** a pillow is a *worse* occupancy sensor than a mattress pad. People move off
+  their pillow in their sleep, so "head off pillow" ≠ "out of bed". Mitigations: the no-return
+  timer is long (20 min), the IMU and sound sensor can tell a roll from a get-up, and the voice
+  check-in comes before any family alert. Have this answer ready for judges.
 - **Accuracy matters.** Wallace et al. show cheap sensors miss short exits. Our no-return timer
   (20 min) only needs the long absence, which is the easier case; mention it if a judge asks about
   false alarms. The "I'm fine" key/tap and the voice check-in are what stop a false alarm from
