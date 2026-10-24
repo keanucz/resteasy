@@ -4,7 +4,7 @@ import secrets
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import Depends, Header, HTTPException, Request, status
+from fastapi import Depends, Header, HTTPException, Request, UploadFile, status
 from supabase import AsyncClient
 from supabase_auth.errors import AuthError
 
@@ -16,6 +16,11 @@ from app.core.app_constants import (
     NOT_OWNER,
     NOT_SIGNED_IN,
     OWNER_ROLE,
+    PHOTO_CONTENT_TYPES,
+    PHOTO_EMPTY,
+    PHOTO_MAX_BYTES,
+    PHOTO_TOO_LARGE,
+    PHOTO_WRONG_TYPE,
     SUPABASE_NOT_CONFIGURED,
 )
 from app.core.config import get_settings
@@ -23,6 +28,7 @@ from app.crud.accounts import get_role_for_user
 from app.crud.pillows import get_pillow
 from app.crud.residents import get_resident
 from app.schemas.pillow import Pillow
+from app.schemas.resident_photo import PhotoUpload
 
 
 def get_supabase(request: Request) -> AsyncClient:
@@ -141,3 +147,18 @@ async def owned_resident(
 
 ViewedResidentDep = Annotated[dict[str, Any], Depends(viewed_resident)]
 OwnedResidentDep = Annotated[dict[str, Any], Depends(owned_resident)]
+
+
+async def photo_upload(file: UploadFile) -> PhotoUpload:
+    """The multipart `file` as a photo: a JPEG, PNG or WebP (422 otherwise), at most 5 MB (413)."""
+    if file.content_type not in PHOTO_CONTENT_TYPES:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=PHOTO_WRONG_TYPE)
+    content = await file.read(PHOTO_MAX_BYTES + 1)
+    if not content:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=PHOTO_EMPTY)
+    if len(content) > PHOTO_MAX_BYTES:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, detail=PHOTO_TOO_LARGE)
+    return PhotoUpload(content=content, content_type=file.content_type)
+
+
+PhotoUploadDep = Annotated[PhotoUpload, Depends(photo_upload)]

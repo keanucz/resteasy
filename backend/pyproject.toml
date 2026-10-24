@@ -8,6 +8,7 @@ dependencies = [
     "anthropic>=2.3",
     "fastapi>=0.143.0",
     "pydantic-settings>=2.15.0",
+    "python-multipart>=0.0.32",
     "supabase>=2.33",
     "tzdata>=2026.5",
     "uvicorn[standard]>=0.54.0",

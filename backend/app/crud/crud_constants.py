@@ -22,3 +22,9 @@ PILLOW_STATE_KEY = "pillow_id"
 
 # Columns the device receives for each queued command (the CONTRACT.md command shape)
 COMMAND_COLUMNS = "id, cmd, args"
+
+# Supabase Storage bucket for residents' profile photos, one each at `<resident_id>/<PHOTO_FILE>`
+RESIDENT_PHOTOS_BUCKET = "resident-photos"
+PHOTO_FILE = "photo.jpg"
+# Query parameter on the photo's public link: when it last changed (ms since epoch), to bust caches
+PHOTO_VERSION_PARAM = "v"

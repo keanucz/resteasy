@@ -46,3 +46,10 @@ OWNER_ROLE = "owner"
 FAMILY_APP_AGENT = "family_app"
 # agent_log.intent for a settings change made from the family app
 SETTINGS_CHANGE_INTENT = "change settings"
+
+# Profile photos the API accepts, the same limits as the resident-photos bucket
+PHOTO_CONTENT_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
+PHOTO_MAX_BYTES = 5 * 1024 * 1024
+PHOTO_WRONG_TYPE = "The photo must be a JPEG, PNG or WebP image"
+PHOTO_EMPTY = "The photo file is empty"
+PHOTO_TOO_LARGE = "The photo must be 5 MB or smaller"
