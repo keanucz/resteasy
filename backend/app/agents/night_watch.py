@@ -1,0 +1,265 @@
+"""Night Watch: turns one pillow's state stream into events and actions (coord/AGENT_FLOW.md 2 and 4).
+
+Plain code by design: every timer and threshold lives here, and Claude only judges words (the
+check-in conversation in voice/). Time comes from each state's `ts` (device or simulator clock),
+never the wall clock, so a simulated night runs in seconds and tests are deterministic.
+
+Feed it Mum's pillow states with `observe()`, the check-in result with `checkin_done()`, and a family
+member's acknowledgement (their pillow tap) with `family_acknowledged()`. Each returns the actions to
+carry out, in order. Nothing here talks to Supabase, a device or a phone: the caller stores the
+`Event`s, queues the `Command`s, speaks the `Say`s, runs the check-in and sends the `Alert`s.
+Guardian (not built yet) is meant to sit between these actions and the outside world.
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+from datetime import datetime
+from enum import StrEnum
+
+LAY_DOWN_S = 5  # head on this long = lying down / back in bed (coord/CONTRACT.md 2)
+BED_EXIT_S = 30  # head off this long = out of bed
+
+PATH_LIGHT_ON = {"brightness_pct": 20, "color": "warm", "fade_s": 3}
+PATH_LIGHT_OFF = {"brightness_pct": 0, "color": "off", "fade_s": 10}
+KID_ALERT = {"pattern": "long", "repeat": 5}  # kid pillow: "Check on Mum, tap to reply" for ~20 s
+
+
+class State(StrEnum):
+    AWAKE = "awake"  # daytime, or not in bed yet: nothing to watch
+    IN_BED = "in_bed"
+    UP = "up"  # out of bed at night, path light on, check-in timer running
+    CHECK_IN = "check_in"  # the voice check-in is talking to her
+    ESCALATING = "escalating"  # family are being alerted
+
+
+@dataclass(frozen=True)
+class NightWatchConfig:
+    """The owner's settings (household row later). Defaults match the week-one plan."""
+
+    pillow_id: str = "mum"
+    family_pillow_id: str | None = "kid"
+    resident: str = "Mum"
+    contacts: tuple[str, ...] = ("Sarah",)  # alert order
+    checkin_timeout_min: float = 20  # week one fixed; later the personal baseline (CONTEXT.md)
+    quiet_hours: tuple[int, int] | None = (22, 7)  # local hours; None = always night (daytime demos)
+    path_light: dict = field(default_factory=lambda: dict(PATH_LIGHT_ON))
+    step_wait_min: float = 2  # between escalation steps
+
+
+@dataclass(frozen=True)
+class Event:
+    """A derived pillow event, for the events table (and the night baseline / Morning Brief)."""
+
+    ts: float
+    type: str
+    data: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Command:
+    """A device command to queue for a pillow (coord/CONTRACT.md 3)."""
+
+    pillow_id: str
+    cmd: str
+    args: dict
+
+
+@dataclass(frozen=True)
+class Say:
+    """A line for the base laptop's voice to speak to her."""
+
+    text: str
+
+
+@dataclass(frozen=True)
+class StartCheckin:
+    """Run the voice check-in (voice/checkin.py) and report back with `checkin_done()`."""
+
+
+@dataclass(frozen=True)
+class CancelCheckin:
+    """Stop a running check-in: she's back in bed or tapped "I'm fine"."""
+
+
+@dataclass(frozen=True)
+class Alert:
+    """A message to one family contact on one channel: "pillow" (their pillow), "sms" or "call"."""
+
+    contact: str
+    channel: str
+    message: str
+
+
+Action = Event | Command | Say | StartCheckin | CancelCheckin | Alert
+
+
+class NightWatch:
+    """The state machine for one resident's pillow."""
+
+    def __init__(self, config: NightWatchConfig | None = None) -> None:
+        self.cfg = config or NightWatchConfig()
+        self.state = State.AWAKE
+        self._head_on = False  # debounced
+        self._head_raw: bool | None = None
+        self._head_since = 0.0
+        self._fine_held = False
+        self._left_at = 0.0  # when her head left the pillow this trip
+        self._checkin_due = math.inf
+        self._fine_used = False  # one "I'm fine" restarts the timer; the next no-return escalates
+        self._ladder: list[tuple[str, str]] = []  # (channel, contact) steps still to run
+        self._next_step_at = math.inf
+        self._alerted: list[str] = []  # contacts told so far, to tell them when she's okay
+        self._reason = ""  # why we escalated, repeated in every alert
+
+    # ---------- inputs ----------
+
+    def observe(self, s: dict) -> list[Action]:
+        """Take one state message from her pillow (coord/CONTRACT.md 1) and return what to do."""
+        ts = float(s["ts"])
+        out: list[Action] = []
+        head = bool(s.get("head_on"))
+        if head != self._head_raw:
+            self._head_raw, self._head_since = head, ts
+        held = ts - self._head_since
+        if head and not self._head_on and held >= LAY_DOWN_S:
+            self._head_on = True
+            out += self._head_arrived(ts)
+        elif not head and self._head_on and held >= BED_EXIT_S:
+            self._head_on = False
+            out += self._head_left(ts, left_at=self._head_since)
+        fine = bool((s.get("keys") or {}).get("fine"))
+        if fine and not self._fine_held:
+            out += self._tapped_fine(ts)
+        self._fine_held = fine
+        return out + self._tick(ts)
+
+    def checkin_done(self, ts: float, escalate: bool, reason: str) -> list[Action]:
+        """Result of the voice check-in: escalate, or she said she's fine."""
+        if self.state is not State.CHECK_IN:
+            return []  # cancelled meanwhile (back in bed, or tapped)
+        out: list[Action] = [Event(ts, "checkin_result", {"escalate": escalate, "reason": reason})]
+        return out + (self._escalate(ts, reason) if escalate else self._said_fine(ts))
+
+    def family_acknowledged(self, ts: float, contact: str) -> list[Action]:
+        """A family member tapped their pillow (or replied): stop alerting anyone else."""
+        if self.state is not State.ESCALATING:
+            return []
+        self._ladder, self._next_step_at = [], math.inf
+        return [Event(ts, "family_ack", {"contact": contact}),
+                Say(f"{contact} knows, and is checking on you.")]
+
+    # ---------- transitions ----------
+
+    def _head_arrived(self, ts: float) -> list[Action]:
+        if self.state is State.AWAKE:
+            if not self._is_night(ts):
+                return [Event(ts, "lay_down", {"watching": False})]
+            self.state = State.IN_BED
+            return [Event(ts, "lay_down", {"watching": True}), *self._presence(True)]
+        if self.state is State.IN_BED:
+            return []
+        trip_min = round((ts - self._left_at) / 60, 1)
+        out: list[Action] = [Event(ts, "bed_return", {"trip_min": trip_min}),
+                             Command(self.cfg.pillow_id, "set_light", dict(PATH_LIGHT_OFF)),
+                             *self._presence(True)]
+        if self.state is State.CHECK_IN:
+            out.append(CancelCheckin())
+        out += self._tell_alerted(f"{self.cfg.resident} is back in bed.")
+        self._reset_trip()
+        self.state = State.IN_BED
+        return out
+
+    def _head_left(self, ts: float, left_at: float) -> list[Action]:
+        if self.state is not State.IN_BED:
+            return []
+        if not self._is_night(left_at):
+            self.state = State.AWAKE  # up for the day
+            return [Event(ts, "got_up", {}), *self._presence(False)]
+        self.state = State.UP
+        self._left_at = left_at
+        self._checkin_due = left_at + self.cfg.checkin_timeout_min * 60
+        return [Event(ts, "bed_exit", {"left_at": left_at}),
+                Command(self.cfg.pillow_id, "set_light", dict(self.cfg.path_light)),
+                Say("The light's on. Take your time."),
+                *self._presence(False)]
+
+    def _tick(self, ts: float) -> list[Action]:
+        if self.state is State.UP and ts >= self._checkin_due:
+            away = round((ts - self._left_at) / 60)
+            if self._fine_used:
+                return [Event(ts, "no_return", {"away_min": away, "second": True}),
+                        *self._escalate(ts, f"She said she was fine earlier but has been up {away} min.")]
+            self.state = State.CHECK_IN
+            self._checkin_due = math.inf
+            return [Event(ts, "no_return", {"away_min": away}), StartCheckin()]
+        if self.state is State.ESCALATING and ts >= self._next_step_at:
+            return self._next_step(ts)
+        return []
+
+    def _tapped_fine(self, ts: float) -> list[Action]:
+        out: list[Action] = [Event(ts, "key_fine", {"state": str(self.state)})]
+        if self.state is State.CHECK_IN:
+            return out + [CancelCheckin(), *self._said_fine(ts)]
+        if self.state is State.ESCALATING:
+            self._ladder, self._next_step_at = [], math.inf
+            out += self._tell_alerted(f"{self.cfg.resident} tapped her pillow to say she's okay.")
+            self._alerted = []
+            return out + self._said_fine(ts)
+        return out
+
+    def _said_fine(self, ts: float) -> list[Action]:
+        self.state = State.UP
+        self._fine_used = True
+        self._checkin_due = ts + self.cfg.checkin_timeout_min * 60
+        return []
+
+    def _escalate(self, ts: float, reason: str) -> list[Action]:
+        self.state = State.ESCALATING
+        self._ladder = [("pillow", self.cfg.contacts[0])] if self.cfg.family_pillow_id else []
+        for contact in self.cfg.contacts:
+            self._ladder += [("sms", contact), ("call", contact)]
+        self._reason = reason
+        return self._next_step(ts)
+
+    def _next_step(self, ts: float) -> list[Action]:
+        if not self._ladder:
+            self._next_step_at = math.inf
+            return [Event(ts, "ladder_exhausted", {})]
+        channel, contact = self._ladder.pop(0)
+        self._next_step_at = ts + self.cfg.step_wait_min * 60
+        left = datetime.fromtimestamp(self._left_at).strftime("%H:%M")
+        away = round((ts - self._left_at) / 60)
+        message = (f"{self.cfg.resident} got up at {left} and hasn't come back to bed ({away} min). "
+                   f"{self._reason}")
+        out: list[Action] = [Event(ts, "escalation_step", {"channel": channel, "contact": contact})]
+        if channel == "pillow":
+            out.append(Command(self.cfg.family_pillow_id, "vibrate", dict(KID_ALERT)))
+        out.append(Alert(contact, channel, message))
+        if contact not in self._alerted:
+            self._alerted.append(contact)
+        return out
+
+    # ---------- helpers ----------
+
+    def _tell_alerted(self, message: str) -> list[Action]:
+        return [Alert(c, "sms", message) for c in self._alerted]
+
+    def _presence(self, on: bool) -> list[Action]:
+        """The family pillow's "Mum's in bed" glow."""
+        if not self.cfg.family_pillow_id:
+            return []
+        return [Command(self.cfg.family_pillow_id, "glow_presence", {"on": on})]
+
+    def _reset_trip(self) -> None:
+        self._checkin_due = math.inf
+        self._fine_used = False
+        self._ladder, self._next_step_at, self._alerted = [], math.inf, []
+
+    def _is_night(self, ts: float) -> bool:
+        if self.cfg.quiet_hours is None:
+            return True
+        start, end = self.cfg.quiet_hours
+        hour = datetime.fromtimestamp(ts).hour
+        return hour >= start or hour < end if start > end else start <= hour < end
