@@ -36,6 +36,15 @@ Anthropic's allowlist yet); it only loads our own `coord/bus_channel.py`.
 with the Monitor tool and re-arm it every time it expires (max 30 min); it resumes where it left
 off. Don't run both at once.
 
+**Safety net (automatic, nothing to start):** `.claude/settings.json` runs
+`python3 coord/bus.py inbox --hook` on every prompt and after tool calls (at most every 20 s), so
+any message the watcher or channel missed lands in your session anyway. It shares the watcher's
+"delivered up to" position, so nothing shows twice. If messages still don't arrive, run
+`python3 coord/bus.py inbox` by hand. Both the watcher and the channel now reconnect when the
+stream goes silent for 2 minutes (laptop sleep or Wi-Fi roaming used to freeze them with no error).
+Instead of env vars you can put your name in `coord/.agent` (gitignored), next to `coord/.topic`
+and `coord/.tokens`.
+
 Send: `python3 coord/bus.py send "text" --to szymon --kind handoff`
 Kinds: `note`, `ask`, `handoff`, `decision`, `blocker`, `done`.
 

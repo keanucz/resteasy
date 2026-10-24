@@ -85,11 +85,15 @@ def stream_forever() -> None:
     """Stream all four agent topics and push each new message; resumes from the saved position."""
     server, base, me = bus.config()
     topics = ",".join(f"{base}-{agent}" for agent in bus.AGENTS)
-    since = bus.load_position(me)
     while True:
+        # Shared with bus.py watch/inbox: re-read so nothing they delivered is pushed twice.
+        since = bus.load_position(me)
         query = f"?since={since}" if since else ""
         try:
-            with urllib.request.urlopen(bus.request(f"{server}/{topics}/json{query}"), timeout=None) as resp:
+            # Read timeout (ntfy keepalives every 45 s): a silently dead connection reconnects
+            # instead of blocking forever.
+            with urllib.request.urlopen(bus.request(f"{server}/{topics}/json{query}"),
+                                        timeout=bus.READ_TIMEOUT_S) as resp:
                 for raw in resp:
                     event = json.loads(raw)
                     if event.get("event") != "message":
@@ -97,8 +101,10 @@ def stream_forever() -> None:
                     since = event.get("id", since)
                     bus.save_position(me, since)
                     push(event, me, base)
-        except (urllib.error.URLError, OSError, json.JSONDecodeError) as err:
-            log(f"stream dropped ({err}), reconnecting")
+            log("stream closed, reconnecting")
+            time.sleep(1)
+        except Exception as err:  # noqa: BLE001 - this thread is the only reader; it must never die
+            log(f"stream dropped ({type(err).__name__}: {err}), reconnecting")
             time.sleep(3)
 
 
