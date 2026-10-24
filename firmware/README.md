@@ -3,6 +3,27 @@
 `pillow/pillow.ino` speaks `coord/CONTRACT.md`: every ~500 ms it reads the sensors, POSTs state to
 `SERVER_URL/api/pillows/{PILLOW_ID}/state`, polls `/commands`, and drives the motor and LED.
 
+## Two pillows, two boards
+
+- `pillow/`: **Mum's pillow**, booth ESP32 DevKit + breadboard sensors (pins below).
+- `kid_pillow/`: **the adult child's pillow**, Waveshare ESP32-S3 AMOLED V2, no wiring: screen glows
+  "Mum's in bed", flashes "Check on Mum" on alerts, tap or touch = `keys.fine`. FQBN
+  `esp32:esp32:esp32s3:CDCOnBoot=cdc`.
+- `i2c_scan/`, `wifi_diag/`: one-off diagnostics (onboard bus = SDA 15 / SCL 14; Wi-Fi reasons).
+
+## Connectivity: USB serial bridge (default)
+
+The venue SSID is almost all 5/6 GHz; the single 2.4 GHz AP is too weak for the ESP32's antenna
+(scan from the board does not see it: reason 201, no AP found). Hotspots are banned. So by default
+`secrets.h` defines `SERIAL_BRIDGE`, and each board talks to its laptop over USB:
+
+```bash
+python3 sim/serial_bridge.py --port /dev/ttyACM0 --server https://pillow.keanuc.net
+```
+
+The board prints `STATE {json}` lines; the bridge POSTs them and writes `CMD {json}` lines back.
+Comment out `SERIAL_BRIDGE` to use Wi-Fi instead (e.g. at home).
+
 ## Build and flash
 
 ```bash
