@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     app_name: str = DEFAULT_APP_NAME
     environment: str = DEFAULT_ENVIRONMENT
     cors_origins: list[str] = DEFAULT_CORS_ORIGINS
+    supabase_url: str = ""
+    supabase_secret_key: str = ""
+
+    @property
+    def supabase_configured(self) -> bool:
+        """Whether both Supabase values are set, so the database-backed routes can work."""
+        return bool(self.supabase_url and self.supabase_secret_key)
 
 
 @lru_cache
