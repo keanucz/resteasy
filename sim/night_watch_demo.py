@@ -62,6 +62,8 @@ def main() -> None:
         import judge
         import voice
 
+        judge.warm_up_in_background()  # SDK import is slow: pay it now, not when she first answers
+
     hh, mm = map(int, args.start.split(":"))
     start = datetime.now().replace(hour=hh, minute=mm, second=0, microsecond=0).timestamp()
     _, phases = pillow_sim.SCENARIOS[args.scenario]
@@ -91,6 +93,7 @@ def main() -> None:
         show(ts, acts)
         if any(isinstance(a, StartCheckin) for a in acts):
             if args.checkin == "voice":
+                judge.warm_up_in_background()  # reopen the connection while the first question plays
                 out = checkin.run_checkin(voice.speak, voice.listen, judge=judge.claude_judge,
                                           contact=args.contact, log=lambda m: print(f"          check-in {m}"))
                 escalate, reason = out.escalate, out.reason
