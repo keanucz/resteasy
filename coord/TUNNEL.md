@@ -27,5 +27,9 @@ ingress:
 Only **one machine** should run the tunnel at a time: two runners load-balance requests between
 them. For the demo, move it to a box that doesn't sleep (Keanu's `planner` VPS) if a laptop is risky.
 
+End-to-end check with a board on USB (stop the bridge first; posts as `test-pillow`):
+`python3 sim/link_test.py --port /dev/ttyACM0`. It prints PASS/FAIL per hop (server, up, down)
+and says which one broke. `--no-board` checks only the server hops.
+
 Clients: firmware uses `SERVER_URL "https://pillow.keanuc.net"`; the simulator uses
 `python3 sim/pillow_sim.py --post https://pillow.keanuc.net`.

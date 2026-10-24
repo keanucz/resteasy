@@ -40,8 +40,8 @@ def http(url: str, body: dict | None = None) -> object:
         return json.loads(raw) if raw else None
 
 
-def read_board(port: serial.Serial, server: str, state: dict) -> None:
-    """Forward STATE lines; remember which pillow is on the other end."""
+def read_board(port: serial.Serial, server: str, state: dict, pillow_id: str | None) -> None:
+    """Forward STATE lines; remember which pillow is on the other end (or post as pillow_id)."""
     while True:
         line = port.readline().decode(errors="replace").strip()
         if not line:
@@ -54,6 +54,8 @@ def read_board(port: serial.Serial, server: str, state: dict) -> None:
         except json.JSONDecodeError:
             print(f"bridge: bad STATE line: {line[:120]}", file=sys.stderr, flush=True)
             continue
+        if pillow_id:
+            msg["pillow_id"] = pillow_id
         state["pillow_id"] = msg.get("pillow_id", state.get("pillow_id"))
         # The boards have no clock (ts = seconds since boot). Night Watch reads quiet hours and
         # trip times from ts, so stamp real Unix time from the laptop before forwarding.
@@ -67,16 +69,20 @@ def read_board(port: serial.Serial, server: str, state: dict) -> None:
 
 
 def poll_commands(port: serial.Serial, server: str, state: dict, interval: float) -> None:
-    last_id = 0
+    last_id = None  # set on the first poll: skip history so a restart doesn't replay old commands
     while True:
         time.sleep(interval)
         pillow = state.get("pillow_id")
         if not pillow:
             continue  # wait until the board has told us who it is
         try:
-            commands = http(f"{server}/api/pillows/{pillow}/commands?after={last_id}") or []
+            commands = http(f"{server}/api/pillows/{pillow}/commands?after={last_id or 0}") or []
         except (urllib.error.URLError, OSError, ValueError) as err:
             print(f"bridge: commands GET failed: {err}", file=sys.stderr, flush=True)
+            continue
+        if last_id is None:
+            last_id = max((int(cmd.get("id", 0)) for cmd in commands), default=0)
+            print(f"bridge: skipped {len(commands)} old commands (up to id {last_id})", flush=True)
             continue
         for cmd in commands:
             last_id = max(last_id, int(cmd.get("id", 0)))
@@ -90,6 +96,8 @@ def main() -> None:
     parser.add_argument("--server", default="https://pillow.keanuc.net")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--interval", type=float, default=0.5, help="command poll seconds")
+    parser.add_argument("--pillow-id", help="post as this pillow instead of the board's own id "
+                        "(e.g. test-pillow for the Waveshare, which says 'kid')")
     args = parser.parse_args()
 
     port = serial.Serial(args.port, args.baud, timeout=1)
@@ -97,7 +105,7 @@ def main() -> None:
     server = args.server.rstrip("/")
     print(f"bridge: {args.port} <-> {server}", flush=True)
     threading.Thread(target=poll_commands, args=(port, server, state, args.interval), daemon=True).start()
-    read_board(port, server, state)
+    read_board(port, server, state, args.pillow_id)
 
 
 if __name__ == "__main__":
