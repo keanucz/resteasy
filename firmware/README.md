@@ -69,8 +69,10 @@ USB). The Uno is 5 V and the ESP32-S3 is not 5 V tolerant, so divide its TX down
 | GND | | GND |
 
 Leave the S3's GPIO43 (TX) unconnected. 9600 baud (`UNO_BAUD` in `voice_unit.ino`): match the Uno
-sketch's `Serial.begin()`. Lines with non-text bytes (wrong baud) are dropped. Uno lines are not yet
-forwarded to the server; the bridge prints them as `board: UNO ...`.
+sketch's `Serial.begin()`. Lines with non-text bytes (wrong baud) are dropped. The sketch is
+`pillow_uno/` (switch plate on pin 2, one JSON line per 500 ms, see its README); run the laptop bridge
+with `--server https://pillow.keanuc.net --pillow-id mum` and each line is posted as pillow state.
+Without `--server` it is printed as `board: UNO ...`.
 
 ## Build and flash
 

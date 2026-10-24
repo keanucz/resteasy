@@ -20,19 +20,30 @@ voice/voice.py uses it when PILLOW_AUDIO=pillow. Clients see the same thing over
   uv run sim/audio_bridge.py                          # Bluetooth: finds "pillow-voice"
   uv run sim/audio_bridge.py --serial /dev/ttyACM0    # USB serial instead, or the ESP-NOW relay
                                                       # (firmware/espnow_relay) on that port
+  uv run sim/audio_bridge.py --server https://pillow.keanuc.net --pillow-id mum
+                                                      # also forward the Uno's lines ("UNO {...}",
+                                                      # firmware/pillow_uno) as pillow state
 """
 
 import argparse
 import asyncio
 import base64
+import contextlib
+import json
 import queue
 import socket
 import socketserver
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
+from pathlib import Path
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from uno_state import uno_line_to_state  # noqa: E402
 
 RATE = 16_000
 CHUNK = RATE // 10 * 2  # 100 ms of s16le, sent to the board at a time
@@ -113,6 +124,14 @@ class Board:
             for q in self.watchers:
                 q.put(b"talk\n")
 
+    poster: "StatePoster | None" = None  # set by main() with --server
+
+    def _line(self, line: str) -> None:
+        """Any other text line from the board: the Uno's state ("UNO {...}") goes to the server."""
+        if self.poster is not None and line.startswith("UNO ") and self.poster.post(line):
+            return
+        print(f"board: {line}", flush=True)
+
 
 class SerialBoard(Board):
     """USB serial: text lines, audio as base64 s16le."""
@@ -161,7 +180,7 @@ class SerialBoard(Board):
             elif line == "KEY talk":
                 self._talk()
             elif line:
-                print(f"board: {line}", flush=True)
+                self._line(line)
 
 
 class BleBoard(Board):
@@ -188,7 +207,7 @@ class BleBoard(Board):
         if data == b"talk":
             self._talk()
         else:
-            print(f"board: {data.decode(errors='replace')}", flush=True)
+            self._line(data.decode(errors="replace").strip())
 
     def command(self, cmd: str) -> None:
         self._call(lambda c: c.write_gatt_char(CTRL_UUID, cmd.encode(), response=True))
@@ -233,6 +252,45 @@ class BleBoard(Board):
                 print(f"audio_bridge: bluetooth: {err}; retrying", file=sys.stderr, flush=True)
             self.client = None
             await asyncio.sleep(2)
+
+
+class StatePoster:
+    """Forwards the Uno's lines to POST /api/pillows/{id}/state (coord/CONTRACT.md 1), stamping the
+    laptop's time, from a worker thread so the link never waits on the network. Keeps only the
+    newest line if the server is slow."""
+
+    def __init__(self, server: str, pillow_id: str) -> None:
+        self.url = f"{server.rstrip('/')}/api/pillows/{pillow_id}/state"
+        self.pillow_id = pillow_id
+        self.latest: queue.Queue = queue.Queue(maxsize=1)
+        self.failures = 0
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def post(self, line: str) -> bool:
+        state = uno_line_to_state(line, pillow_id=self.pillow_id, ts=round(time.time(), 2))
+        if state is None:
+            return False
+        with contextlib.suppress(queue.Empty):
+            self.latest.get_nowait()  # drop an unsent older one
+        self.latest.put(state)
+        return True
+
+    def _run(self) -> None:
+        while True:
+            state = self.latest.get()
+            req = urllib.request.Request(self.url, data=json.dumps(state).encode(), method="POST",
+                                         headers={"Content-Type": "application/json",
+                                                  "User-Agent": "calhacks-audio-bridge/1.0"})
+            try:
+                with urllib.request.urlopen(req, timeout=5):
+                    pass
+                if self.failures:
+                    print("audio_bridge: state posting recovered", flush=True)
+                self.failures = 0
+            except (urllib.error.URLError, OSError) as err:
+                self.failures += 1
+                if self.failures in (1, 10, 100):
+                    print(f"audio_bridge: POST state failed ({err}), will keep trying", flush=True)
 
 
 def play(board: Board, conn: socket.socket, first: bytes) -> None:
@@ -301,9 +359,14 @@ def main() -> None:
     parser.add_argument("--serial", metavar="PORT", help="use USB serial (e.g. /dev/ttyACM0) instead of Bluetooth")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--listen", default="127.0.0.1:8765", help="host:port for local clients")
+    parser.add_argument("--server", help="also POST the Uno's lines as pillow state to this server")
+    parser.add_argument("--pillow-id", default="mum", help="pillow id for those state posts")
     args = parser.parse_args()
     host, _, port = args.listen.rpartition(":")
     board = SerialBoard(args.serial, args.baud) if args.serial else BleBoard(args.ble_name)
+    if args.server:
+        board.poster = StatePoster(args.server, args.pillow_id)
+        print(f"audio_bridge: Uno lines -> {board.poster.url}", flush=True)
     threading.Thread(target=board.run, daemon=True).start()
     serve(board, host, int(port))
 
