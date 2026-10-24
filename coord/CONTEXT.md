@@ -99,3 +99,8 @@ agents), Factory Droid (trigger you designed, limited access, visible plans/diff
   `checkin_timeout_min` = her usual trip length (≈p90 of past trips) + margin, clamped to 10–30 min;
   trips at unusual hours also flag. Drift (e.g. more trips per night over weeks) goes to family in
   the Morning Brief, never silently absorbed. Demo uses a hardcoded week of history.
+- Sat 24 Oct: Adyan moves to hardware with Keanu; Adam takes over all agents, built in Szymon's
+  backend (`szymon/app-scaffold`). Szymon chose Spacetime for live state.
+- Sat 24 Oct: agent flow and sponsor targets in `coord/AGENT_FLOW.md`. Core: Anthropic, Cartesia,
+  Spacetime, Microsoft. Bets: Factory Droid (Morning Brief), Fetch.ai (family agent in ASI:One).
+  Dropped: Atlassian (Forge/Jira only), Moss, ElevenLabs, Backboard, Convex.
