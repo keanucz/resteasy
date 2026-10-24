@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from checkin import Kind, classify, run_checkin
+from checkin import Kind, Verdict, classify, run_checkin
 
 
 def fake(*replies):
@@ -83,3 +83,23 @@ def test_confused_forever_still_ends():
     out = run_checkin(speak, listen)
     # first ask, then 3 tries after the reorient, the warning, "letting Sarah know"
     assert out.escalate and len(said) == 1 + 3 + 1 + 1
+
+
+def test_judge_wording_used_for_fine_but_not_distress():
+    def judge(q, text):
+        if "fallen" in text:
+            return Verdict(Kind.DISTRESS, "a made-up distress line")
+        return Verdict(Kind.FINE, "Lovely, take your time.")
+    speak, listen, said = fake("I'm good")
+    run_checkin(speak, listen, judge=judge)
+    assert said[-1][0] == "Lovely, take your time."
+    speak, listen, said = fake("I've fallen")
+    run_checkin(speak, listen, judge=judge, contact="Sarah")
+    assert "getting Sarah" in said[-1][0]
+
+
+def test_judge_reorient_line_always_asks():
+    judge = lambda q, t: Verdict(Kind.CONFUSED, "You're at home and it's night.") if "where" in t else Verdict(Kind.FINE)
+    speak, listen, said = fake("where am I", "okay")
+    run_checkin(speak, listen, judge=judge)
+    assert said[1][0] == "You're at home and it's night. Are you alright?"
