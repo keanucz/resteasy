@@ -55,6 +55,10 @@ def read_board(port: serial.Serial, server: str, state: dict) -> None:
             print(f"bridge: bad STATE line: {line[:120]}", file=sys.stderr, flush=True)
             continue
         state["pillow_id"] = msg.get("pillow_id", state.get("pillow_id"))
+        # The boards have no clock (ts = seconds since boot). Night Watch reads quiet hours and
+        # trip times from ts, so stamp real Unix time from the laptop before forwarding.
+        msg["device_uptime_s"] = msg.get("ts")
+        msg["ts"] = round(time.time(), 2)
         try:
             http(f"{server}/api/pillows/{state['pillow_id']}/state", msg)
             port.write(b"LINK OK\n")  # tells the board the server is reachable (offline fallback)
