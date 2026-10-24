@@ -1,20 +1,24 @@
 {
   "expo": {
-    "name": "Pillow",
+    "name": "Rest Easy",
     "slug": "pillow-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "scheme": "pillow",
     "userInterfaceStyle": "automatic",
+    "backgroundColor": "#171537",
     "ios": {
       "supportsTablet": true
     },
     "web": {
+      "bundler": "metro",
       "output": "static"
     },
     "plugins": [
       "expo-router",
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-font",
+      "expo-sqlite"
     ],
     "experiments": {
       "typedRoutes": true

@@ -14,7 +14,6 @@ class CommandName(StrEnum):
     VIBRATE = "vibrate"
     FAN = "fan"
     BUZZ = "buzz"
-    GLOW_PRESENCE = "glow_presence"
     STOP_ALL = "stop_all"
 
 

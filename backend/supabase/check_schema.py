@@ -16,7 +16,51 @@ create role authenticated nologin;
 create publication supabase_realtime;
 create schema auth;
 create table auth.users (id uuid primary key);
+create function auth.uid() returns uuid language sql stable
+    as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+grant usage on schema auth to anon, authenticated;
 """
+
+# Supabase grants table privileges to the API roles; RLS then decides which rows they see.
+API_GRANTS = "grant select on all tables in schema public to anon, authenticated;"
+
+# Links the test contact to a login, as scripts/create_login.py does on the live project.
+TEST_LOGIN = """
+insert into auth.users (id) values ('00000000-0000-0000-0000-0000000000f1');
+update contacts set user_id = '00000000-0000-0000-0000-0000000000f1'
+    where id = '00000000-0000-0000-0000-000000000012';
+insert into pillow_state (pillow_id) values ('mum'), ('test-pillow') on conflict do nothing;
+"""
+
+# (label, role, jwt sub or '' for none, query): what the app can read through RLS.
+RLS_CHECKS = [
+    ("anon pillows", "anon", "", "select count(*) from pillows"),
+    ("anon pillow_state", "anon", "", "select count(*) from pillow_state"),
+    (
+        "test user pillows",
+        "authenticated",
+        "00000000-0000-0000-0000-0000000000f1",
+        "select string_agg(id, ', ' order by id) from pillows",
+    ),
+    (
+        "test user pillow_state",
+        "authenticated",
+        "00000000-0000-0000-0000-0000000000f1",
+        "select string_agg(pillow_id, ', ' order by pillow_id) from pillow_state",
+    ),
+    (
+        "test user residents",
+        "authenticated",
+        "00000000-0000-0000-0000-0000000000f1",
+        "select string_agg(full_name, ', ') from residents",
+    ),
+    (
+        "test user contacts",
+        "authenticated",
+        "00000000-0000-0000-0000-0000000000f1",
+        "select count(*) from contacts",
+    ),
+]
 
 CHECKS = [
     (
@@ -72,15 +116,33 @@ BAD = [
     ),
 ]
 
+
+def first_value(psql_output: str) -> str:
+    """Return the first cell of the last result table in psql's aligned output."""
+    lines = psql_output.splitlines()
+    divider = max(i for i, line in enumerate(lines) if line.startswith("-"))
+    return lines[divider + 1].strip()
+
+
+def read_as(db, role: str, sub: str, sql: str) -> str:
+    """Run a read as an API role with an optional JWT subject, the way PostgREST does."""
+    claim = f"set local request.jwt.claim.sub = '{sub}';" if sub else ""
+    return first_value(db.psql(f"begin; set local role {role}; {claim} {sql}; rollback;"))
+
+
 with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
     db = pgserver.get_server(tmp, cleanup_mode="stop")
     db.psql(SUPABASE_STUBS)
     for migration in MIGRATIONS:
         db.psql(migration.read_text(encoding="utf-8"))
+    db.psql(API_GRANTS)
     db.psql(SEED.read_text(encoding="utf-8"))
     db.psql(SEED.read_text(encoding="utf-8"))  # twice: the seed must be re-runnable
     for name, sql in CHECKS:
         print(f"{name}: {db.psql(sql).strip().splitlines()[2].strip()}")
+    db.psql(TEST_LOGIN)
+    for name, role, sub, sql in RLS_CHECKS:
+        print(f"rls {name}: {read_as(db, role, sub, sql) or '(none)'}")
     db.psql(MANY_TO_MANY)
     print(
         "carer watches:",

@@ -1,31 +1,21 @@
-import { StyleSheet, Text, type TextProps } from 'react-native';
+import { Text, type TextProps } from 'react-native';
 
-import { colors, fontSizes } from '@/constants/theme';
-
-type Variant = 'body' | 'subtitle' | 'title';
+type Variant = 'body' | 'muted' | 'caption' | 'label' | 'subtitle' | 'title';
 
 type AppTextProps = TextProps & {
   variant?: Variant;
 };
 
-/** Text with themed variants. Use instead of raw <Text> so typography lives in one place. */
-export function AppText({ variant = 'body', style, ...rest }: AppTextProps) {
-  return <Text style={[styles.base, styles[variant], style]} {...rest} />;
-}
+const VARIANT_CLASSES: Record<Variant, string> = {
+  body: 'font-sans text-base text-ink',
+  muted: 'font-sans text-sm text-ink-muted',
+  caption: 'font-sans text-xs text-ink-muted',
+  label: 'font-sans-semibold text-xs uppercase tracking-widest text-ink-muted',
+  subtitle: 'font-display text-xl text-ink',
+  title: 'font-display text-3xl text-ink',
+};
 
-const styles = StyleSheet.create({
-  base: {
-    color: colors.text,
-  },
-  body: {
-    fontSize: fontSizes.body,
-  },
-  subtitle: {
-    fontSize: fontSizes.subtitle,
-    fontWeight: '600',
-  },
-  title: {
-    fontSize: fontSizes.title,
-    fontWeight: 'bold',
-  },
-});
+/** Text with the style guide's variants, in both colour schemes. Use instead of raw <Text>. */
+export function AppText({ variant = 'body', className, ...rest }: AppTextProps) {
+  return <Text className={`${VARIANT_CLASSES[variant]} ${className ?? ''}`} {...rest} />;
+}

@@ -33,15 +33,26 @@ Add packages with `npx expo install <pkg>`, not `npm install`, so versions match
 ```
 src/
 ├── app/            routes only (Expo Router). Files here become screens; keep logic out.
-│   ├── _layout.tsx root stack + status bar
-│   └── index.tsx   "/" — Hello World
+│   ├── _layout.tsx root stack; signed-out users only see /login, signed-in users only see /
+│   ├── login.tsx   "/login": email + password form
+│   └── index.tsx   "/" — signed-in placeholder ("hi there!") confirming the login worked
+├── hooks/          useSession — the live Supabase Auth session
 ├── components/     reusable UI (Screen container, AppText)
 ├── constants/      design tokens (colours, spacing, font sizes)
 ├── config/         env.ts — the only place that reads EXPO_PUBLIC_* vars
-└── services/api/   client.ts — single fetch wrapper; add one file per backend resource
+├── services/api/   client.ts — single fetch wrapper; add one file per backend resource
+├── services/supabase/client.ts — the one Supabase client (publishable key, session in app storage)
+└── services/auth.ts signIn / signOut; every failed login shows the same "Details incorrect"
 ```
 
-Add `hooks/` and `types/` under `src/` as you need them. Import with the `@/` alias (`@/components/Screen`).
+Add `types/` under `src/` as you need it.
+
+## Login
+
+Supabase Auth with email + password; the form can also create an account. Any rejected login, whether the user is unknown or the
+password is wrong, shows the same "Details incorrect", so the form never reveals which accounts exist.
+Create logins from the backend: `cd backend; uv run python -m scripts.create_login <email> <contact_id>` (a plain name becomes
+`<name>@pillow.test`, which is then what they type). Import with the `@/` alias (`@/components/Screen`).
 
 ## SDK 58 on a phone
 

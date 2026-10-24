@@ -1,0 +1,732 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-24T20:12:40+00:00",
+  "title": "Design System: Rest Easy",
+  "extensions": {
+    "colorMeta": {
+      "night": {
+        "role": "neutral",
+        "displayName": "Night",
+        "canonical": "#171537",
+        "oklch": "oklch(22.0% 0.064 282.4)",
+        "tonalRamp": [
+          "#090525",
+          "#212043",
+          "#3D3D63",
+          "#5B5D85",
+          "#7C7EA8",
+          "#9EA1CD",
+          "#C2C5F3",
+          "#E7EAFF"
+        ]
+      },
+      "dusk": {
+        "role": "neutral",
+        "displayName": "Dusk",
+        "canonical": "#2A2752",
+        "oklch": "oklch(30.0% 0.076 284.0)",
+        "tonalRamp": [
+          "#0A0329",
+          "#221E48",
+          "#3D3C69",
+          "#5C5B8B",
+          "#7C7CAF",
+          "#9F9FD4",
+          "#C2C3FA",
+          "#E7E9FF"
+        ]
+      },
+      "mist": {
+        "role": "neutral",
+        "displayName": "Mist",
+        "canonical": "#EEEFF6",
+        "oklch": "oklch(95.3% 0.009 279.7)",
+        "tonalRamp": [
+          "#0A0B0F",
+          "#24252A",
+          "#414247",
+          "#606167",
+          "#818288",
+          "#A4A4AB",
+          "#C8C9CF",
+          "#EDEEF5"
+        ]
+      },
+      "glow": {
+        "role": "primary",
+        "displayName": "Glow",
+        "canonical": "#9499E6",
+        "oklch": "oklch(70.9% 0.112 280.3)",
+        "tonalRamp": [
+          "#0B0038",
+          "#1E1759",
+          "#39387B",
+          "#56589F",
+          "#767AC4",
+          "#989DEA",
+          "#BBC1FF",
+          "#E0E7FF"
+        ]
+      },
+      "calm": {
+        "role": "secondary",
+        "displayName": "Calm",
+        "canonical": "#9FD6C2",
+        "oklch": "oklch(83.2% 0.063 170.3)",
+        "tonalRamp": [
+          "#001307",
+          "#002E20",
+          "#164D3D",
+          "#386D5C",
+          "#5A8F7D",
+          "#7CB29F",
+          "#A0D7C3",
+          "#C5FDE8"
+        ]
+      },
+      "alert": {
+        "role": "tertiary",
+        "displayName": "Alert",
+        "canonical": "#E64C6B",
+        "oklch": "oklch(63.7% 0.190 12.5)",
+        "tonalRamp": [
+          "#350000",
+          "#5B000E",
+          "#81002A",
+          "#A82C48",
+          "#CF5168",
+          "#F87589",
+          "#FF9AAC",
+          "#FFBFD1"
+        ]
+      },
+      "night-muted": {
+        "role": "neutral",
+        "displayName": "Night Muted",
+        "canonical": "#A39EAB",
+        "oklch": "oklch(70.8% 0.019 303.3)",
+        "tonalRamp": [
+          "#0D0912",
+          "#27232D",
+          "#44404B",
+          "#635F6B",
+          "#85808C",
+          "#A7A2AF",
+          "#CBC6D4",
+          "#F1ECFA"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Line",
+        "canonical": "#433F65",
+        "oklch": "oklch(38.9% 0.064 287.9)",
+        "tonalRamp": [
+          "#0B0424",
+          "#241F42",
+          "#403C62",
+          "#5F5C84",
+          "#807DA7",
+          "#A29FCB",
+          "#C6C3F1",
+          "#EBE9FF"
+        ]
+      },
+      "bone": {
+        "role": "neutral",
+        "displayName": "Bone",
+        "canonical": "#3A3862",
+        "oklch": "oklch(36.3% 0.071 284.4)",
+        "tonalRamp": [
+          "#0A0327",
+          "#221E46",
+          "#3E3C66",
+          "#5C5B89",
+          "#7D7DAC",
+          "#9F9FD1",
+          "#C3C3F7",
+          "#E8E9FF"
+        ]
+      },
+      "day": {
+        "role": "neutral",
+        "displayName": "Day",
+        "canonical": "#F5F6FE",
+        "oklch": "oklch(97.5% 0.011 280.5)",
+        "tonalRamp": [
+          "#0A0B10",
+          "#24252A",
+          "#414148",
+          "#606167",
+          "#818289",
+          "#A3A4AC",
+          "#C7C8D0",
+          "#EDEEF6"
+        ]
+      },
+      "day-card": {
+        "role": "neutral",
+        "displayName": "Day Card",
+        "canonical": "#FFFFFF",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#A5A5A5",
+          "#C9C9C9",
+          "#EEEEEE"
+        ]
+      },
+      "day-field": {
+        "role": "neutral",
+        "displayName": "Day Field",
+        "canonical": "#EBECF7",
+        "oklch": "oklch(94.6% 0.015 281.9)",
+        "tonalRamp": [
+          "#0A0A11",
+          "#24242C",
+          "#40414A",
+          "#60606A",
+          "#81818B",
+          "#A3A4AE",
+          "#C7C8D3",
+          "#ECEDF9"
+        ]
+      },
+      "day-line": {
+        "role": "neutral",
+        "displayName": "Day Line",
+        "canonical": "#DCDDEF",
+        "oklch": "oklch(90.2% 0.024 283.4)",
+        "tonalRamp": [
+          "#0A0A15",
+          "#232431",
+          "#40404F",
+          "#5F606F",
+          "#808191",
+          "#A2A3B4",
+          "#C6C7D9",
+          "#ECEDFF"
+        ]
+      },
+      "day-muted": {
+        "role": "neutral",
+        "displayName": "Day Muted",
+        "canonical": "#6C697E",
+        "oklch": "oklch(53.1% 0.033 291.8)",
+        "tonalRamp": [
+          "#0C0818",
+          "#252234",
+          "#423F52",
+          "#615E73",
+          "#827F95",
+          "#A5A2B8",
+          "#C9C6DD",
+          "#EEEBFF"
+        ]
+      },
+      "day-bone": {
+        "role": "neutral",
+        "displayName": "Day Bone",
+        "canonical": "#EBEBF0",
+        "oklch": "oklch(94.1% 0.007 286.3)",
+        "tonalRamp": [
+          "#0B0B0E",
+          "#252528",
+          "#414145",
+          "#616165",
+          "#828286",
+          "#A4A4A9",
+          "#C8C8CD",
+          "#EEEEF3"
+        ]
+      },
+      "glow-day": {
+        "role": "primary",
+        "displayName": "Glow Day",
+        "canonical": "#686CB5",
+        "oklch": "oklch(56.1% 0.112 279.7)",
+        "tonalRamp": [
+          "#0A0038",
+          "#1E1859",
+          "#38387B",
+          "#55589F",
+          "#757AC4",
+          "#979DEA",
+          "#BAC1FF",
+          "#DFE7FF"
+        ]
+      },
+      "glow-day-text": {
+        "role": "primary",
+        "displayName": "Glow Day Text",
+        "canonical": "#6266AF",
+        "oklch": "oklch(54.0% 0.113 279.5)",
+        "tonalRamp": [
+          "#0A0038",
+          "#1E1759",
+          "#38387C",
+          "#5558A0",
+          "#757AC5",
+          "#979DEB",
+          "#BAC1FF",
+          "#DEE7FF"
+        ]
+      },
+      "state-asleep": {
+        "role": "state",
+        "displayName": "State Asleep",
+        "canonical": "#9FD6C2",
+        "oklch": "oklch(83.2% 0.063 170.3)",
+        "tonalRamp": [
+          "#001307",
+          "#002E20",
+          "#164D3D",
+          "#386D5C",
+          "#5A8F7D",
+          "#7CB29F",
+          "#A0D7C3",
+          "#C5FDE8"
+        ]
+      },
+      "state-restless": {
+        "role": "state",
+        "displayName": "State Restless",
+        "canonical": "#E2A8F5",
+        "oklch": "oklch(81.1% 0.122 317.6)",
+        "tonalRamp": [
+          "#1D002B",
+          "#3C044A",
+          "#5C276B",
+          "#7D488E",
+          "#A069B2",
+          "#C58CD7",
+          "#EAB0FD",
+          "#FFD5FF"
+        ]
+      },
+      "state-up": {
+        "role": "state",
+        "displayName": "State Up",
+        "canonical": "#F4C46C",
+        "oklch": "oklch(84.5% 0.120 81.1)",
+        "tonalRamp": [
+          "#220000",
+          "#411900",
+          "#613800",
+          "#835800",
+          "#A67A15",
+          "#CB9D43",
+          "#F1C169",
+          "#FFE68E"
+        ]
+      },
+      "state-alert": {
+        "role": "state",
+        "displayName": "State Alert",
+        "canonical": "#FF9C94",
+        "oklch": "oklch(79.2% 0.120 25.1)",
+        "tonalRamp": [
+          "#2D0000",
+          "#510002",
+          "#751F1F",
+          "#9A413D",
+          "#C0635D",
+          "#E6867F",
+          "#FFAAA1",
+          "#FFCFC6"
+        ]
+      },
+      "state-offline": {
+        "role": "state",
+        "displayName": "State Offline",
+        "canonical": "#B8BAC6",
+        "oklch": "oklch(79.1% 0.017 278.4)",
+        "tonalRamp": [
+          "#090A12",
+          "#23242D",
+          "#40414B",
+          "#5F606B",
+          "#80828D",
+          "#A2A4B0",
+          "#C6C8D4",
+          "#ECEEFA"
+        ]
+      },
+      "state-asleep-day": {
+        "role": "state",
+        "displayName": "State Asleep Day",
+        "canonical": "#0F7C66",
+        "oklch": "oklch(52.5% 0.096 174.0)",
+        "tonalRamp": [
+          "#001508",
+          "#003221",
+          "#00523E",
+          "#00735D",
+          "#35957E",
+          "#5CB9A0",
+          "#82DEC4",
+          "#A7FFEA"
+        ]
+      },
+      "state-restless-day": {
+        "role": "state",
+        "displayName": "State Restless Day",
+        "canonical": "#8E3BB3",
+        "oklch": "oklch(51.9% 0.189 313.6)",
+        "tonalRamp": [
+          "#210038",
+          "#3F0059",
+          "#5F197C",
+          "#813EA0",
+          "#A461C5",
+          "#C884EB",
+          "#EEA8FF",
+          "#FFCDFF"
+        ]
+      },
+      "state-up-day": {
+        "role": "state",
+        "displayName": "State Up Day",
+        "canonical": "#A85C00",
+        "oklch": "oklch(55.2% 0.130 59.5)",
+        "tonalRamp": [
+          "#2B0000",
+          "#4E0300",
+          "#712900",
+          "#954A00",
+          "#BA6C20",
+          "#E09049",
+          "#FFB46E",
+          "#FFD993"
+        ]
+      },
+      "state-alert-day": {
+        "role": "state",
+        "displayName": "State Alert Day",
+        "canonical": "#C8202F",
+        "oklch": "oklch(53.8% 0.200 23.6)",
+        "tonalRamp": [
+          "#360000",
+          "#5C0000",
+          "#820011",
+          "#A92E32",
+          "#D15352",
+          "#F97773",
+          "#FF9C96",
+          "#FFC1BA"
+        ]
+      },
+      "state-offline-day": {
+        "role": "state",
+        "displayName": "State Offline Day",
+        "canonical": "#5C6178",
+        "oklch": "oklch(49.7% 0.037 275.4)",
+        "tonalRamp": [
+          "#07091B",
+          "#202437",
+          "#3C4156",
+          "#5B6077",
+          "#7C8199",
+          "#9EA4BD",
+          "#C2C8E2",
+          "#E7EDFF"
+        ]
+      },
+      "on-color": {
+        "role": "neutral",
+        "displayName": "On Colour",
+        "canonical": "#FFFFFF",
+        "oklch": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#A5A5A5",
+          "#C9C9C9",
+          "#EEEEEE"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Screen titles such as the app name on login."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "The status sentence, \"Mum is asleep\"."
+      },
+      "status-word": {
+        "displayName": "Status word",
+        "purpose": "The one italic key word of a status, in the state colour."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Card and dialog headings."
+      },
+      "motto": {
+        "displayName": "Motto",
+        "purpose": "The brand line under the logo."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Sentences and field values."
+      },
+      "body-strong": {
+        "displayName": "Body strong",
+        "purpose": "Button labels, row titles, stat values."
+      },
+      "meta": {
+        "displayName": "Meta",
+        "purpose": "Row metadata, notification detail, times."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Field labels above inputs, sentence case."
+      },
+      "column-header": {
+        "displayName": "Column header",
+        "purpose": "Table column headers only (uppercase, tracked)."
+      }
+    },
+    "shadows": [
+      {
+        "name": "float",
+        "value": "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)",
+        "purpose": "Notification cards only."
+      }
+    ],
+    "motion": [
+      {
+        "name": "duration-instant",
+        "value": "90ms",
+        "purpose": "Press-in, toggle thumb."
+      },
+      {
+        "name": "duration-fast",
+        "value": "150ms",
+        "purpose": "Press-out, focus, chip and tab selection, alert dialog, skeleton to content."
+      },
+      {
+        "name": "duration-base",
+        "value": "220ms",
+        "purpose": "Error in, dialog in, list item in."
+      },
+      {
+        "name": "duration-slow",
+        "value": "320ms",
+        "purpose": "First data fading in, headline word change."
+      },
+      {
+        "name": "duration-sky",
+        "value": "700ms",
+        "purpose": "Calm sky crossfade, and an alert resolving."
+      },
+      {
+        "name": "duration-sky-alert",
+        "value": "250ms",
+        "purpose": "Any change into alert."
+      },
+      {
+        "name": "duration-exit",
+        "value": "160ms",
+        "purpose": "Leaving, about 70% of entering."
+      },
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(0.2, 0, 0, 1)",
+        "purpose": "Things entering."
+      },
+      {
+        "name": "ease-in",
+        "value": "cubic-bezier(0.3, 0, 1, 1)",
+        "purpose": "Exits only."
+      },
+      {
+        "name": "ease-standard",
+        "value": "cubic-bezier(0.4, 0, 0.2, 1)",
+        "purpose": "Crossfades and colour changes."
+      },
+      {
+        "name": "spring-press",
+        "value": "damping 28, stiffness 420, mass 1",
+        "purpose": "The only spring: button press, critically damped."
+      },
+      {
+        "name": "press-scale",
+        "value": "0.98",
+        "purpose": "How far a pressed button shrinks; never below 0.97."
+      },
+      {
+        "name": "skeleton-pulse",
+        "value": "opacity 1 to 0.55, 900ms each way, sine in-out",
+        "purpose": "One shared breath for every bone on screen."
+      },
+      {
+        "name": "skeleton-delay",
+        "value": "200ms show delay, 400ms minimum",
+        "purpose": "Fast loads never flash a skeleton."
+      }
+    ],
+    "sky": {
+      "edge": "-cosh(1.5x) for x in [-1, 1]",
+      "horizon": "230px (home), 370px (login)",
+      "archHeight": "15% of horizon",
+      "fade": "smoothstep over 52px",
+      "stars": "asleep and restless, Dark mode only"
+    }
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one main action per view.",
+      "html": "<button class=\"ds-btn-primary\">I&#8217;m on it</button>",
+      "css": ".ds-btn-primary { height: 44px; padding: 0 24px; border: none; border-radius: 12px; font-family: 'Figtree', system-ui, sans-serif; font-weight: 600; font-size: 16px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: opacity 150ms cubic-bezier(0.4, 0, 0.2, 1), transform 90ms cubic-bezier(0.2, 0, 0, 1); background: #9499E6; color: #171537; } .ds-btn-primary:active { opacity: 0.8; transform: scale(0.98); } .ds-btn-primary:focus-visible { outline: 2px solid #9499E6; outline-offset: 2px; } .ds-btn-primary:disabled { opacity: 0.4; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "A second, softer action.",
+      "html": "<button class=\"ds-btn-secondary\">Call Mum</button>",
+      "css": ".ds-btn-secondary { height: 44px; padding: 0 24px; border: none; border-radius: 12px; font-family: 'Figtree', system-ui, sans-serif; font-weight: 600; font-size: 16px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: opacity 150ms cubic-bezier(0.4, 0, 0.2, 1), transform 90ms cubic-bezier(0.2, 0, 0, 1); background: rgba(148, 153, 230, 0.25); color: #EEEFF6; } .ds-btn-secondary:active { opacity: 0.8; transform: scale(0.98); } .ds-btn-secondary:focus-visible { outline: 2px solid #9499E6; outline-offset: 2px; }"
+    },
+    {
+      "name": "Alert Button",
+      "kind": "button",
+      "refersTo": "button-alert",
+      "description": "Urgent or destructive confirm only.",
+      "html": "<button class=\"ds-btn-alert\">Call emergency contact</button>",
+      "css": ".ds-btn-alert { height: 44px; padding: 0 24px; border: none; border-radius: 12px; font-family: 'Figtree', system-ui, sans-serif; font-weight: 600; font-size: 16px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: opacity 150ms cubic-bezier(0.4, 0, 0.2, 1), transform 90ms cubic-bezier(0.2, 0, 0, 1); background: #E64C6B; color: #FFFFFF; } .ds-btn-alert:active { opacity: 0.8; transform: scale(0.98); } .ds-btn-alert:focus-visible { outline: 2px solid #9499E6; outline-offset: 2px; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "The quiet way out, under a primary.",
+      "html": "<button class=\"ds-btn-ghost\">Not now</button>",
+      "css": ".ds-btn-ghost { height: 44px; padding: 0 24px; border: none; border-radius: 12px; font-family: 'Figtree', system-ui, sans-serif; font-weight: 600; font-size: 16px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: opacity 150ms cubic-bezier(0.4, 0, 0.2, 1), transform 90ms cubic-bezier(0.2, 0, 0, 1); background: transparent; color: #9499E6; } .ds-btn-ghost:active { opacity: 0.8; } .ds-btn-ghost:focus-visible { outline: 2px solid #9499E6; outline-offset: 2px; }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "text-field",
+      "description": "Filled field with its label above.",
+      "html": "<label class=\"ds-field\"><span class=\"ds-field-label\">Username</span><input class=\"ds-field-input\" placeholder=\"mum.watcher\"></label>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 6px; width: 280px; } .ds-field-label { font-family: 'Figtree', system-ui, sans-serif; font-weight: 600; font-size: 12px; color: #A39EAB; } .ds-field-input { height: 48px; padding: 0 16px; border-radius: 14px; border: 1.5px solid transparent; background: #2A2752; color: #EEEFF6; font-family: 'Figtree', system-ui, sans-serif; font-size: 16px; outline: none; transition: border-color 150ms cubic-bezier(0.4, 0, 0.2, 1); } .ds-field-input::placeholder { color: #A39EAB; } .ds-field-input:focus { border-color: #9499E6; }"
+    },
+    {
+      "name": "Filter Chip",
+      "kind": "chip",
+      "refersTo": "chip-selected",
+      "description": "A filter the user taps. Never a status label.",
+      "html": "<div class=\"ds-chips\"><button class=\"ds-chip ds-chip-on\">Got up</button><button class=\"ds-chip\">Quiet nights</button></div>",
+      "css": ".ds-chips { display: flex; gap: 8px; } .ds-chip { height: 32px; padding: 0 14px; border-radius: 9999px; border: 1px solid #433F65; background: transparent; color: #EEEFF6; font-family: 'Figtree', system-ui, sans-serif; font-weight: 500; font-size: 13px; cursor: pointer; } .ds-chip-on { background: #9499E6; border-color: #9499E6; color: #171537; } .ds-chip:focus-visible { outline: 2px solid #9499E6; outline-offset: 2px; }"
+    },
+    {
+      "name": "Segmented Tabs",
+      "kind": "nav",
+      "refersTo": "segmented-tabs",
+      "description": "Switch between views: Night, Week, Month.",
+      "html": "<div class=\"ds-tabs\" role=\"tablist\"><button class=\"ds-tab ds-tab-on\" role=\"tab\">Night</button><button class=\"ds-tab\" role=\"tab\">Week</button><button class=\"ds-tab\" role=\"tab\">Month</button></div>",
+      "css": ".ds-tabs { display: flex; width: 300px; padding: 3px; border-radius: 10px; background: #2A2752; } .ds-tab { flex: 1; padding: 8px 0; border: none; border-radius: 8px; background: transparent; color: #A39EAB; font-family: 'Figtree', system-ui, sans-serif; font-weight: 600; font-size: 13px; cursor: pointer; transition: background 150ms cubic-bezier(0.4, 0, 0.2, 1); } .ds-tab-on { background: rgba(238, 239, 246, 0.15); color: #EEEFF6; } .ds-tab:focus-visible { outline: 2px solid #9499E6; outline-offset: 2px; }"
+    },
+    {
+      "name": "List Row",
+      "kind": "card",
+      "refersTo": "list-row",
+      "description": "One person in the care circle, as its own card.",
+      "html": "<div class=\"ds-row\"><span class=\"ds-avatar\">AN</span><span class=\"ds-row-text\"><b>Anna</b><small>Second, after 2 minutes</small></span></div>",
+      "css": ".ds-row { display: flex; align-items: center; gap: 12px; width: 300px; padding: 14px; border-radius: 16px; background: #2A2752; } .ds-avatar { width: 44px; height: 44px; border-radius: 9999px; background: rgba(148, 153, 230, 0.25); color: #EEEFF6; display: grid; place-items: center; font-family: 'Figtree', system-ui, sans-serif; font-weight: 600; } .ds-row-text { display: flex; flex-direction: column; gap: 2px; font-family: 'Figtree', system-ui, sans-serif; } .ds-row-text b { font-weight: 600; font-size: 16px; color: #EEEFF6; } .ds-row-text small { font-size: 13px; color: #A39EAB; }"
+    },
+    {
+      "name": "Status Headline",
+      "kind": "custom",
+      "refersTo": "headline",
+      "description": "The state said in words, one italic key word in the state colour. Replaces status pills.",
+      "html": "<p class=\"ds-status\">Mum is <em>asleep</em></p>",
+      "css": ".ds-status { margin: 0; font-family: 'Literata', Georgia, serif; font-weight: 600; font-size: 24px; line-height: 30px; color: #EEEFF6; } .ds-status em { font-style: italic; color: #B9C8FF; }"
+    },
+    {
+      "name": "Stat Tile",
+      "kind": "card",
+      "refersTo": "stat-tile",
+      "description": "A small label over one value.",
+      "html": "<div class=\"ds-tile\"><span>Asleep for</span><b>3h 18m</b></div>",
+      "css": ".ds-tile { display: flex; flex-direction: column; gap: 8px; width: 150px; padding: 14px; border-radius: 16px; background: #2A2752; font-family: 'Figtree', system-ui, sans-serif; } .ds-tile span { font-size: 12px; color: #A39EAB; } .ds-tile b { font-weight: 600; font-size: 20px; color: #EEEFF6; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Night Light",
+    "overview": "Rest Easy is a small, steady glow in a dark room. It is there when you look and never glaring. The app is opened by an adult child at 2 am, half asleep, sometimes frightened, and every decision serves that moment: a dark-first canvas the eye can rest on, one sentence that says how Mum is, and colour that stays quiet until it means something. Calm is the default; clarity is the job; alarm is reserved for the one state that earns it.\n\nThe look is warm and nocturnal rather than clinical. A literary serif (Literata) speaks the headlines and the status, the way a note left on the bedside table would; a friendly sans (Figtree) carries everything you tap and scan. The top of the home screen is a sky in the state's own colours that arcs and fades into the page; below it, the furniture is flat, soft and tonal. There is room for quiet playfulness (the mascot, small kindnesses in copy and empty states) but never inside an alert.\n\nDensity is low on purpose. One focal sentence, a few facts, and the ways to act. If a screen needs a label to explain a state, the state was not said clearly enough.",
+    "keyCharacteristics": [
+      "Dark-first, with a fully designed Light mode; Dark is the default on every device.",
+      "State said in words: a sentence with one italic key word in the state's colour. Never a pill.",
+      "The sky carries the mood; the rest of the screen stays flat and tonal.",
+      "Serif for what she is doing, sans for what you can do.",
+      "Soft and sure controls: rounded, filled, borderless, a gentle press, nothing bounces."
+    ],
+    "rules": [
+      {
+        "name": "The Theme Role Rule",
+        "body": "Screens use theme roles (canvas, surface, field, ink, ink-muted, hairline, accent, danger, state-*), never fixed hexes, so Light mode keeps working untouched.",
+        "section": "colors"
+      },
+      {
+        "name": "The Rose Means Now Rule",
+        "body": "Alert rose appears only when she needs you: the alert sky, the alert word, the alert button, the alert avatar. Never as decoration, never as an error tint for ordinary form mistakes beyond the error text itself.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Glow Rule",
+        "body": "Glow is the only interactive accent. State colours are for words, never for buttons or fills.",
+        "section": "colors"
+      },
+      {
+        "name": "The Serif Speaks Rule",
+        "body": "Literata is for what she is doing and what the app is saying (status, headings, the motto). Anything you tap or scan is Figtree.",
+        "section": "typography"
+      },
+      {
+        "name": "The No Eyebrow Rule",
+        "body": "No small uppercase label above a heading. Uppercase tracking is reserved for table column headers.",
+        "section": "typography"
+      },
+      {
+        "name": "The Photo Stays Put Rule",
+        "body": "The photo ring is pinned left in the header; a long headline wraps beside it and never pushes it.",
+        "section": "layout"
+      },
+      {
+        "name": "The Flat By Default Rule",
+        "body": "Surfaces are flat at rest. A shadow means \"this is on top of something\", never \"this is important\". No glows as depth; the sky's glows belong to the sky.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** say the state in a sentence with one italic key word in the state colour (\"Mum is *up*\").",
+      "**Do** use theme roles (canvas, surface, field, ink, ink-muted, hairline, accent, state-*) so Light mode keeps working.",
+      "**Do** keep one Glow primary button per view and put the quiet way out (ghost) under it.",
+      "**Do** keep text at 4.5:1 or better in both modes; state colours are already tuned for it.",
+      "**Do** keep motion short and eased out (90 to 320ms), with the sky crossfade as the one slow, signature moment, and honour reduced motion.",
+      "**Do** keep the sky's photo and headline in fixed positions whatever the copy length."
+    ],
+    "donts": [
+      "**Don't** use status pills, badges, chips or dots that label a state, in any restyled form.",
+      "**Don't** show stars when she is up, alerting or offline, or in Light mode.",
+      "**Don't** use Alert rose for decoration or anything that is not escalation.",
+      "**Don't** add shadows to cards or glow halos as depth; the system is flat and tonal.",
+      "**Don't** put small uppercase eyebrow labels above headings.",
+      "**Don't** bounce, wiggle, pulse a status, or count numbers up.",
+      "**Don't** call the modes day and night in the interface; they are Light and Dark."
+    ]
+  }
+}

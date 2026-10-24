@@ -62,6 +62,8 @@ Every `POST /state` runs the pillow's agents in order; all settings come from `r
   `test-pillow`, never the real device.
 - Apply both with the Supabase MCP (`apply_migration`, then `execute_sql` with the seed) or paste them
   into Dashboard > SQL Editor, migration first.
+- App logins: `uv run python -m scripts.create_login <username> <contact_id>` creates a confirmed
+  Supabase Auth user (`<username>@pillow.test`), links it to the contact and prints a random password once.
 - Check the schema offline on a throwaway Postgres (Python 3.12):
   `uvx --python 3.12 --with pgserver python supabase/check_schema.py`
 

@@ -1,20 +1,26 @@
 import type { PropsWithChildren } from 'react';
-import { StyleSheet } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { colors, spacing } from '@/constants/theme';
+type ScreenProps = PropsWithChildren<{
+  /** Centre the content (forms, empty states). Off for scrolling pages. */
+  centered?: boolean;
+  /** Scroll the content; the page background still fills the screen. */
+  scroll?: boolean;
+}>;
 
-/** Safe-area-aware page container. Wrap every screen in this so layout stays consistent. */
-export function Screen({ children }: PropsWithChildren) {
-  return <SafeAreaView style={styles.container}>{children}</SafeAreaView>;
+/** Safe-area-aware page on the theme's canvas. Wrap every screen in this. */
+export function Screen({ centered = true, scroll = false, children }: ScreenProps) {
+  const body = centered ? 'flex-1 items-center justify-center gap-2 p-4' : 'gap-4 p-4';
+  return (
+    <View className="flex-1 bg-canvas">
+      <SafeAreaView style={{ flex: 1 }}>
+        {scroll ? (
+          <ScrollView contentContainerClassName={body}>{children}</ScrollView>
+        ) : (
+          <View className={centered ? body : `flex-1 ${body}`}>{children}</View>
+        )}
+      </SafeAreaView>
+    </View>
+  );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.md,
-    backgroundColor: colors.background,
-  },
-});
