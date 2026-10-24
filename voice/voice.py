@@ -1,11 +1,15 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["httpx>=0.27", "numpy>=1.26", "sounddevice>=0.4"]
+# dependencies = ["httpx>=0.27", "numpy>=1.26", "sounddevice>=0.4", "websockets>=14"]
 # ///
-"""Pillow voice on the base laptop: Cartesia Sonic speaks, Cartesia Ink transcribes.
+"""Pillow voice on the base laptop: Cartesia Sonic speaks, Cartesia Ink-2 listens.
 
-Plain REST (docs.cartesia.ai/calhacks, API version 2026-08-14). The agents decide what to say;
-this module only turns text into speech and speech into text.
+docs.cartesia.ai/calhacks, API version 2026-08-14. The agents decide what to say; this module only
+turns text into speech and speech into text.
+
+Listening streams the mic to Ink-2's turn-detection socket, so a reply ends when she has finished
+talking (not after a fixed window): a quick "I'm fine" returns at once, a slow sleepy answer is not
+cut off, and silence is recognised as no answer.
 
     export CARTESIA_API_KEY=sk_car_...          # never commit it
     uv run voice/voice.py                      # one check-in round trip: ask, listen, print
@@ -15,30 +19,42 @@ this module only turns text into speech and speech into text.
 from __future__ import annotations
 
 import argparse
-import io
+import asyncio
+import json
 import os
 import sys
-import wave
+from collections.abc import AsyncIterator
+from urllib.parse import urlencode
 
 import httpx
 import numpy as np
 import sounddevice as sd
+import websockets
 
 API = "https://api.cartesia.ai"
+STT_WS = "wss://api.cartesia.ai/stt/turns/websocket"
 VERSION = "2026-08-14"
 TTS_MODEL = "sonic-3.6"
-STT_MODEL = "ink-whisper"
+STT_MODEL = "ink-2"
 # Gemma, en-GB, a stable voice Cartesia recommends for agents. Swap after a listen test.
 VOICE_ID = os.environ.get("PILLOW_VOICE_ID", "62ae83ad-4f6a-430b-af41-a9bede9286ca")
 TTS_RATE = 24_000
 MIC_RATE = 16_000
+CHUNK = MIC_RATE // 10  # 100 ms of audio per frame, as the docs recommend
+# Cartesia's "Patient" turn profile: tolerates pauses mid-sentence from someone half asleep.
+TURN = {
+    "turn_start_threshold": 0.8,
+    "turn_eager_end_threshold": 0.3,
+    "turn_end_threshold": 0.1,
+    "turn_end_timeout_ms": 8000,
+}
 
 
-def _headers() -> dict[str, str]:
+def _key() -> str:
     key = os.environ.get("CARTESIA_API_KEY", "").strip()
     if not key:
         sys.exit("CARTESIA_API_KEY is not set (play.cartesia.ai/keys). Never commit it.")
-    return {"Authorization": f"Bearer {key}", "Cartesia-Version": VERSION}
+    return key
 
 
 def speak(text: str, *, speed: float = 0.85, emotion: str = "calm") -> None:
@@ -54,37 +70,78 @@ def speak(text: str, *, speed: float = 0.85, emotion: str = "calm") -> None:
         "output_format": {"container": "raw", "encoding": "pcm_s16le", "sample_rate": TTS_RATE},
         "generation_config": {"speed": speed, "emotion": emotion},
     }
-    r = httpx.post(f"{API}/tts/bytes", headers=_headers(), json=body, timeout=30)
+    headers = {"Authorization": f"Bearer {_key()}", "Cartesia-Version": VERSION}
+    r = httpx.post(f"{API}/tts/bytes", headers=headers, json=body, timeout=30)
     r.raise_for_status()
     sd.play(np.frombuffer(r.content, dtype=np.int16), TTS_RATE)
     sd.wait()
 
 
-def listen(seconds: float = 6.0) -> str:
-    """Record from the laptop mic for `seconds` and return the transcript ("" if silent)."""
-    audio = sd.rec(int(seconds * MIC_RATE), samplerate=MIC_RATE, channels=1, dtype="int16")
-    sd.wait()
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(MIC_RATE)
-        w.writeframes(audio.tobytes())
-    r = httpx.post(
-        f"{API}/stt",
-        headers=_headers(),
-        data={"model": STT_MODEL, "language": "en"},
-        files={"file": ("reply.wav", buf.getvalue(), "audio/wav")},
-        timeout=30,
-    )
-    r.raise_for_status()
-    return r.json().get("text", "").strip()
+async def _mic() -> AsyncIterator[bytes]:
+    """Yield 100 ms frames of 16 kHz mono s16le from the default mic, forever."""
+    loop = asyncio.get_running_loop()
+    frames: asyncio.Queue[bytes] = asyncio.Queue()
+
+    def on_audio(data, _frames, _time, _status) -> None:
+        loop.call_soon_threadsafe(frames.put_nowait, bytes(data))
+
+    with sd.RawInputStream(samplerate=MIC_RATE, channels=1, dtype="int16", blocksize=CHUNK, callback=on_audio):
+        while True:
+            yield await frames.get()
+
+
+async def transcribe_turn(audio: AsyncIterator[bytes], *, no_answer_s: float, max_s: float) -> str:
+    """Stream `audio` to Ink-2 and return her first complete turn ("" if she never starts talking).
+
+    `audio` must keep producing frames (silence included): the server waits for audio rather than
+    assuming silence, so a turn only ends while frames keep arriving.
+    """
+    params = urlencode({"model": STT_MODEL, "encoding": "pcm_s16le", "sample_rate": MIC_RATE,
+                        "cartesia_version": VERSION, **TURN})
+    async with websockets.connect(f"{STT_WS}?{params}", additional_headers={"X-API-Key": _key()}) as ws:
+
+        async def send() -> None:
+            async for frame in audio:
+                await ws.send(frame)
+
+        async def receive() -> str:
+            heard = ""  # latest cumulative text, returned if we hit max_s mid-turn
+            started = False
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + no_answer_s
+            while True:
+                try:
+                    msg = await asyncio.wait_for(ws.recv(), max(0.0, deadline - loop.time()))
+                except TimeoutError:
+                    return heard
+                event = json.loads(msg)
+                kind = event["type"]
+                if kind == "error":
+                    raise RuntimeError(f"Cartesia STT: {event.get('title')}: {event.get('message')}")
+                if kind == "turn.start" and not started:
+                    started = True
+                    deadline = loop.time() + max_s
+                elif kind in ("turn.update", "turn.eager_end"):
+                    heard = event.get("transcript", heard)
+                elif kind == "turn.end":
+                    return event.get("transcript", "").strip()
+
+        sender = asyncio.create_task(send())
+        try:
+            return await receive()
+        finally:
+            sender.cancel()
+
+
+def listen(*, no_answer_s: float = 8.0, max_s: float = 30.0) -> str:
+    """Listen on the laptop mic until she finishes one reply; "" if she says nothing for `no_answer_s`."""
+    return asyncio.run(transcribe_turn(_mic(), no_answer_s=no_answer_s, max_s=max_s))
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--say", help="just speak this line and exit")
-    parser.add_argument("--listen-s", type=float, default=6.0)
+    parser.add_argument("--no-answer-s", type=float, default=8.0, help="silence before counting it as no answer")
     args = parser.parse_args()
 
     if args.say:
@@ -92,8 +149,8 @@ def main() -> None:
         return
     for attempt in (1, 2):
         speak("Are you alright?" if attempt == 1 else "I just want to check you're OK. Are you alright?")
-        print(f"listening {args.listen_s:.0f} s ...", flush=True)
-        reply = listen(args.listen_s)
+        print(f"listening (no answer after {args.no_answer_s:.0f} s of silence) ...", flush=True)
+        reply = listen(no_answer_s=args.no_answer_s)
         print(f"attempt {attempt}: {reply!r}")
         if reply:
             return
