@@ -129,7 +129,8 @@ def main() -> None:
     if args.keywords:
         judge = keyword_judge
     else:
-        from judge import claude_judge
+        from judge import claude_judge, warm_up_in_background
+        warm_up_in_background()  # loads the SDK while the first question is being spoken
         judge = claude_judge
 
     out = run_checkin(voice.speak, voice.listen, judge=judge, contact=args.contact, max_tries=args.tries,

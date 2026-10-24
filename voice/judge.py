@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -93,16 +94,45 @@ SCHEMA = {
 }
 
 _client = None
+_client_lock = threading.Lock()
+
+
+def _get_client():
+    """The shared client. Importing the SDK is the slow part (4-12 s on Windows, measured), so it
+    happens here, on first use, rather than at module import: tests run without the SDK at all."""
+    global _client
+    with _client_lock:
+        if _client is None:
+            import anthropic
+
+            _client = anthropic.Anthropic(timeout=10.0, max_retries=1)  # short: she's waiting
+        return _client
+
+
+def warm_up() -> None:
+    """Get ready before she answers: load the SDK and open a connection to the API.
+
+    Call at startup (pays the SDK import) and when a check-in starts (an idle connection is dropped
+    between check-ins). Uses count_tokens, which is free. Never raises: a failed warm-up just means
+    the first judgement is slower, and the judge still falls back to keywords if the API is down.
+    """
+    try:
+        _get_client().messages.count_tokens(model=MODEL, messages=[{"role": "user", "content": "warm-up"}])
+    except Exception as e:  # noqa: BLE001 - warm-up is best effort
+        print(f"  (Claude warm-up failed: {type(e).__name__}: {e})", file=sys.stderr)
+
+
+def warm_up_in_background() -> None:
+    """`warm_up()` without blocking: run it while the pillow is speaking."""
+    threading.Thread(target=warm_up, daemon=True).start()
 
 
 def claude_judge(question: str, text: str) -> Verdict:
-    import anthropic  # only the live judge needs it; tests run without it
+    client = _get_client()
+    import anthropic  # already loaded by _get_client; needed for the error types below
 
-    global _client
-    if _client is None:  # short timeout: she is waiting for an answer in the dark
-        _client = anthropic.Anthropic(timeout=10.0, max_retries=1)
     try:
-        response = _client.beta.messages.create(
+        response = client.beta.messages.create(
             model=MODEL,
             max_tokens=1024,
             betas=["server-side-fallback-2026-07-01"],
