@@ -29,6 +29,7 @@ import urllib.request
 AGENTS = ("keanu", "adam", "szymon", "adyan")
 KINDS = ("note", "ask", "handoff", "decision", "blocker", "done")
 MAX_BYTES = 3800  # ntfy caps a message at 4096 bytes; leave room for the envelope
+STATE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def config() -> tuple[str, str, str]:
@@ -108,13 +109,38 @@ def stream(query: str, follow: bool, state: dict) -> None:
             event = json.loads(raw)
             if event.get("event") == "message":
                 state["since"] = event.get("id", state.get("since"))
+                save_position(me, state["since"])
             line = format_event(event, me, base)
             if line:
                 print(line, flush=True)
 
 
+def position_file(agent: str) -> str:
+    return os.path.join(STATE_DIR, f".bus_last_{agent}")
+
+
+def load_position(agent: str) -> str | None:
+    """Last message id this agent's watcher saw, so a re-armed watcher fills the gap."""
+    try:
+        with open(position_file(agent), encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def save_position(agent: str, message_id: str | None) -> None:
+    if not message_id:
+        return
+    try:
+        with open(position_file(agent), "w", encoding="utf-8") as f:
+            f.write(message_id)
+    except OSError as err:
+        print(f"bus: could not save position: {err}", file=sys.stderr, flush=True)
+
+
 def watch() -> None:
-    state: dict = {"since": None}
+    _, _, me = config()
+    state: dict = {"since": load_position(me)}
     while True:
         try:
             stream(f"?since={state['since']}" if state["since"] else "", follow=True, state=state)
