@@ -138,7 +138,7 @@ bool codecInit() {
   return es8311_init(codec, &clk, ES8311_RESOLUTION_16, ES8311_RESOLUTION_16) == ESP_OK &&
          es8311_sample_frequency_config(codec, clk.mclk_frequency, RATE) == ESP_OK &&
          es8311_microphone_config(codec, false) == ESP_OK &&  // analog mic, not PDM
-         es8311_voice_volume_set(codec, 75, NULL) == ESP_OK &&
+         es8311_voice_volume_set(codec, 85, NULL) == ESP_OK &&  // above ~90 the speaker distorts
          es8311_microphone_gain_set(codec, (es8311_mic_gain_t)4) == ESP_OK;  // +24 dB: muffled by the pillow
 }
 
