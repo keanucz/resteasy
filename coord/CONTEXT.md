@@ -88,3 +88,14 @@ agents), Factory Droid (trigger you designed, limited access, visible plans/diff
 - Fri 23 Oct: lanes. Keanu electronics + firmware lead; Szymon backend, then pairs on wiring Sat
   morning; Adam product plus the non-electronic physical build (pod, base, cables); Adyan stays on
   agents (critical path).
+- Fri 23 Oct: persona confirmed: adults 65+ living alone, not bedridden, who get up in the night.
+- Fri 23 Oct: app owner = the person who sets the pillow up (usually an adult child). The resident
+  has no app or login. Keep two roles in the data: `owner` (configures: quiet hours, timeout,
+  contact order) and ordered `contacts` (who gets alerted; may include the owner, siblings,
+  neighbours). Resident consents at setup and can pause by voice. Guardian caps sit above owner
+  settings.
+- Fri 23 Oct: personal night baseline (plain stats, not an LLM). Week one is "learning mode": fixed
+  20 min no-return timeout + voice check-in from night one, trips only recorded. From week two,
+  `checkin_timeout_min` = her usual trip length (≈p90 of past trips) + margin, clamped to 10–30 min;
+  trips at unusual hours also flag. Drift (e.g. more trips per night over weeks) goes to family in
+  the Morning Brief, never silently absorbed. Demo uses a hardcoded week of history.
