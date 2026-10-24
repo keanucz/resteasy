@@ -19,6 +19,50 @@ study, or secondhand summary.
 - California: **~10M** older adults by 2030 (25% of the state). **647,000** Californians 65+ who live
   alone can't cover basic costs (UCLA Elder Index).
 
+## The pillow's chain: night trip → fall → pillow stays empty → family alerted
+
+Each step of the Night Watch flow, and what evidence backs it.
+
+| Step | Evidence | Source | Strength |
+|---|---|---|---|
+| **1. She gets up at night** | Nocturia (waking to urinate) is linked to a ~1.2× higher fall risk (9 longitudinal studies). Getting up 3+ times a night: +28% risk of a new fall within 3 years in a community cohort | [Chen et al., systematic review & meta-analysis](https://uroluts.uroweb.org/publication/the-impact-of-nocturia-on-falls-and-fractures-a-systematic-review-and-meta-analysis/); [community cohort (PMC, pmid 20456212)](https://pmc.ncbi.nlm.nih.gov/articles/pmid/20456212) | strong (association, not causation) |
+| **2. The trip is when falls happen** | 34% of falls in adults 60+ were toileting-related, ≥44% of those at night, peaking 11pm–1am; almost half of night falls were at the bedside | [Rose et al., Australas J Ageing 2019](https://onlinelibrary.wiley.com/doi/10.1111/ajag.12696) | medium (hospital, not home) |
+| | Older adults fall going to the bathroom at night because of low light (this is the case for the path light) | [2022 field study, PMC9520131](https://pmc.ncbi.nlm.nih.gov/articles/PMC9520131) | medium |
+| **3. She's alone and can't get up** | 82% of falls happened when the person was alone; 80% of fallers couldn't get up after at least one fall | [Fleming & Brayne, BMJ 2008](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2590903/) | strong |
+| **4. Her alarm doesn't help** | Call alarms were in most homes but rarely activated during falls | same | strong |
+| **5. Time on the floor is what hurts** | Lying on the floor 1h+ (30% of fallers) was strongly associated with serious injury, hospital admission and moves into long-term care | same | strong |
+| | Long lies cause rhabdomyolysis, pressure injury, dehydration, hypothermia, pneumonia; 60% of older fallers with a 1h+ long lie were readmitted for a fall within a year | [Scoping review, long-lie therapy](https://magazine.sciencepod.net/?p=435980); [RCNI systematic review 2025](https://journals.rcni.com/nursing-older-people/evidence-and-practice/exploring-the-concept-of-a-long-lie-after-a-fall-to-inform-clinical-pathways-in-prehospital-services-a-systematic-literature-review-nop.2025.e1505/pdf) | medium |
+| **6. An empty bed is a usable signal** | UK councils already issue "bed occupancy sensors" to older people living alone: a mattress pad raises an alert if the person leaves bed and doesn't return within a set time, "indicating a possible fall", and can switch on lights | [Tunstall bed/chair occupancy sensor](https://www.tunstall.co.uk/our-products/product-catalogue/bed-chair-occupancy-sensor/); [Medway Council telecare](https://www.medway.gov.uk/directory_record/48951/telecare_bedchair_occupancy_sensor) | medium (established practice, not a trial) |
+| | Under-bed sensor in a seniors' residence detected high-risk residents leaving bed at night and alerted staff, removing the need for hourly room checks | [Bruyère/Carleton Sleepsense pilot 2023](https://carleton.ca/sam3/2023/toch-sleepsense-technology-enables-retirement-home-staff-to-monitor-overnight-bed-exits-for-seniors-with-real-time-alerts) | medium (care home) |
+| | Bed sensors vary a lot: one had 0–2.7% entry/exit errors, another missed 59% of short exits | [Wallace et al. 2020, eTELEMED](https://carleton.ca/sam3/wp-content/uploads/etelemed_2020_3_220_40094.pdf) | medium |
+| **7. Family gets the alert** | US PERS services already route non-emergencies to designated responders who are family, neighbours or friends | [OSF HealthCare personal response systems](https://www.osfhealthcare.org/services/home-care/home-medical-equipment/equipment-supplies/personal-response-systems) | weak (provider page) |
+| | 63M family caregivers in the US | [AARP/NAC 2025](https://www.aarp.org/press/releases/2025-07-24-new-report-reveals-crisis-point-for-americas-63-million-family-caregivers.html) | medium |
+
+### The pitch, in one line per step
+
+"She gets up at night (that's when falls happen) → she's alone, can't get up, and doesn't press the
+button → every hour on the floor makes it worse → **her pillow notices she hasn't come back** → it
+checks in with her, then tells her daughter. No wearable, no button."
+
+### What's ours, not the literature's
+
+- **Bed-exit + no-return is proven *practice*** (UK telecare, care homes), but we found **no
+  peer-reviewed trial** showing it reduces long lies or harm for people living at home. Say
+  "councils already prescribe bed sensors for exactly this; we added a voice check-in and family
+  routing", not "proven to save lives".
+- **Existing systems alert a call centre or staff.** We found no study of alerts going straight
+  to family. That's our design choice (least intrusive first, matches the burden findings).
+- **Why a pillow and not a mattress pad:** telecare pads are prescribed after something has
+  already gone wrong (e.g. after a hospital stay) and cover only the bed. The pillow adds voice and
+  a family link and can be bought before the first fall. That's our argument; there's no study
+  for it.
+- **Accuracy matters.** Wallace et al. show cheap sensors miss short exits. Our no-return timer
+  (20 min) only needs the long absence, which is the easier case; mention it if a judge asks about
+  false alarms. The "I'm fine" key/tap and the voice check-in are what stop a false alarm from
+  reaching family.
+- **Don't quote** "half of people who lie 1h+ die within 6 months" (Wild 1981). It's widely
+  repeated but we couldn't trace it to the primary source; use Fleming & Brayne instead.
+
 ## (a) Older adults living alone are a large, specific market
 
 | Claim | Number | Source | Strength |
