@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "hivemind": {
+      "command": "python3",
+      "args": ["coord/bus_channel.py"]
+    }
+  }
+}

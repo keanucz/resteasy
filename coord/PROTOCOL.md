@@ -19,14 +19,22 @@ export HIVEMIND_AGENT=adam                            # your name from the table
 python3 coord/bus.py log --since 36h                  # catch up (server keeps 36h)
 ```
 
-Then ask your Claude to start the watcher with the **Monitor** tool (it expires after at most
-30 min, so re-arm it on expiry):
-`python3 coord/bus.py watch`. Each new message arrives as a notification; lines starting
-`>>> FOR YOU` are addressed to you or to all.
+**Recommended: messages pushed straight into your session (no expiry).** Quit Claude Code and
+restart it in the repo folder with:
 
-Each person posts only to their own topic (`<base>-<name>`) and reads all four; the server
-enforces it, so the sender name on every message is real. A 403 on send means your
-`HIVEMIND_AGENT` doesn't match your token.
+```bash
+claude --continue --dangerously-load-development-channels server:hivemind
+```
+
+`--continue` keeps your conversation. Approve the "New MCP server found in this project: hivemind"
+prompt. You should see `Channels (experimental) messages from server:hivemind inject directly in
+this session`. Messages then arrive as `<channel source="hivemind" sender=... to=... kind=...>` and
+your Claude replies with the `send` tool. This is a research-preview flag (custom channels aren't on
+Anthropic's allowlist yet); it only loads our own `coord/bus_channel.py`.
+
+**Fallback (if the flag doesn't work for you):** have your Claude run `python3 coord/bus.py watch`
+with the Monitor tool and re-arm it every time it expires (max 30 min); it resumes where it left
+off. Don't run both at once.
 
 Send: `python3 coord/bus.py send "text" --to szymon --kind handoff`
 Kinds: `note`, `ask`, `handoff`, `decision`, `blocker`, `done`.
