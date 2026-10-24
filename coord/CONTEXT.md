@@ -100,7 +100,10 @@ agents), Factory Droid (trigger you designed, limited access, visible plans/diff
   trips at unusual hours also flag. Drift (e.g. more trips per night over weeks) goes to family in
   the Morning Brief, never silently absorbed. Demo uses a hardcoded week of history.
 - Sat 24 Oct: Adyan moves to hardware with Keanu; Adam takes over all agents, built in Szymon's
-  backend (`szymon/app-scaffold`). Szymon chose Spacetime for live state.
+  backend (`szymon/app-scaffold`).
 - Sat 24 Oct: agent flow and sponsor targets in `coord/AGENT_FLOW.md`. Core: Anthropic, Cartesia,
-  Spacetime, Microsoft. Bets: Factory Droid (Morning Brief), Fetch.ai (family agent in ASI:One).
-  Dropped: Atlassian (Forge/Jira only), Moss, ElevenLabs, Backboard, Convex.
+  Microsoft. Bets: Factory Droid (Morning Brief), Fetch.ai (family agent in ASI:One).
+  Dropped: Atlassian (Forge/Jira only), Moss, ElevenLabs, Backboard.
+- Sat 24 Oct: backend = Supabase (Postgres + Realtime) behind FastAPI, not Spacetime (Szymon + Adam
+  agreed). Agents in Python against Supabase; family app via supabase-js Realtime. Trade-off
+  accepted: no backend sponsor prize (Spacetime, Convex).

@@ -1,14 +1,14 @@
 # Agent flow (Adam's lane from Sat 24 Oct)
 
 How the agents turn pillow state into actions. Built in Szymon's backend (`szymon/app-scaffold`,
-FastAPI) on top of Spacetime. Device shapes stay as in `coord/CONTRACT.md`. Rule from CONTEXT.md
+FastAPI, Python) on top of Supabase (Postgres + Realtime). Device shapes stay as in `coord/CONTRACT.md`. Rule from CONTEXT.md
 holds: **timers and thresholds are plain code; Claude does language and judgement.**
 
 ```
 pillow state ─> event deriver ─> Night Watch state machine ─> Claude tool loop ─> Guardian ─> actions
-(Spacetime)     (plain code)      (plain code, timers)         (words, judgement)  (plain code)  (light, voice,
+(Supabase)      (plain code)      (plain code, timers)         (words, judgement)  (plain code)  (light, voice,
                                                                                                  family alerts)
-        every plan, tool call and Guardian verdict ─> Spacetime `agent_log` ─> family app (live)
+        every plan, tool call and Guardian verdict ─> Supabase `agent_log` ─> family app (live, Realtime)
 ```
 
 ## 1. Signals we actually have (Mum's pillow)
@@ -91,11 +91,10 @@ request; checks that `motion` drops.
 |---|---|---|
 | Core | Anthropic | Claude tool loop + Guardian ("knows where it could go wrong") |
 | Core | Cartesia | check-in voice, goodnight playback |
-| Core | Spacetime | live state + `agent_log` shared by pillows, agents and family app |
 | Core | Microsoft "Built for the Real World" | healthcare framing, measurable (time on the floor), responsible design |
 | Bet | Factory Droid | Morning Brief: designed trigger, whitelisted access, visible diff |
 | Bet | Fetch.ai | family agent in ASI:One |
-| Dropped | Atlassian (must be a Forge app for Jira/Confluence), Moss and ElevenLabs (second voice stack), Backboard, Convex (Spacetime chosen) | |
+| Dropped | Atlassian (must be a Forge app for Jira/Confluence), Moss and ElevenLabs (second voice stack), Backboard, Spacetime and Convex (backend is Supabase, not a sponsor), MLH Tiger Data (only if night history moved there) | |
 
 ## Build order
 
@@ -107,6 +106,6 @@ request; checks that `motion` drops.
 
 ## Needs from other lanes
 
-- **Szymon:** Spacetime tables for pillow state, events, commands, `agent_log`, contacts (with phone
+- **Szymon:** Supabase tables for pillow state, events, commands, `agent_log`, contacts (with phone
   numbers) and config; owner of the schema. Agent code lives in the backend under `app/agents/`.
 - **Keanu / Adyan:** `keys.fine` from the hit sensor and the kid pillow's touch; `vibrate` on the kid pillow.
