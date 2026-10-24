@@ -78,10 +78,10 @@ agents), Factory Droid (trigger you designed, limited access, visible plans/diff
   Implications: Night Watch needs a non-PIR trigger (MPU6050 head-off-pillow, sound sensor, or the
   HC-SR04 ultrasonic; the ELEGOO kit has no PIR); hit sensors can be "tap = I'm fine" alongside key 2 (one per pillow); KY-001 can
   stand in for DHT11. Only one pillow is built (see decisions log).
-- In the pillow: the Uno with its sensors and the N16R8 "pillow node", which sends the Uno's lines
-  over ESP-NOW. Next to the bed: the Waveshare voice unit (mic, speaker, screen) on the laptop's
-  USB. Power dangles outside the pillow: the starter kit's 9 V battery in the Uno's barrel jack
-  (the Uno's 5V feeds the N16R8), a USB power bank as backup (see decisions log, PR #36).
+- In the pillow: the N16R8 "pillow node" with the sensors on its breadboard (foil head switch plate
+  on GPIO4; the Uno is out), sending one contract line per 500 ms over ESP-NOW. Next to the bed:
+  the Waveshare voice unit (mic, speaker, screen) on the laptop's USB. Power dangles outside the
+  pillow: a USB power bank on one cable into the N16R8 (see decisions log, PR #36).
   No LiPo or heater inside bedding. 3D printers (4, queued) for a vented sensor pod.
 - Keypad: key 1 hold-to-talk, key 2 "I'm fine" (cancels escalation), key 3 call family.
 - Lane split for hardware resolved Fri 23 Oct: see the decisions log.
@@ -215,3 +215,7 @@ Defaults in brackets are what's built; settle together, then log the answer belo
 - Sat 24 Oct: repo migrations now match live Supabase. `link_contacts_to_auth_users` (adds
   `contacts.user_id` → `auth.users`) and `drop_glow_presence` had been applied live without being
   committed; both are added to `backend/supabase/migrations/` under their live versions.
+- Sat 24 Oct: the Uno is out (Keanu + Adyan). The foil head plate goes straight onto the N16R8
+  pillow node (GPIO4, `INPUT_PULLUP`), which builds the same contract line the Uno printed, so
+  `sim/uno_state.py`, the bridge and the backend are unchanged. One USB cable from a power bank
+  outside the pillow powers the node. `firmware/pillow_uno/` kept for reference.

@@ -38,25 +38,24 @@ Comment out `SERIAL_BRIDGE` to use Wi-Fi instead (e.g. at home).
 ## Demo layout: pillow node + bedside voice unit
 
 The Waveshare is enclosed (no header to wire), so it sits at the bedside on the laptop's USB, and
-the bare N16R8 goes in the pillow with the Uno. One power cable leaves the pillow; the battery
-dangles outside it (no lithium inside bedding).
+the bare N16R8 goes in the pillow with the sensors on its breadboard (the Uno is out: one board,
+one supply). One USB cable leaves the pillow to the power bank outside it (no lithium inside bedding).
 
 ```
-PILLOW                                   BEDSIDE                        LAPTOP
-Uno ── TX, 1k/2k ──> N16R8 pillow_node ──ESP-NOW──> Waveshare voice_unit ──USB──> audio_bridge.py
-battery (outside) -> Uno; Uno 5V/GND -> N16R8 5V/GND            (mic, speaker, screen)
+PILLOW                                        BEDSIDE                        LAPTOP
+foil plate ──> N16R8 pillow_node ──ESP-NOW──> Waveshare voice_unit ──USB──> audio_bridge.py --server
+power bank (outside) ──USB──> N16R8                (mic, speaker, screen)
 ```
 
-| Uno | | N16R8 |
+| Sensor | N16R8 | Note |
 |---|---|---|
-| pin 1 (TX) | 1 kΩ in series, then 2 kΩ to GND at the S3 end | GPIO18 |
-| 5V | | 5V |
-| GND | | GND |
+| head switch plate, sheet 1 | GPIO4 (`PLATE_PIN`, `INPUT_PULLUP`) | pressed reads LOW |
+| head switch plate, sheet 2 | GND | |
 
-Never wire an S3 TX pin to Uno pin 0, and don't power the S3 from the Uno's 3.3V pin (too weak
-for the radio). Unplug the 5V wire before plugging the N16R8 into a laptop. A USB power bank in
-the Uno runs both for hours (~150 mA). The starter kit's 9V battery in the barrel jack works too,
-for ~1-2 h: put in a fresh one before the demo.
+S3 pins are 3.3 V only: no 5 V sensor outputs straight in (an HC-SR04 echo needs a 1k/2k divider);
+analog only on ADC1 (GPIO1-10); keep off GPIO0/3/45/46 (strapping), 19/20 (USB), 48 (RGB LED).
+The node builds the contract line itself ({"head_on":1,"motion":null,...,"talk":0}) every 500 ms
+and on change; `sim/uno_state.py`, the bridge and the backend are unchanged from the Uno days.
 
 ```bash
 L="--libraries firmware/libraries --build-property compiler.cpp.extra_flags=-DPILLOW_LINK=1"
@@ -65,11 +64,11 @@ arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc --libraries firmwar
 uv run sim/audio_bridge.py --serial <the Waveshare's port> --server https://pillow.keanuc.net
 ```
 
-The voice unit's audio stays on USB; the radio carries only the pillow's lines (`UNO {...}`) and
-its talk key (`"talk":1` after `"talk":0`, acked, arrives as `KEY talk`). The node's LED: red =
-looking for the voice unit, green = paired, blue blink = a line sent. On its USB (115200) it
-prints what it forwards, and a line typed there is forwarded as if the Uno sent it (`STATS`:
-link health).
+The voice unit's audio stays on USB; the radio carries only the pillow's lines (`UNO {...}`, the
+prefix kept from the Uno days) and its talk key (`"talk":1` after `"talk":0`, acked, arrives as
+`KEY talk`). The node's LED: red = looking for the voice unit, green = paired, blue blink = a line
+sent. On its USB (115200) it prints what it forwards, and a JSON line typed there is forwarded as if
+the sensors produced it (`STATS`: link health).
 
 ## Wireless voice link: ESP-NOW relay (no access point)
 
@@ -110,10 +109,10 @@ RST once to flash it the first time.
 UDP. A hidden SSID still beacons; **it is a hotspot, so never at the venue**. The relay boots with
 the access point off and starts it only on the serial command `AP ON`.
 
-### The Uno (pillow sensors)
+### The Uno (pillow sensors): retired
 
-In the demo layout the Uno is wired to the pillow node instead (above). This section is the older
-layout, for a voice unit with a reachable header.
+The sensors now sit on the pillow node itself (demo layout above); `pillow_uno/` is kept for
+reference only. This section is the older layout, for a voice unit with a reachable header.
 
 The pillow's sensors are on the starter kit's Arduino Uno R3, which has no radio. The voice unit
 reads the Uno's serial output and sends each line on as `UNO <line>` (over the link and its own

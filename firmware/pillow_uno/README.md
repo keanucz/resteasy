@@ -1,4 +1,7 @@
-# pillow_uno: the switch plate on the Arduino Uno R3
+# pillow_uno: the switch plate on the Arduino Uno R3 (retired)
+
+**Superseded (Sat 24 Oct):** the plate is wired straight to the N16R8 pillow node (`../pillow_node/`),
+which prints the same line itself. Kept for reference and for the bench bridge (`sim/uno_bridge.py`).
 
 The head sensor is a pressure plate: two cardboard sheets faced with aluminium foil, foam or cloth
 between them. A head pressing them together closes the circuit. The Uno reads it and prints one
