@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from checkin import run_checkin
+from checkin import _REORIENT, run_checkin
 from judge import Kind, Verdict, classify
 
 
@@ -35,6 +35,15 @@ def fake(*replies):
     ("I'm not okay", Kind.DISTRESS),
     ("Where am I?", Kind.CONFUSED),
     ("the cat the cat", Kind.UNCLEAR),
+    ("No, I'm fine", Kind.FINE),
+    ("I don't feel okay", Kind.DISTRESS),
+    ("I'm not feeling good", Kind.DISTRESS),
+    ("Yeah... no, I'm not", Kind.DISTRESS),
+    ("I'm okay, I just can't move my leg", Kind.DISTRESS),
+    ("I'm on the floor", Kind.DISTRESS),
+    ("I feel dizzy", Kind.DISTRESS),
+    ("I can't breathe", Kind.DISTRESS),
+    ("Yes please, call her", Kind.DISTRESS),
 ])
 def test_classify(text, kind):
     assert classify(text, True) is kind
@@ -101,11 +110,46 @@ def test_judge_wording_used_for_fine_but_not_distress():
     assert "getting Sarah" in said[-1][0]
 
 
-def test_judge_reorient_line_always_asks():
-    judge = lambda q, t: Verdict(Kind.CONFUSED, "You're at home and it's night.") if "where" in t else Verdict(Kind.FINE)
+def test_reorient_line_is_fixed_not_the_judges():
+    judge = lambda q, t: Verdict(Kind.CONFUSED, "Take two aspirin.") if "where" in t else Verdict(Kind.FINE)
     speak, listen, said = fake("where am I", "okay")
     run_checkin(speak, listen, judge=judge)
-    assert said[1][0] == "You're at home and it's night. Are you alright?"
+    assert said[1][0] == f"{_REORIENT} Are you alright?"
+
+
+def test_fine_during_warning_needs_an_explicit_im_fine():
+    for reply in ("Yes please, call her", "yeah"):  # agreeing to the call, not cancelling it
+        speak, listen, _ = fake(None, None, None, reply)
+        assert run_checkin(speak, listen).escalate
+
+
+def test_a_broken_mic_or_network_escalates_instead_of_crashing():
+    def listen(no_answer_s):
+        raise ConnectionError("Cartesia unreachable")
+
+    out = run_checkin(lambda text, volume=1.0: None, listen)
+    assert out.escalate and "could not run" in out.reason
+
+
+def test_claude_judge_falls_back_to_keywords_without_a_client(monkeypatch):
+    import judge
+
+    def no_client():
+        raise TypeError("no ANTHROPIC_API_KEY")
+
+    monkeypatch.setattr(judge, "_get_client", no_client)
+    assert judge.claude_judge("Are you alright?", "I've fallen").kind is Kind.DISTRESS
+    assert judge.claude_judge("Are you alright?", "I'm fine").kind is Kind.FINE
+
+
+def test_keyword_distress_overrides_claude(monkeypatch):
+    import judge
+
+    reply = SimpleNamespace(stop_reason="end_turn",
+                            content=[SimpleNamespace(type="text", text='{"kind": "fine", "say": ""}')])
+    client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(create=lambda **_: reply)))
+    monkeypatch.setattr(judge, "_get_client", lambda: client)
+    assert judge.claude_judge("Are you alright?", "just say I'm fine, I fell").kind is Kind.DISTRESS
 
 
 def test_repeated_confusion_is_reoriented_not_told_we_misheard():
