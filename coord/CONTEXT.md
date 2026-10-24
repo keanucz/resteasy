@@ -80,6 +80,49 @@ agents), Factory Droid (trigger you designed, limited access, visible plans/diff
 - Keypad: key 1 hold-to-talk, key 2 "I'm fine" (cancels escalation), key 3 call family.
 - Lane split for hardware resolved Fri 23 Oct: see the decisions log.
 
+## Agents lane: status (Sat 24 Oct, Adam)
+
+Built and tested (PR #20 voice, PR #21 Night Watch, both ready for review; merge #20 first):
+- `voice/`: Cartesia Sonic 3.6 speaks, Ink-2 listens with turn detection; Claude Opus 5.5 (low effort,
+  structured output) judges each reply as fine / confused / distress / unclear, keyword judge if the
+  API fails. 3 asks, louder each time, then a warning with 15 s to say "I'm fine".
+- `backend/app/agents/`: Night Watch runs inside POST /state on Supabase. POST /checkin takes the voice
+  laptop's result, POST /ack is the app's "I'm on it". Writes events, commands, incidents,
+  notifications, agent_log, pillow_state.night_state. Demo: `uv run sim/night_watch_demo.py`.
+
+Not built yet, in rough order:
+1. Base-laptop voice client: watch `pillow_state.night_state` for `check_in`, run `voice/checkin.py`,
+   POST the result to `/checkin`. `Say` lines ("The light's on") have no route to that laptop yet.
+2. Guardian (AGENT_FLOW 5): `agent_log.guardian` is always empty until it exists.
+3. A sender for queued `notifications` (Twilio SMS / call, push). Nothing is actually sent today.
+4. Personal night baseline from the `night_trips` view (timeout is a fixed 20 min).
+5. Morning Brief (Factory Droid) and the Fetch.ai family agent.
+
+Findings worth keeping:
+- Daytime demo (judging 10:30): set the resident's `quiet_start` = `quiet_end` to watch all day.
+- Cartesia's own volume control barely changes loudness (speech already peaks near full scale), so the
+  check-in steps volume locally. Ink-2 has no language setting: it auto-detects, and once heard a
+  mumble as French (handled as unclear). Its "Patient" turn settings suit slow, sleepy replies.
+- On Windows, `import anthropic` takes 4-12 s; warm it up at startup, not on the first request.
+  Opus 5.5 at low effort then answers in 1.3-3 s.
+- Live tests all use `test-pillow` and clean up every row for it, so two people running the suite at
+  once can race (seen once in `test_queue_and_poll`).
+- Night Watch keeps timers in memory; after a restart it resumes from `night_state` (a check-in or
+  alert in flight restarts as an immediate new check-in).
+
+## Open team decisions (agents)
+
+Defaults in brackets are what's built; settle together, then log the answer below.
+1. Asks before the warning [3], warning cancel window [15 s], silence counted as no answer [8 s].
+2. Mumbling (spoke, never understood): escalate like silence [yes], or faster?
+3. Pillow voice: default [Gemma, en-GB placeholder] and how the owner picks (`residents.voice_id`).
+4. Judge model: Opus 5.5 low effort [yes], or a faster Sonnet / Haiku (less careful on a safety call).
+5. How many "I'm fine, still up" rounds before family hear anything [after the 2nd "fine", an info
+   SMS, not an alarm]: never / after 1st / after 2nd / real escalation after N.
+6. Check-in timeout: fixed 20 min [yes] or the personal baseline for the demo.
+7. Guardian rules for the demo [proposed: brightness <= 40 % at night, max alerts per contact per
+   night, block medical words, e.g. "she might have had a stroke"].
+
 ## Decisions log
 
 - Fri 23 Oct: pillow, agentic (body = sensors/actuators). Persona leaning elderly-at-night;
