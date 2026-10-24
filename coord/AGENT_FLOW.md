@@ -61,6 +61,7 @@ outside their own quiet hours) move ahead of those who aren't. Nobody is dropped
 reachable, everyone is still tried. Any contact's "I'm on it" in the app
 (`POST /api/pillows/{id}/ack`) stops the ladder, and Mum hears "<name> knows, and is checking on
 you." There is no second pillow: the adult child only has the app.
+
 **Never auto-calls 911**; the message tells the contact to call if they can't reach her.
 
 ## 5. Guardian (plain code, checks every tool call before it is queued)
@@ -108,7 +109,7 @@ request; checks that `motion` drops.
 
 1. Event deriver + Night Watch against `sim/pillow_sim.py --scenario no_return`.
 2. Check-in: Cartesia voice + Claude classify.
-3. Guardian + ladder: app alert, then SMS, then call.
+3. Guardian + ladder: in-app alert first, then SMS.
 4. `agent_log` live in the family app.
 5. Morning Brief Droid. 6. Fetch family agent. 7. Settle.
 
