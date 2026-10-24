@@ -7,6 +7,8 @@ message and reads command lines:
 
   board -> laptop:  STATE {"pillow_id": "kid", ...}      (coord/CONTRACT.md section 1)
   laptop -> board:  CMD {"id": 41, "cmd": "set_light", "args": {...}}
+  laptop -> board:  LINK OK   (after each successful state POST; boards fall back to local
+                             behaviour, e.g. the path light, when these stop)
 
 This script forwards STATE to POST {server}/api/pillows/{id}/state and polls
 GET {server}/api/pillows/{id}/commands?after=N every 500 ms, writing each command back as CMD.
@@ -55,6 +57,7 @@ def read_board(port: serial.Serial, server: str, state: dict) -> None:
         state["pillow_id"] = msg.get("pillow_id", state.get("pillow_id"))
         try:
             http(f"{server}/api/pillows/{state['pillow_id']}/state", msg)
+            port.write(b"LINK OK\n")  # tells the board the server is reachable (offline fallback)
         except (urllib.error.URLError, OSError, ValueError) as err:
             print(f"bridge: state POST failed: {err}", file=sys.stderr, flush=True)
 
