@@ -10,17 +10,25 @@ Family get alerts through the app (incidents + notifications) and acknowledge wi
 Speech and the check-in run on the base laptop, not here: that laptop watches `night_state` (it
 becomes `check_in`) and reports the result to POST /api/pillows/{id}/checkin. `Say` lines are only
 logged until that laptop has a way to receive them.
+
+Alerts are worded by the Family Liaison (app/agents/liaison.py, Claude with tools; fixed text when it
+can't), then every command, spoken line and alert passes the Guardian (app/agents/guardian.py); its
+verdict lands in `agent_log.guardian`, and a blocked action runs its safe replacement or nothing.
 """
 
 import asyncio
 import logging
+import re
 import time as clock
+from collections import deque
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, time
 from zoneinfo import ZoneInfo
 
 from supabase import AsyncClient
 
+from app.agents.guardian import Guardian, GuardianConfig
+from app.agents.liaison import Liaison, Situation
 from app.agents.night_watch import (
     Action,
     Alert,
@@ -30,6 +38,7 @@ from app.agents.night_watch import (
     NightWatchConfig,
     State,
 )
+from app.agents.sleep_events import SleepTracker
 from app.crud.commands import queue_command
 from app.crud.night_log import add_event, add_notification, log_action, open_incident, update_incident
 from app.crud.pillow_state import get_state, set_night_state
@@ -52,6 +61,10 @@ class _Watch:
     """One pillow's Night Watch plus what the service tracks around it."""
 
     nw: NightWatch
+    guardian: Guardian = field(default_factory=Guardian)
+    sleep: SleepTracker = field(default_factory=SleepTracker)  # restless / asleep / key events
+    recent: deque[str] = field(default_factory=lambda: deque(maxlen=8))  # event types, for the Liaison
+    heard: list[str] = field(default_factory=list)  # what she said at the last check-in
     contact_ids: dict[str, str] = field(default_factory=dict)  # alert name -> contacts.id
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)  # one report at a time, in order
     loaded_at: float = 0.0  # monotonic, last settings load
@@ -64,7 +77,8 @@ class _Watch:
 class WatchService:
     """Holds a Night Watch per pillow for the life of the process."""
 
-    def __init__(self) -> None:
+    def __init__(self, liaison: Liaison | None = None) -> None:
+        self.liaison = liaison or Liaison(None)
         self._watches: dict[str, _Watch] = {}
         self._create_lock = asyncio.Lock()  # two first reports after a restart make one watch
 
@@ -77,7 +91,8 @@ class WatchService:
             async with w.lock:
                 w.last_ts, w.last_seen = state.ts, clock.monotonic()
                 before = w.nw.state
-                actions = w.nw.observe(state.model_dump())
+                report = state.model_dump()
+                actions = [*w.sleep.observe(report), *w.nw.observe(report)]
                 await self._apply(db, pillow.id, w, actions, before, state.ts)
         except Exception:  # the device's report is stored already; never fail it over an agent error
             log.exception("Night Watch failed on %s", pillow.id)
@@ -155,17 +170,21 @@ class WatchService:
         firsts = [n.split()[0] for n in names]
         w.contact_ids = {(f if firsts.count(f) == 1 else n): c["id"]
                          for n, f, c in zip(names, firsts, contacts, strict=True)}
+        quiet_hours = (time.fromisoformat(resident["quiet_start"]), time.fromisoformat(resident["quiet_end"]))
         w.nw.cfg = NightWatchConfig(
             pillow_id=pillow.id,
             resident=resident["preferred_name"],
             contacts=tuple(w.contact_ids) or ("family",),
             checkin_timeout_min=resident["checkin_timeout_min"],
             timezone=resident["timezone"],
-            quiet_hours=(time.fromisoformat(resident["quiet_start"]),
-                         time.fromisoformat(resident["quiet_end"])),
+            quiet_hours=quiet_hours,
             paused=resident["monitoring_paused"],
             step_wait_min=resident["step_wait_min"],
         )
+        consent = {name: bool(c.get("sms_consent", True))
+                   for name, c in zip(w.contact_ids, contacts, strict=True)}
+        w.guardian.cfg = GuardianConfig(timezone=resident["timezone"], quiet_hours=quiet_hours,
+                                        step_wait_min=resident["step_wait_min"], sms_consent=consent)
         w.loaded_at = clock.monotonic()
 
     # ---------- writing decisions back ----------
@@ -173,25 +192,47 @@ class WatchService:
     async def _apply(
         self, db: AsyncClient, pillow_id: str, w: _Watch, actions: list[Action], before: State, ts: float
     ) -> None:
-        """Store and carry out Night Watch's actions, in order."""
+        """Store the events, let the Liaison word the alerts, pass everything else through the
+        Guardian, then carry it out, in order."""
+        actions = await self._word(w, actions)
         for a in actions:
             if isinstance(a, Event):
                 await add_event(db, pillow_id, a.type, a.ts, a.data)
                 await self._track_incident(db, pillow_id, w, a)
+                w.recent.append(a.type)
+                if a.type == "checkin_result":
+                    w.heard = _QUOTED.findall(a.data.get("reason") or "")
                 continue
+            (screened,) = w.guardian.screen([a], ts)
+            run, verdict = screened.run, screened.verdict
             reason = None
-            if isinstance(a, Command):
-                reason = await self._send_command(db, a)
-            elif isinstance(a, Alert):
-                reason = await self._notify(db, w, a)
+            if isinstance(run, Command):
+                reason = await self._send_command(db, run)
+            elif isinstance(run, Alert):
+                reason = await self._notify(db, w, run)
+            if not verdict.allowed:
+                instead = f"; ran instead: {_intent(run)}" if run is not None else "; dropped"
+                reason = f"blocked: {verdict.reason}{instead}" + (f" ({reason})" if reason else "")
             await log_action(db, pillow_id, AGENT, intent=_intent(a), tool=type(a).__name__,
-                             args=asdict(a), incident_id=w.incident_id, reason=reason)
+                             args=asdict(a), incident_id=w.incident_id, guardian=verdict.label, reason=reason)
         if w.nw.state is not before:
             await set_night_state(db, pillow_id, str(w.nw.state), ts)
             await log_action(db, pillow_id, AGENT, intent=f"{before} -> {w.nw.state}",
                              incident_id=w.incident_id)
             if w.nw.state is not State.ESCALATING:
                 w.incident_id, w.incident_step = None, 0
+
+    async def _word(self, w: _Watch, actions: list[Action]) -> list[Action]:
+        """Replace the step's fixed alert texts with the Liaison's wording (same contacts and channels),
+        and add the line it wants her to hear. Nothing else in the batch changes."""
+        alerts = [a for a in actions if isinstance(a, Alert)]
+        if not alerts:
+            return actions
+        events = [*w.recent, *(a.type for a in actions if isinstance(a, Event))]
+        worded = await self.liaison.compose(Situation(w.nw.cfg.resident, alerts, events, w.heard))
+        new_alerts = iter(a for a in worded if isinstance(a, Alert))
+        out: list[Action] = [next(new_alerts, a) if isinstance(a, Alert) else a for a in actions]
+        return out + [a for a in worded if not isinstance(a, Alert)]
 
     async def _track_incident(self, db: AsyncClient, pillow_id: str, w: _Watch, e: Event) -> None:
         """Mirror the escalation into the incidents table the family app watches."""
@@ -222,6 +263,9 @@ class WatchService:
             return "logged only: no open incident or no contact on record"
         await add_notification(db, w.incident_id, contact_id, CHANNELS[a.channel])
         return None
+
+
+_QUOTED = re.compile(r'"([^"]+)"')  # the check-in reason quotes her: She said: "..."
 
 
 def _intent(a: Action) -> str:

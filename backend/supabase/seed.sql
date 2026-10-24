@@ -15,9 +15,9 @@ insert into pillows (id, resident_id, location_label)
 values ('mum', '00000000-0000-0000-0000-000000000001', 'Bedroom')
 on conflict do nothing;
 
-insert into contacts (id, full_name, phone)
-values ('00000000-0000-0000-0000-000000000002', 'Sarah Test', '+15555550100')
-on conflict do nothing;
+insert into contacts (id, full_name, phone, sms_consent)
+values ('00000000-0000-0000-0000-000000000002', 'Sarah Test', '+15555550100', true)
+on conflict (id) do update set sms_consent = excluded.sms_consent;  -- Guardian blocks SMS without it
 
 insert into resident_contacts (resident_id, contact_id, relationship, role, priority)
 values ('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002',
@@ -37,9 +37,9 @@ insert into pillows (id, resident_id, location_label)
 values ('test-pillow', '00000000-0000-0000-0000-000000000011', 'Test bench')
 on conflict do nothing;
 
-insert into contacts (id, full_name, phone)
-values ('00000000-0000-0000-0000-000000000012', 'Test User', '+15555550199')
-on conflict do nothing;
+insert into contacts (id, full_name, phone, sms_consent)
+values ('00000000-0000-0000-0000-000000000012', 'Test User', '+15555550199', true)
+on conflict (id) do update set sms_consent = excluded.sms_consent;
 
 insert into resident_contacts (resident_id, contact_id, relationship, role, priority)
 values ('00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000012',

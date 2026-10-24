@@ -14,7 +14,7 @@ async def get_resident(db: AsyncClient, resident_id: str) -> dict[str, Any] | No
 
 
 async def list_contacts_in_order(db: AsyncClient, resident_id: str) -> list[dict[str, Any]]:
-    """Return the resident's contacts (id, name, on_call, quiet hours), first to alert first."""
+    """Return the resident's contacts (id, name, on_call, quiet hours, SMS consent), first to alert first."""
     response = await (
         db.table(RESIDENT_CONTACTS_TABLE)
         .select("priority, contacts(id, full_name, on_call, quiet_start, quiet_end)")
@@ -23,3 +23,9 @@ async def list_contacts_in_order(db: AsyncClient, resident_id: str) -> list[dict
         .execute()
     )
     return [row["contacts"] for row in response.data]
+
+
+async def update_resident(db: AsyncClient, resident_id: str, fields: dict[str, Any]) -> None:
+    """Change the resident's settings (quiet hours, timeout); the caller has run the Guardian."""
+    if fields:
+        await db.table(RESIDENTS_TABLE).update(fields).eq("id", resident_id).execute()

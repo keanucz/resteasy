@@ -9,7 +9,7 @@ family member's acknowledgement (the app's "I'm on it" button) with `family_ackn
 returns the actions to carry out, in order. Nothing here talks to Supabase, a device or a phone:
 the caller stores the `Event`s, queues the `Command`s, speaks the `Say`s, runs the check-in and sends
 the `Alert`s.
-Guardian (not built yet) is meant to sit between these actions and the outside world.
+The Guardian (guardian.py) sits between these actions and the outside world.
 """
 
 from __future__ import annotations

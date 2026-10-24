@@ -8,3 +8,4 @@ coord/.bus_last_*
 firmware/**/secrets.h
 coord/.agent
 coord/.bus_polled_*
+droid/workspace/

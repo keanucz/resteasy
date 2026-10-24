@@ -45,9 +45,50 @@ async def log_action(
     tool: str | None = None,
     args: dict | None = None,
     incident_id: int | None = None,
+    guardian: str | None = None,
     reason: str | None = None,
 ) -> None:
-    """Append one agent decision to agent_log, which the family app shows live."""
+    """Append one agent decision to agent_log, which the family app shows live.
+
+    `guardian` is the Guardian's verdict on it ("allowed" / "blocked"), None for a plain note."""
     row = {"pillow_id": pillow_id, "agent": agent, "intent": intent, "tool": tool, "args": args or {},
-           "incident_id": incident_id, "reason": reason}
+           "incident_id": incident_id, "guardian": guardian, "reason": reason}
     await db.table(AGENT_LOG_TABLE).insert(row).execute()
+
+
+async def list_events_between(db: AsyncClient, pillow_id: str, start_iso: str, end_iso: str) -> list[dict]:
+    """The pillow's events in [start, end), oldest first (one night, for the summary)."""
+    response = await (
+        db.table(EVENTS_TABLE).select("event_type, device_ts, data").eq("pillow_id", pillow_id)
+        .gte("device_ts", start_iso).lt("device_ts", end_iso).order("device_ts").execute()
+    )
+    return response.data
+
+
+async def list_recent_events_of_type(
+    db: AsyncClient, pillow_id: str, types: list[str], limit: int = 20
+) -> list[dict]:
+    """The pillow's latest events of the given types, oldest first."""
+    response = await (
+        db.table(EVENTS_TABLE).select("event_type, device_ts, data").eq("pillow_id", pillow_id)
+        .in_("event_type", types).order("device_ts", desc=True).limit(limit).execute()
+    )
+    return list(reversed(response.data))
+
+
+async def list_agent_log_between(db: AsyncClient, pillow_id: str, start_iso: str, end_iso: str) -> list[dict]:
+    """What the agents did in [start, end), oldest first: intent, tool, Guardian verdict, reason."""
+    response = await (
+        db.table(AGENT_LOG_TABLE).select("ts, agent, intent, tool, args, guardian, reason")
+        .eq("pillow_id", pillow_id).gte("ts", start_iso).lt("ts", end_iso).order("ts").execute()
+    )
+    return response.data
+
+
+async def latest_log_row(db: AsyncClient, pillow_id: str, agent: str) -> dict | None:
+    """The most recent agent_log row written by `agent` (e.g. the last Morning Brief), or None."""
+    response = await (
+        db.table(AGENT_LOG_TABLE).select("ts, agent, intent, args, guardian, reason")
+        .eq("pillow_id", pillow_id).eq("agent", agent).order("ts", desc=True).limit(1).execute()
+    )
+    return response.data[0] if response.data else None

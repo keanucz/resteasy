@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import acreate_client
 
+from app.agents.liaison import Liaison
 from app.agents.watch_service import WatchService
 from app.core.app_constants import API_PREFIX, CORS_ALLOW_HEADERS, CORS_ALLOW_METHODS, NIGHT_WATCH_TICK_S
 from app.core.config import get_settings
@@ -23,7 +24,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if settings.supabase_configured
         else None
     )
-    app.state.night_watch = WatchService()
+    app.state.night_watch = WatchService(Liaison.from_api_key(settings.anthropic_api_key))
     ticker = asyncio.create_task(_tick_night_watch(app)) if app.state.supabase is not None else None
     yield
     if ticker is not None:

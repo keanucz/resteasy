@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     supabase_secret_key: str = ""
     # Shared secret the base laptop sends as `Authorization: Bearer ...` with POST /checkin
     checkin_token: str = ""
+    # Claude, for the Family Liaison's wording (app/agents/liaison.py); empty = fixed messages only
+    anthropic_api_key: str = ""
 
     @property
     def supabase_configured(self) -> bool:

@@ -1,0 +1,84 @@
+"""The sleep-quality and key events of coord/CONTRACT.md section 2 that Night Watch doesn't derive:
+restless, asleep, key_talk, key_family."""
+
+from app.agents.sleep_events import ASLEEP_S, RESTLESS_S, SleepTracker
+
+T0 = 1_792_815_000.0
+
+
+def feed(tracker, start, seconds, **fields):
+    """One report per second for `seconds` from `start`; returns (next ts, events)."""
+    out = []
+    for t in range(seconds):
+        out += tracker.observe({"ts": start + t, "head_on": True, "motion": 0.03, "keys": {}, **fields})
+    return start + seconds, out
+
+
+def types(events):
+    return [e.type for e in events]
+
+
+def test_asleep_after_15_quiet_minutes_in_bed():
+    tr = SleepTracker()
+    _, before = feed(tr, T0, ASLEEP_S - 1, motion=0.03)
+    assert "asleep" not in types(before)
+    _, after = feed(tr, T0 + ASLEEP_S - 1, 2, motion=0.03)
+    assert types(after) == ["asleep"]
+
+
+def test_asleep_fires_once_until_she_leaves_the_bed():
+    tr = SleepTracker()
+    ts, ev = feed(tr, T0, ASLEEP_S + 600, motion=0.03)
+    assert types(ev).count("asleep") == 1
+    ts, _ = feed(tr, ts, 60, head_on=False)
+    _, ev = feed(tr, ts, ASLEEP_S + 1, motion=0.03)
+    assert types(ev) == ["asleep"]
+
+
+def test_restless_after_10_minutes_of_tossing():
+    tr = SleepTracker()
+    _, ev = feed(tr, T0, RESTLESS_S + 1, motion=0.55)
+    assert types(ev) == ["restless"]
+    assert ev[0].data["motion_avg"] > 0.35
+
+
+def test_a_short_toss_is_not_restless():
+    tr = SleepTracker()
+    ts, ev = feed(tr, T0, 120, motion=0.6)  # 2 min of tossing ...
+    _, more = feed(tr, ts, RESTLESS_S, motion=0.1)  # ... in an otherwise calm 10 minutes
+    assert "restless" not in types(ev + more)
+
+
+def test_restless_needs_a_head_on_the_pillow():
+    tr = SleepTracker()
+    _, ev = feed(tr, T0, RESTLESS_S + 1, motion=0.9, head_on=False)
+    assert ev == []
+
+
+def test_settling_after_restless_is_reported():
+    tr = SleepTracker()
+    ts, ev = feed(tr, T0, RESTLESS_S + 1, motion=0.55)
+    assert types(ev) == ["restless"]
+    _, ev = feed(tr, ts, RESTLESS_S + 1, motion=0.05)
+    assert types(ev)[0] == "settled"
+
+
+def test_key_presses_fire_on_the_rising_edge_only():
+    tr = SleepTracker()
+    held = {"talk": True, "fine": False, "family": False}
+    ts, ev = feed(tr, T0, 3, keys=held)
+    assert types(ev) == ["key_talk"]
+    ts, ev = feed(tr, ts, 1, keys={"talk": False, "fine": False, "family": True})
+    assert types(ev) == ["key_family"]
+
+
+def test_key_fine_is_left_to_night_watch():
+    tr = SleepTracker()
+    _, ev = feed(tr, T0, 2, keys={"fine": True})
+    assert ev == []
+
+
+def test_null_readings_are_skipped_not_counted():
+    tr = SleepTracker()
+    _, ev = feed(tr, T0, ASLEEP_S + 1, motion=None)
+    assert ev == []

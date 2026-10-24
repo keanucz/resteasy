@@ -111,6 +111,27 @@ Findings worth keeping:
 - Night Watch keeps timers in memory; after a restart it resumes from `night_state` (a check-in or
   alert in flight restarts as an immediate new check-in).
 
+## Agents lane: status (Sat 24 Oct, Adyan, branch `adyan/guardian`)
+
+Built on top of Adam's Night Watch and voice check-in, all tested without Supabase (live tests skip):
+- `backend/app/agents/guardian.py`: every command / spoken line / alert passes it; verdict in
+  `agent_log.guardian`. Caps brightness at 40 % at night, pulse 4-14 bpm, contract arg ranges, blocks
+  medical claims (her own quoted words are allowed), max 6 alerts per contact per night, no repeat
+  on one channel inside the step wait, SMS only with `contacts.sms_consent`, config whitelist.
+- `backend/app/agents/sleep_events.py`: `restless`, `settled`, `asleep`, `key_talk`, `key_family`.
+- `backend/app/agents/liaison.py`: Family Liaison, Claude Opus 5.5 with strict tools words each
+  alert for its channel and one line for her; ladder stays plain code; fixed text on any failure.
+- Family API (`backend/app/routers/family.py`): `GET /night`, `GET`/`POST /brief`, `PATCH /settings`,
+  `POST`/`GET /goodnight`, `POST /goodnight/played`. Writes use the shared `CHECKIN_TOKEN`.
+- `voice/checkin_client.py`: base laptop watches `night_state`, speaks the path-light line, runs the
+  check-in and posts the result, plays queued goodnight messages.
+- `droid/morning_brief.py`: Factory Droid at 06:00, read-only workspace, structured note + diff.
+- `agents/fetch/family_agent.py`: uAgent on Agentverse (chat protocol) for ASI:One.
+
+Needs: `ANTHROPIC_API_KEY` in `backend/.env` (Liaison), re-run `supabase/seed.sql` (sets
+`sms_consent = true` for Sarah and Test User, or the Guardian blocks their SMS), Droid CLI +
+`FACTORY_API_KEY` on the laptop that runs the brief, `AGENT_SEED` for the family agent.
+
 ## Open team decisions (agents)
 
 Defaults in brackets are what's built; settle together, then log the answer below.
