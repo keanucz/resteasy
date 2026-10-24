@@ -1,12 +1,14 @@
 """FastAPI dependencies shared across routers."""
 
+import secrets
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from supabase import AsyncClient
 
 from app.agents.watch_service import WatchService
-from app.core.app_constants import SUPABASE_NOT_CONFIGURED
+from app.core.app_constants import CHECKIN_TOKEN_NOT_CONFIGURED, SUPABASE_NOT_CONFIGURED
+from app.core.config import get_settings
 from app.crud.pillows import get_pillow
 from app.schemas.pillow import Pillow
 
@@ -39,3 +41,13 @@ def get_night_watch(request: Request) -> WatchService:
 
 
 NightWatchDep = Annotated[WatchService, Depends(get_night_watch)]
+
+
+def require_checkin_token(authorization: Annotated[str | None, Header()] = None) -> None:
+    """Only the base laptop may report a check-in result (it can cancel or start an escalation)."""
+    expected = get_settings().checkin_token
+    if not expected:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=CHECKIN_TOKEN_NOT_CONFIGURED)
+    if not secrets.compare_digest((authorization or "").encode(), f"Bearer {expected}".encode()):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid check-in token",
+                            headers={"WWW-Authenticate": "Bearer"})

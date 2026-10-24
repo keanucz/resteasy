@@ -56,6 +56,7 @@ class _Watch:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)  # one report at a time, in order
     loaded_at: float = 0.0  # monotonic, last settings load
     last_ts: float = 0.0  # last device ts seen, the clock for check-in results
+    last_seen: float = 0.0  # monotonic time of that report, to let device time run on without reports
     incident_id: int | None = None
     incident_step: int = 0
 
@@ -65,15 +66,16 @@ class WatchService:
 
     def __init__(self) -> None:
         self._watches: dict[str, _Watch] = {}
+        self._create_lock = asyncio.Lock()  # two first reports after a restart make one watch
 
     async def report_state(self, db: AsyncClient, pillow: Pillow, state: DeviceState) -> None:
-        """Feed one state report to the pillow's Night Watch."""
+        """Feed one state report to the pillow's Night Watch (a null head reading still carries keys)."""
         try:
-            if pillow.resident_id is None or state.head_on is None:
-                return  # nobody to watch, or no head sensor reading to watch with
+            if pillow.resident_id is None:
+                return  # nobody to watch
             w = await self._watch(db, pillow)
             async with w.lock:
-                w.last_ts = state.ts
+                w.last_ts, w.last_seen = state.ts, clock.monotonic()
                 before = w.nw.state
                 actions = w.nw.observe(state.model_dump())
                 await self._apply(db, pillow.id, w, actions, before, state.ts)
@@ -105,18 +107,36 @@ class WatchService:
             await self._apply(db, pillow.id, w, actions, before, w.last_ts)
             return str(w.nw.state)
 
+    async def tick_all(self, db: AsyncClient) -> None:
+        """Run every watch's due timers, so a silent pillow or a check-in that never reports back
+        still moves the ladder. Device time is extrapolated from each pillow's last report."""
+        for pillow_id, w in list(self._watches.items()):
+            try:
+                async with w.lock:
+                    if not w.last_seen:
+                        continue  # no report since start-up: no device clock to run on
+                    ts = w.last_ts + (clock.monotonic() - w.last_seen)
+                    before = w.nw.state
+                    actions = w.nw.tick(ts)
+                    await self._apply(db, pillow_id, w, actions, before, ts)
+            except Exception:
+                log.exception("Night Watch tick failed on %s", pillow_id)
+
     # ---------- setup ----------
 
     async def _watch(self, db: AsyncClient, pillow: Pillow) -> _Watch:
         """The pillow's watch, created (and resumed from the database) on first use."""
         w = self._watches.get(pillow.id)
         if w is None:
-            w = _Watch(NightWatch())
-            await self._load_settings(db, pillow, w)
-            saved = await get_state(db, pillow.id)
-            if saved and saved.night_state != State.AWAKE:
-                w.nw.resume(State(saved.night_state), saved.state_since.timestamp())
-            self._watches[pillow.id] = w
+            async with self._create_lock:
+                w = self._watches.get(pillow.id)
+                if w is None:
+                    w = _Watch(NightWatch())
+                    await self._load_settings(db, pillow, w)
+                    saved = await get_state(db, pillow.id)
+                    if saved and saved.night_state != State.AWAKE:
+                        w.nw.resume(State(saved.night_state), saved.state_since.timestamp())
+                    self._watches[pillow.id] = w
         elif clock.monotonic() - w.loaded_at > CONFIG_REFRESH_S:
             await self._load_settings(db, pillow, w)
         return w
@@ -129,7 +149,12 @@ class WatchService:
         # Reachable contacts (on call, outside their own quiet hours) first, in priority order; the
         # rest after them, so nobody is ever left out of an alert.
         contacts.sort(key=lambda c: not _reachable(c, now))
-        w.contact_ids = {c["full_name"].split()[0]: c["id"] for c in contacts}
+        # First name as spoken to her, but the full name when two share one (two Sarahs must stay two
+        # contacts); a blank name falls back to the id.
+        names = [(c.get("full_name") or "").strip() or c["id"] for c in contacts]
+        firsts = [n.split()[0] for n in names]
+        w.contact_ids = {(f if firsts.count(f) == 1 else n): c["id"]
+                         for n, f, c in zip(names, firsts, contacts, strict=True)}
         w.nw.cfg = NightWatchConfig(
             pillow_id=pillow.id,
             resident=resident["preferred_name"],

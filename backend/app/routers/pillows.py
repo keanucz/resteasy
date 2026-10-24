@@ -1,8 +1,8 @@
 """Pillow router: the device pushes its state here and the app reads it back."""
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.core.dependencies import NightWatchDep, PillowDep, SupabaseDep
+from app.core.dependencies import NightWatchDep, PillowDep, SupabaseDep, require_checkin_token
 from app.crud.pillow_state import get_state, save_state
 from app.schemas.checkin import Acknowledgement, CheckinResult, NightStatus
 from app.schemas.pillow import Pillow
@@ -37,7 +37,7 @@ async def read_state(pillow: PillowDep, db: SupabaseDep) -> PillowState:
     return state
 
 
-@router.post("/checkin")
+@router.post("/checkin", dependencies=[Depends(require_checkin_token)])
 async def report_checkin(
     pillow: PillowDep, result: CheckinResult, db: SupabaseDep, night_watch: NightWatchDep
 ) -> NightStatus:

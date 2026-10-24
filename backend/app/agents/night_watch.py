@@ -20,8 +20,12 @@ from datetime import datetime, time
 from enum import StrEnum
 from zoneinfo import ZoneInfo
 
-LAY_DOWN_S = 5  # head on this long = lying down / back in bed (coord/CONTRACT.md 2)
+LAY_DOWN_S = 5  # head on this long = lying down (coord/CONTRACT.md 2)
+# Head on this long = back in bed while she's up. Longer than LAY_DOWN_S: a brief reading from the
+# slow warmth/humidity sensor must not end an incident mid-escalation.
+BED_RETURN_S = 45
 BED_EXIT_S = 30  # head off this long = out of bed
+CHECKIN_MAX_S = 180  # a check-in that hasn't reported back by now is treated as failed
 
 PATH_LIGHT_ON = {"brightness_pct": 20, "color": "warm", "fade_s": 3}
 PATH_LIGHT_OFF = {"brightness_pct": 0, "color": "off", "fade_s": 10}
@@ -110,9 +114,11 @@ class NightWatch:
         self._head_on = False  # debounced
         self._head_raw: bool | None = None
         self._head_since = 0.0
+        self._last_ts = -math.inf
         self._fine_held = False
         self._left_at = 0.0  # when her head left the pillow this trip
         self._checkin_due = math.inf
+        self._checkin_deadline = math.inf  # when a running check-in counts as failed
         self._fine_rounds = 0  # check-ins this trip where she said she was fine
         self._ladder: list[list[tuple[str, str]]] = []  # steps still to run: [(channel, contact)]
         self._next_step_at = math.inf
@@ -137,24 +143,40 @@ class NightWatch:
         self._checkin_due = since + self.cfg.checkin_timeout_min * 60 if state is State.UP else -math.inf
 
     def observe(self, s: dict) -> list[Action]:
-        """Take one state message from her pillow (coord/CONTRACT.md 1) and return what to do."""
+        """Take one state message from her pillow (coord/CONTRACT.md 1) and return what to do.
+
+        A report with no head reading (`head_on` null) still counts for keys and timers.
+        """
         ts = float(s["ts"])
+        if ts < self._last_ts:
+            return []  # out of order: time never goes backwards here
+        self._last_ts = ts
         out: list[Action] = []
-        head = bool(s.get("head_on"))
-        if head != self._head_raw:
-            self._head_raw, self._head_since = head, ts
-        held = ts - self._head_since
-        if head and not self._head_on and held >= LAY_DOWN_S:
-            self._head_on = True
-            out += self._head_arrived(ts)
-        elif not head and self._head_on and held >= BED_EXIT_S:
-            self._head_on = False
-            out += self._head_left(ts, left_at=self._head_since)
+        head = s.get("head_on")
+        if head is not None:
+            head = bool(head)
+            if head != self._head_raw:
+                self._head_raw, self._head_since = head, ts
+            held = ts - self._head_since
+            lay_down_s = LAY_DOWN_S if self.state in (State.AWAKE, State.IN_BED) else BED_RETURN_S
+            if head and not self._head_on and held >= lay_down_s:
+                self._head_on = True
+                out += self._head_arrived(ts)
+            elif not head and self._head_on and held >= BED_EXIT_S:
+                self._head_on = False
+                out += self._head_left(ts, left_at=self._head_since)
         fine = bool((s.get("keys") or {}).get("fine"))
         if fine and not self._fine_held:
             out += self._tapped_fine(ts)
         self._fine_held = fine
         return out + self._tick(ts)
+
+    def tick(self, ts: float) -> list[Action]:
+        """Let time pass with no report (board unplugged, check-in never answered): run due timers."""
+        if ts < self._last_ts:
+            return []
+        self._last_ts = ts
+        return self._tick(ts)
 
     def checkin_done(self, ts: float, escalate: bool, reason: str) -> list[Action]:
         """Result of the voice check-in: escalate, or she said she's fine."""
@@ -206,14 +228,22 @@ class NightWatch:
                 Say("The light's on. Take your time.")]
 
     def _tick(self, ts: float) -> list[Action]:
+        if self.state is State.AWAKE and self._head_on and self._is_night(ts):
+            # She lay down before quiet hours began: start watching now, not only at the next lay-down.
+            self.state = State.IN_BED
+            return [Event(ts, "lay_down", {"watching": True, "late_start": True})]
         if self.state is State.UP and ts >= self._checkin_due:
             # Every no-return goes through the voice check-in: it alone decides to escalate, so she
             # is always asked and warned (with a chance to cancel) before family are alarmed.
             away = round((ts - self._left_at) / 60)
             self.state = State.CHECK_IN
             self._checkin_due = math.inf
+            self._checkin_deadline = ts + CHECKIN_MAX_S
             return [Event(ts, "no_return", {"away_min": away, "round": self._fine_rounds + 1}),
                     StartCheckin()]
+        if self.state is State.CHECK_IN and ts >= self._checkin_deadline:
+            reason = "The pillow's check-in didn't finish, so we couldn't ask her."
+            return [Event(ts, "checkin_timeout", {}), CancelCheckin(), *self._escalate(ts, reason)]
         if self.state is State.ESCALATING and ts >= self._next_step_at:
             return self._next_step(ts)
         return []

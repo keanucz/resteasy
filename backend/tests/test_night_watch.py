@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.agents.night_watch import (
+    BED_RETURN_S,
     Alert,
     CancelCheckin,
     Command,
@@ -174,3 +175,69 @@ def test_every_contact_gets_the_app_alert_first_then_sms_and_calls_in_turn():
     steps = [(round(m), a.channel, a.contact) for m, a in log if isinstance(a, Alert)]
     assert steps == [(80, "app", "Sarah"), (80, "app", "Tom"), (82, "sms", "Sarah"), (84, "call", "Sarah"),
                      (86, "sms", "Tom"), (88, "call", "Tom")]
+
+
+def feed(nw, start, seconds, head_on, fine=False):
+    """One report per second for `seconds` from `start`. Returns (next start, actions)."""
+    acts = []
+    for t in range(seconds):
+        acts += nw.observe({"ts": start + t, "head_on": head_on, "keys": {"fine": fine}})
+    return start + seconds, acts
+
+
+def escalating(nw, start=NIGHT):
+    """In bed, up for good, check-in escalates. Returns the ts after it."""
+    ts, _ = feed(nw, start, 10, True)
+    ts, acts = feed(nw, ts, 20 * 60 + 40, False)
+    assert any(isinstance(a, StartCheckin) for a in acts)
+    nw.checkin_done(ts, escalate=True, reason="She didn't answer.")
+    assert nw.state is State.ESCALATING
+    return ts
+
+
+def test_lying_down_before_quiet_hours_is_still_watched():
+    evening = datetime(2026, 10, 24, 21, 30, tzinfo=TZ).timestamp()
+    nw = NightWatch()
+    ts, _ = feed(nw, evening, 10, True)
+    assert nw.state is State.AWAKE  # 21:30: not watching yet
+    acts = nw.tick(datetime(2026, 10, 24, 22, 0, tzinfo=TZ).timestamp())
+    assert nw.state is State.IN_BED and acts[0].data["late_start"]
+    up = datetime(2026, 10, 25, 2, 0, tzinfo=TZ).timestamp()
+    _, acts = feed(nw, up, 40, False)
+    assert "bed_exit" in [a.type for a in acts if isinstance(a, Event)]
+
+
+def test_a_checkin_that_never_reports_back_escalates():
+    nw = NightWatch()
+    ts, _ = feed(nw, NIGHT, 10, True)
+    ts, acts = feed(nw, ts, 20 * 60 + 40, False)
+    assert nw.state is State.CHECK_IN
+    assert nw.tick(ts + 60) == []  # still within the check-in's time
+    acts = nw.tick(ts + 200)  # the board has gone quiet too: only the tick moves time on
+    assert nw.state is State.ESCALATING
+    assert any(isinstance(a, CancelCheckin) for a in acts)
+    assert any(isinstance(a, Alert) and "didn't finish" in a.message for a in acts)
+
+
+def test_fine_tap_counts_even_without_a_head_reading():
+    nw = NightWatch()
+    ts = escalating(nw)
+    acts = nw.observe({"ts": ts + 1, "head_on": None, "keys": {"fine": True}})
+    assert nw.state is State.UP and "key_fine" in events([(0, a) for a in acts])
+
+
+def test_a_brief_head_reading_during_escalation_is_not_a_return():
+    nw = NightWatch()
+    ts = escalating(nw)
+    ts, acts = feed(nw, ts, 10, True)
+    ts, more = feed(nw, ts, 5, False)
+    assert nw.state is State.ESCALATING and "bed_return" not in events([(0, a) for a in acts + more])
+    _, acts = feed(nw, ts, BED_RETURN_S + 1, True)
+    assert nw.state is State.IN_BED and "bed_return" in events([(0, a) for a in acts])
+
+
+def test_reports_from_the_past_are_ignored():
+    nw = NightWatch()
+    ts, _ = feed(nw, NIGHT, 10, True)
+    assert nw.observe({"ts": NIGHT - 100, "head_on": False, "keys": {"fine": True}}) == []
+    assert nw.tick(NIGHT - 100) == []

@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from supabase import Client
 
+from app.core.config import get_settings
 from app.crud.crud_constants import (
     AGENT_LOG_TABLE,
     COMMANDS_TABLE,
@@ -25,6 +26,7 @@ from tests.seed_constants import TEST_PILLOW_ID, TEST_USER_ID, UNKNOWN_CONTACT_I
 # 23:00 in the test resident's timezone (the residents default), inside her quiet hours
 NIGHT = datetime(2026, 10, 24, 23, 0, tzinfo=ZoneInfo("America/Los_Angeles")).timestamp()
 STATE_URL = f"/api/pillows/{TEST_PILLOW_ID}/state"
+CHECKIN_TOKEN = "test-checkin-token"
 
 
 def _clean(db: Client) -> None:
@@ -35,8 +37,9 @@ def _clean(db: Client) -> None:
 
 
 @pytest.fixture
-def night(db: Client, live_client: TestClient) -> Iterator[TestClient]:
+def night(db: Client, live_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     """A live client with the test pillow's night history cleared before and after."""
+    monkeypatch.setattr(get_settings(), "checkin_token", CHECKIN_TOKEN)
     _clean(db)
     yield live_client
     _clean(db)
@@ -61,8 +64,10 @@ def _escalate(client: TestClient) -> None:
     _report(client, 91, False)  # head off 30 s: bed_exit
     _report(client, 60 + 20 * 60, False)  # 20 min since she left: check-in
     assert client.get(STATE_URL).json()["night_state"] == "check_in"
-    escalated = client.post(f"/api/pillows/{TEST_PILLOW_ID}/checkin",
-                            json={"escalate": True, "reason": "She didn't answer."})
+    checkin_url = f"/api/pillows/{TEST_PILLOW_ID}/checkin"
+    result = {"escalate": True, "reason": "She didn't answer."}
+    assert client.post(checkin_url, json=result).status_code == 401  # only the base laptop may
+    escalated = client.post(checkin_url, json=result, headers={"Authorization": f"Bearer {CHECKIN_TOKEN}"})
     assert escalated.json() == {"night_state": "escalating"}
 
 
@@ -71,7 +76,7 @@ def test_a_night_with_no_return_escalates_and_resolves(db: Client, night: TestCl
     _escalate(night)
 
     _report(night, 1300, True)
-    _report(night, 1306, True)  # back in bed
+    _report(night, 1346, True)  # head on 45 s: back in bed
     assert night.get(STATE_URL).json()["night_state"] == "in_bed"
 
     events = [e["event_type"] for e in _rows(db, EVENTS_TABLE, "id, event_type")]

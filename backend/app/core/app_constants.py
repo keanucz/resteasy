@@ -24,3 +24,9 @@ CONNECTION_TEST_MESSAGE = "Frontend reached the backend"
 
 # Detail returned with a 503 when SUPABASE_URL / SUPABASE_SECRET_KEY are not set
 SUPABASE_NOT_CONFIGURED = "Supabase is not configured on this server"
+
+# Seconds between Night Watch timer runs when no pillow reports
+NIGHT_WATCH_TICK_S = 5
+
+# Detail returned with a 503 when CHECKIN_TOKEN is not set (POST /checkin fails closed)
+CHECKIN_TOKEN_NOT_CONFIGURED = "CHECKIN_TOKEN is not configured on this server"
