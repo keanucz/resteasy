@@ -1,10 +1,13 @@
 """Check-in rules against scripted replies, no audio.  uv run --with pytest pytest voice"""
 
+import runpy
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from checkin import Kind, Verdict, classify, run_checkin
+from checkin import run_checkin
+from judge import Kind, Verdict, classify
 
 
 def fake(*replies):
@@ -82,7 +85,7 @@ def test_confused_forever_still_ends():
     speak, listen, said = fake(*["where am I?"] * 10)
     out = run_checkin(speak, listen)
     # first ask, then 3 tries after the reorient, the warning, "letting Sarah know"
-    assert out.escalate and len(said) == 1 + 3 + 1 + 1
+    assert out.escalate and len(said) == 1 + 3 + 1 + 1 and "confused" in out.reason
 
 
 def test_judge_wording_used_for_fine_but_not_distress():
@@ -103,3 +106,20 @@ def test_judge_reorient_line_always_asks():
     speak, listen, said = fake("where am I", "okay")
     run_checkin(speak, listen, judge=judge)
     assert said[1][0] == "You're at home and it's night. Are you alright?"
+
+
+def test_repeated_confusion_is_reoriented_not_told_we_misheard():
+    speak, listen, said = fake("where am I?", "where am I?", "okay")
+    run_checkin(speak, listen)
+    assert "at home" in said[1][0] and "at home" in said[2][0]
+
+
+def test_script_run_shares_kinds_with_judge():
+    # checkin.py runs as __main__; a judge's Kind must still be the loop's Kind (it once wasn't,
+    # so Claude's "distress" never matched and a fall didn't escalate).
+    import judge
+    script = runpy.run_path(str(Path(__file__).with_name("checkin.py")), run_name="as_script")
+    speak, listen, said = fake("help")
+    out = script["run_checkin"](speak, listen, judge=lambda q, t: judge.Verdict(judge.Kind.DISTRESS),
+                                contact="Sarah")
+    assert out.escalate and "getting Sarah" in said[-1][0]

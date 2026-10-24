@@ -5,8 +5,7 @@
 """The night check-in conversation: ask, listen, retry, warn, then escalate or stand down.
 
 Plain code (coord/AGENT_FLOW.md section 3): this owns the tries, the timings and when to escalate.
-A `judge` reads each reply: Claude (voice/judge.py) in the live run, with the keyword `classify`
-below as its offline fallback and as the judge in tests.
+A judge (voice/judge.py) reads each reply: Claude in the live run, keywords offline and in tests.
 
     uv run voice/checkin.py --contact Sarah     # needs CARTESIA_API_KEY and ANTHROPIC_API_KEY
     uv run voice/checkin.py --keywords          # no Claude, keyword judge only
@@ -14,7 +13,7 @@ below as its offline fallback and as the judge in tests.
 Rules:
 - Distress ("I've fallen", "help") escalates at once, and she is told so.
 - Silence or speech we can't make out: up to `max_tries` asks, each a little louder.
-- Confused ("where am I?"): one reorienting answer, then the tries start again (once only).
+- Confused ("where am I?"): reorient her each time; the first time also restarts the tries.
 - Before escalating she is warned and has `cancel_s` to say she's fine.
 - Clear "I'm fine" at any point stands down.
 - The distress and warning lines are fixed here; a judge may only word the fine and reorient lines.
@@ -23,51 +22,10 @@ Rules:
 from __future__ import annotations
 
 import argparse
-import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import StrEnum
 
-
-class Kind(StrEnum):
-    FINE = "fine"
-    CONFUSED = "confused"
-    DISTRESS = "distress"
-    UNCLEAR = "unclear"  # she spoke, but we couldn't make out an answer
-    SILENT = "silent"
-
-
-@dataclass
-class Verdict:
-    kind: Kind
-    say: str | None = None  # optional line to speak back (fine / confused only)
-
-
-Judge = Callable[[str, str], Verdict]  # judge(question asked, her reply text) -> Verdict
-
-_DISTRESS = re.compile(
-    r"\b(fallen|fell|fall|help|hurt|hurts|pain|can'?t get up|cannot get up|stuck|bleeding|ambulance|"
-    r"not (?:ok|okay|fine|alright|all right|good))\b")
-_CONFUSED = re.compile(r"\b(where am i|where is|what time|who are you|what'?s (?:happening|going on)|confused|lost)\b")
-_FINE = re.compile(r"\b(fine|ok|okay|alright|all right|good|yes|yeah|yep|toilet|loo|bathroom|back to bed|i'?m up)\b")
-
-
-def classify(text: str, spoke: bool) -> Kind:
-    """Keyword judge. Distress wins over everything, then confusion, then fine."""
-    t = text.lower().replace("’", "'")
-    if not t:
-        return Kind.UNCLEAR if spoke else Kind.SILENT
-    if _DISTRESS.search(t):
-        return Kind.DISTRESS
-    if _CONFUSED.search(t):
-        return Kind.CONFUSED
-    if _FINE.search(t):
-        return Kind.FINE
-    return Kind.UNCLEAR
-
-
-def keyword_judge(_question: str, text: str) -> Verdict:
-    return Verdict(classify(text, True))
+from judge import Judge, Kind, Verdict, keyword_judge
 
 
 @dataclass
@@ -82,6 +40,7 @@ Listen = Callable[..., object]  # listen(no_answer_s=...) -> object with .text a
 
 VOLUMES = (1.0, 1.3, 1.6, 1.8, 2.0)  # a little louder each try (voice.speak's 0.5-2.0 scale)
 _MAX_SAY = 220  # longer judge lines are ignored in favour of the fixed ones
+_REORIENT = "It's the middle of the night and you're at home. The light's on by your bed."
 
 
 def _usable(say: str | None) -> str | None:
@@ -100,19 +59,18 @@ def run_checkin(
     log: Callable[[str], None] = lambda _: None,
 ) -> Outcome:
     heard: list[str] = []
-    ever_spoke = False
+    seen: set[Kind] = set()
     reoriented = False
 
     def ask(prompt: str, volume: float, wait_s: float) -> Verdict:
-        nonlocal ever_spoke
         speak(prompt, volume=volume)
         reply = listen(no_answer_s=wait_s)
-        ever_spoke = ever_spoke or reply.spoke
         if reply.text:
             heard.append(reply.text)
             verdict = judge(prompt, reply.text)
         else:
             verdict = Verdict(Kind.UNCLEAR if reply.spoke else Kind.SILENT)
+        seen.add(verdict.kind)
         log(f"{prompt!r} -> {verdict.kind}: {reply.text!r}")
         return verdict
 
@@ -132,13 +90,13 @@ def run_checkin(
             return distress()
         if v.kind is Kind.FINE:
             return fine(v)
-        if v.kind is Kind.CONFUSED and not reoriented:
-            reoriented, attempt = True, 0
-            prompt = _usable(v.say) or ("It's the middle of the night and you're at home. "
-                                        "The light's on by your bed.")
-            if not prompt.rstrip().endswith("?"):
+        if v.kind is Kind.CONFUSED:
+            if not reoriented:
+                reoriented, attempt = True, 0
+            prompt = _usable(v.say) or _REORIENT
+            if not prompt.endswith("?"):
                 prompt += " Are you alright?"
-        elif v.kind in (Kind.UNCLEAR, Kind.CONFUSED):
+        elif v.kind is Kind.UNCLEAR:
             prompt = "Sorry, I didn't quite catch that. Are you alright?"
         else:
             prompt = "I just want to check you're okay. Are you alright?"
@@ -150,7 +108,9 @@ def run_checkin(
     if v.kind is Kind.DISTRESS:
         return distress()
     speak(f"Okay, I'm letting {contact} know now.", volume=1.3)
-    if ever_spoke:
+    if Kind.CONFUSED in seen:
+        return Outcome(True, "She answered but seemed confused about where she was.", heard)
+    if Kind.UNCLEAR in seen:
         return Outcome(True, "She answered but we couldn't understand her.", heard)
     return Outcome(True, "She didn't answer.", heard)
 

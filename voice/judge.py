@@ -1,18 +1,64 @@
-"""Claude reads one check-in reply and says what it means (coord/AGENT_FLOW.md section 3).
+"""What one check-in reply means (coord/AGENT_FLOW.md section 3).
 
-Claude only judges and words a short reply; the check-in loop (checkin.py) owns tries, timings and
-whether to escalate. If Claude can't answer (no network, error, refusal) the keyword judge decides,
-so a night check-in never stalls on the API.
+A judge reads her reply and returns a Verdict; the check-in loop (checkin.py) owns tries, timings
+and whether to escalate. `claude_judge` is the live judge. `keyword_judge` is its offline fallback
+(no network, error, refusal), so a night check-in never stalls on the API, and the judge in tests.
+
+This module must not import checkin.py: checkin.py runs as __main__, and a second import of it
+would create a second, unequal Kind enum.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
+from enum import StrEnum
 
-import anthropic
 
-from checkin import Kind, Verdict, keyword_judge
+class Kind(StrEnum):
+    FINE = "fine"
+    CONFUSED = "confused"
+    DISTRESS = "distress"
+    UNCLEAR = "unclear"  # she spoke, but we couldn't make out an answer
+    SILENT = "silent"
+
+
+@dataclass
+class Verdict:
+    kind: Kind
+    say: str | None = None  # optional line to speak back (fine / confused only)
+
+
+Judge = Callable[[str, str], Verdict]  # judge(question asked, her reply text) -> Verdict
+
+
+_DISTRESS = re.compile(
+    r"\b(fallen|fell|fall|help|hurt|hurts|pain|can'?t get up|cannot get up|stuck|bleeding|ambulance|"
+    r"not (?:ok|okay|fine|alright|all right|good))\b")
+_CONFUSED = re.compile(r"\b(where am i|where is|what time|who are you|what'?s (?:happening|going on)|confused|lost)\b")
+_FINE = re.compile(r"\b(fine|ok|okay|alright|all right|good|yes|yeah|yep|toilet|loo|bathroom|back to bed|i'?m up)\b")
+
+
+def classify(text: str, spoke: bool) -> Kind:
+    """Keyword judge. Distress wins over everything, then confusion, then fine."""
+    t = text.lower().replace("’", "'")
+    if not t:
+        return Kind.UNCLEAR if spoke else Kind.SILENT
+    if _DISTRESS.search(t):
+        return Kind.DISTRESS
+    if _CONFUSED.search(t):
+        return Kind.CONFUSED
+    if _FINE.search(t):
+        return Kind.FINE
+    return Kind.UNCLEAR
+
+
+def keyword_judge(_question: str, text: str) -> Verdict:
+    return Verdict(classify(text, True))
+
 
 MODEL = "claude-opus-5-5"
 
@@ -46,19 +92,17 @@ SCHEMA = {
     "additionalProperties": False,
 }
 
-_client: anthropic.Anthropic | None = None
-
-
-def _get_client() -> anthropic.Anthropic:
-    global _client
-    if _client is None:  # short timeout: she is waiting for an answer in the dark
-        _client = anthropic.Anthropic(timeout=10.0, max_retries=1)
-    return _client
+_client = None
 
 
 def claude_judge(question: str, text: str) -> Verdict:
+    import anthropic  # only the live judge needs it; tests run without it
+
+    global _client
+    if _client is None:  # short timeout: she is waiting for an answer in the dark
+        _client = anthropic.Anthropic(timeout=10.0, max_retries=1)
     try:
-        response = _get_client().beta.messages.create(
+        response = _client.beta.messages.create(
             model=MODEL,
             max_tokens=1024,
             betas=["server-side-fallback-2026-07-01"],
