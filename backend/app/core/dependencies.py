@@ -5,10 +5,11 @@ from typing import Annotated, Any
 
 from fastapi import Depends, Header, HTTPException, Request, status
 from supabase import AsyncClient
+from supabase_auth.errors import AuthError
 
 from app.agents.reminders import ReminderService
 from app.agents.watch_service import WatchService
-from app.core.app_constants import CHECKIN_TOKEN_NOT_CONFIGURED, SUPABASE_NOT_CONFIGURED
+from app.core.app_constants import CHECKIN_TOKEN_NOT_CONFIGURED, NOT_SIGNED_IN, SUPABASE_NOT_CONFIGURED
 from app.core.config import get_settings
 from app.crud.pillows import get_pillow
 from app.crud.residents import get_resident
@@ -76,3 +77,20 @@ def require_checkin_token(authorization: Annotated[str | None, Header()] = None)
     if not secrets.compare_digest((authorization or "").encode(), f"Bearer {expected}".encode()):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid check-in token",
                             headers={"WWW-Authenticate": "Bearer"})
+
+
+async def current_user_id(db: SupabaseDep, authorization: Annotated[str | None, Header()] = None) -> str:
+    """The Supabase Auth user behind the app's `Authorization: Bearer <access token>`, or 401."""
+    token = (authorization or "").removeprefix("Bearer ").strip()
+    try:
+        response = await db.auth.get_user(token) if token else None
+    except AuthError:  # expired, revoked or forged token
+        response = None
+    if response is None or response.user is None:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, detail=NOT_SIGNED_IN, headers={"WWW-Authenticate": "Bearer"}
+        )
+    return response.user.id
+
+
+UserIdDep = Annotated[str, Depends(current_user_id)]
