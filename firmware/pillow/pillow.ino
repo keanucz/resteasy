@@ -203,6 +203,11 @@ void postState(float motion, float probeC, float humidRh, float distCm, float li
   doc["knob"] = nullptr;
   String body;
   serializeJson(doc, body);
+#ifdef SERIAL_BRIDGE
+  Serial.print("STATE ");
+  Serial.println(body);
+  return;
+#endif
   HTTPClient http;
   beginRequest(http, base() + "/state");
   http.addHeader("Content-Type", "application/json");
@@ -229,6 +234,20 @@ void pollCommands() {
   http.end();
 }
 
+// Serial bridge mode: commands arrive as "CMD {json}" lines from sim/serial_bridge.py.
+void readSerialCommands() {
+  static String line;
+  while (Serial.available()) {
+    char ch = Serial.read();
+    if (ch != '\n') { if (line.length() < 1024) line += ch; continue; }
+    if (line.startsWith("CMD ")) {
+      JsonDocument doc;
+      if (!deserializeJson(doc, line.substring(4))) runCommand(doc.as<JsonObject>());
+    }
+    line = "";
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   pinMode(PIN_HIT, INPUT);
@@ -241,7 +260,9 @@ void setup() {
   dht.begin();
   probe.setWaitForConversion(true);
   tls.setInsecure();
+#ifndef SERIAL_BRIDGE
   ensureWifi();
+#endif
 }
 
 void loop() {
@@ -253,11 +274,16 @@ void loop() {
   updateHeadOn(probeC, humidRh);
   float distCm = readDistanceCm();
   float light = analogRead(PIN_LDR) / 4095.0;
+#ifdef SERIAL_BRIDGE
+  postState(motion, probeC, humidRh, distCm, light);
+  readSerialCommands();
+#else
   ensureWifi();
   if (WiFi.status() == WL_CONNECTED) {
     postState(motion, probeC, humidRh, distCm, light);
     pollCommands();
   }
+#endif
   applyActuators();
   uint32_t spent = millis() - started;
   if (spent < LOOP_MS) delay(LOOP_MS - spent);
