@@ -48,6 +48,13 @@ bool warmHead = false, humidHead = false;
 uint32_t fineUntil = 0;         // hit sensor latch so a tap survives one state message
 long lastCommandId = 0;
 
+// Offline safety: if the server hasn't been reachable for LINK_TIMEOUT_MS, the base lights the
+// path by itself when she's out of bed in the dark, so the light never depends on the cloud.
+const uint32_t LINK_TIMEOUT_MS = 15000;
+uint32_t lastLinkOk = 0;
+bool offlineLight = false;
+bool linkUp() { return lastLinkOk != 0 && millis() - lastLinkOk < LINK_TIMEOUT_MS; }
+
 // One TLS connection, reused for every request (a fresh handshake twice a second is too slow).
 // setInsecure() skips certificate checks: acceptable for the hackathon, not for production.
 NetworkClientSecure tls;
@@ -152,6 +159,7 @@ void applyActuators() {
   if (millis() < vibrateUntil) motorDuty = 220;
   if (fanPct > 0 && motorDuty == 0) motorDuty = map(fanPct, 0, 100, 0, 255);
   if (presenceGlow) ledDuty = max<uint8_t>(ledDuty, 40);
+  if (offlineLight) ledDuty = max<uint8_t>(ledDuty, 77);  // ~30% path light, never overrides brighter
   ledcWrite(PIN_MOTOR, motorDuty);
   ledcWrite(PIN_LED, ledDuty);
 }
@@ -212,7 +220,8 @@ void postState(float motion, float probeC, float humidRh, float distCm, float li
   beginRequest(http, base() + "/state");
   http.addHeader("Content-Type", "application/json");
   int code = http.POST(body);
-  if (code < 200 || code >= 300) Serial.printf("state POST -> %d\n", code);
+  if (code >= 200 && code < 300) lastLinkOk = millis();
+  else Serial.printf("state POST -> %d\n", code);
   http.end();
 }
 
@@ -240,6 +249,7 @@ void readSerialCommands() {
   while (Serial.available()) {
     char ch = Serial.read();
     if (ch != '\n') { if (line.length() < 1024) line += ch; continue; }
+    if (line.startsWith("LINK OK")) lastLinkOk = millis();  // bridge: server answered
     if (line.startsWith("CMD ")) {
       JsonDocument doc;
       if (!deserializeJson(doc, line.substring(4))) runCommand(doc.as<JsonObject>());
@@ -284,6 +294,13 @@ void loop() {
     pollCommands();
   }
 #endif
+  bool outOfBedInDark = !headOn && !isnan(distCm) && distCm < ROOM_NEAR_CM && light < 0.2;
+  if (!linkUp()) {
+    if (outOfBedInDark && !offlineLight) Serial.println("offline: path light on");
+    offlineLight = offlineLight ? !headOn : outOfBedInDark;  // stays on until she's back in bed
+  } else {
+    offlineLight = false;
+  }
   applyActuators();
   uint32_t spent = millis() - started;
   if (spent < LOOP_MS) delay(LOOP_MS - spent);
