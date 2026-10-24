@@ -11,9 +11,12 @@
   "Mum's in bed", flashes "Check on Mum" on alerts, tap or touch = `keys.fine`. FQBN
   `esp32:esp32:esp32s3:CDCOnBoot=cdc`.
 - `voice_unit/`: the Waveshare inside Mum's pillow as **speaker + mic only** (ES8311 codec, squeeze
-  = "talk"). Bluetooth LE to the laptop (16 kHz mu-law), USB serial as a fallback;
+  = "talk"). Bluetooth LE to the laptop (16 kHz mu-law) or ESP-NOW to `espnow_relay/` (below),
+  USB serial as a fallback;
   `uv run sim/audio_bridge.py` makes it the speaker and mic for `voice/voice.py`
   (`PILLOW_AUDIO=pillow`). FQBN `esp32:esp32:esp32s3:CDCOnBoot=cdc`, no libraries to install.
+  Also reads the Uno's sensor lines (below).
+- `espnow_relay/` + `libraries/PillowRadio/`: the laptop end of the ESP-NOW link.
 - `i2c_scan/`, `wifi_diag/`: one-off diagnostics (onboard bus = SDA 15 / SCL 14; Wi-Fi reasons).
 
 ## Connectivity: USB serial bridge (default)
@@ -28,6 +31,46 @@ python3 sim/serial_bridge.py --port /dev/ttyACM0 --server https://pillow.keanuc.
 
 The board prints `STATE {json}` lines; the bridge POSTs them and writes `CMD {json}` lines back.
 Comment out `SERIAL_BRIDGE` to use Wi-Fi instead (e.g. at home).
+
+## Wireless voice link: ESP-NOW relay (no access point)
+
+Bluetooth from the pillow to the laptop is the default. The alternative is ESP-NOW: the voice unit
+talks straight to a second ESP32-S3 (the Elegoo kit's N16R8, `espnow_relay/`) plugged into the
+laptop. Neither board joins or runs a network, so nothing beacons. Packets to the paired board are
+encrypted; pairing hellos are not. The relay speaks the voice unit's own USB protocol, so the
+bridge is unchanged:
+
+```bash
+cp firmware/libraries/PillowRadio/secrets{.example,}.h   # gitignored: channel + keys,
+#                                                     the SAME file for both boards
+L="--libraries firmware/libraries --build-property compiler.cpp.extra_flags=-DPILLOW_LINK=1"
+arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc $L firmware/voice_unit   # in the pillow
+arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc $L firmware/espnow_relay # on the laptop
+uv run sim/audio_bridge.py --serial /dev/ttyACM0                                      # the relay's port
+```
+
+Plug the relay into its native "USB" port. If you only have its USB-UART ("COM") port, build it
+without `CDCOnBoot=cdc` and add `--baud 921600` to the bridge. The two boards pair by themselves
+within a few seconds of both being on ("radio: paired with ..." on each side).
+
+`PILLOW_LINK=2` is an **experiment**: the relay runs a hidden 2.4 GHz access point and both talk
+UDP. A hidden SSID still beacons; **it is a hotspot, so never at the venue**. The relay boots with
+the access point off and starts it only on the serial command `AP ON`.
+
+### The Uno (pillow sensors)
+
+The pillow's sensors are on the starter kit's Arduino Uno R3, which has no radio. The voice unit
+reads the Uno's serial output and sends each line on as `UNO <line>` (over the link and its own
+USB). The Uno is 5 V and the ESP32-S3 is not 5 V tolerant, so divide its TX down:
+
+| Uno | | Waveshare header |
+|---|---|---|
+| pin 1 (TX) | 1 kΩ in series, then 2 kΩ to GND at the S3 end | GPIO44 (U0RXD) |
+| GND | | GND |
+
+Leave the S3's GPIO43 (TX) unconnected. 9600 baud (`UNO_BAUD` in `voice_unit.ino`): match the Uno
+sketch's `Serial.begin()`. Lines with non-text bytes (wrong baud) are dropped. Uno lines are not yet
+forwarded to the server; the bridge prints them as `board: UNO ...`.
 
 ## Build and flash
 

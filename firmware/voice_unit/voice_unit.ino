@@ -1,29 +1,52 @@
 // Voice unit: the Waveshare ESP32-S3-Touch-AMOLED-1.8 in Mum's pillow, used only as a speaker and
 // microphone. It posts no state: the booth ESP32 is "mum". sim/audio_bridge.py on the laptop turns
-// it into a local speaker + mic for voice/voice.py, over either link (both always on):
+// it into a local speaker + mic for voice/voice.py, over USB serial (always on) plus one wireless
+// link, chosen at build time with PILLOW_LINK:
 //
-// Bluetooth LE (default): peripheral "pillow-voice", one GATT service. Audio is 16 kHz G.711 mu-law
+//   LINK_BLE (0, default)  Bluetooth LE straight to the laptop, below
+//   LINK_ESPNOW (1)        ESP-NOW to the relay board on the laptop's USB (firmware/espnow_relay)
+//   LINK_WIFI (2)          the relay's hidden 2.4 GHz access point + UDP. Experiment: it is a
+//                          hotspot, never at the venue
+//
+// The radio links carry the same audio and commands: firmware/libraries/PillowRadio.
+//
+// Bluetooth LE: peripheral "pillow-voice", one GATT service. Audio is 16 kHz G.711 mu-law
 // (8 bits a sample, 128 kbit/s), small enough for BLE with room to spare.
 //   MIC   notify  mic audio, only while the mic is on
 //   SPK   write   audio to play (write without response; the bridge paces it to real time)
 //   CTRL  write   text: "MIC ON", "MIC OFF", "VOL <0-100>", "GAIN <0-7>" (mic gain, 6 dB steps)
-//   EVENT notify  "talk": a squeeze/tap of the pillow (IMU jump), "I want to say something"
+//   EVENT notify  "talk": a squeeze/tap of the pillow (IMU jump), "I want to say something";
+//                 or "UNO <line>", a line from the Uno
 //
 // USB serial (fallback, when the board is plugged into the laptop): the same as text lines.
-//   board -> laptop:  MIC <base64 of 100 ms 16 kHz mono s16le>,  KEY talk,  boot log / debug
+//   board -> laptop:  MIC <base64 of 100 ms 16 kHz mono s16le>,  KEY talk,  UNO <line>,  boot log
 //   laptop -> board:  SPK <base64 s16le>,  MIC ON|OFF,  VOL n,  GAIN n
 //
+// Uno passthrough: the Arduino Uno R3 with the pillow's sensors has no radio, so its serial output
+// (pin 1, TX) comes in on UNO_RX, through a 1k/2k divider (the Uno is 5 V, the S3 3.3 V). Each line
+// goes on over the wireless link and USB as "UNO <line>", unchanged.
+//
 // Build: arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc firmware/voice_unit
+//   radio: add --libraries firmware/libraries --build-property compiler.cpp.extra_flags=-DPILLOW_LINK=1
 // Codec driver es8311.* is Espressif's (Apache-2.0), as shipped in Waveshare's 15_ES8311 example.
 
 #include <Wire.h>
 #include <ESP_I2S.h>
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLE2902.h>
+#include "driver/gpio.h"
 #include "mbedtls/base64.h"
 #include "freertos/stream_buffer.h"
 #include "es8311.h"
+
+#ifndef PILLOW_LINK
+#define PILLOW_LINK 0
+#endif
+#if PILLOW_LINK == 0
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLE2902.h>
+#else
+#include <PillowRadio.h>  // radio only: Bluetooth and ESP-NOW together are unreliable
+#endif
 
 // Board pins (Waveshare pin_config.h + schematic)
 #define IIC_SDA 15
@@ -35,6 +58,8 @@
 #define I2S_DIN 10   // codec ASDOUT -> ESP32 (mic)
 #define PA_EN 46     // NS4150B speaker amplifier enable
 #define QMI8658_ADDR 0x6B
+#define UNO_RX 44    // header pad U0RXD <- Uno pin 1 (TX) via 1k/2k divider; Uno GND to GND
+#define UNO_TX 43    // header pad U0TXD, unused (leave unwired: the ROM boot log comes out here)
 
 // GATT UUIDs: shared with sim/audio_bridge.py
 #define SERVICE_UUID "6e9d0001-5a1c-4c5e-9b7e-70696c6c6f77"
@@ -50,15 +75,21 @@ const size_t BLE_CHUNK_MAX = 240;            // mu-law bytes per notification (f
 const uint32_t PA_OFF_AFTER_MS = 400;        // amp off when idle: no hiss next to a sleeping ear
 const float TAP_G = 0.45;                    // accel jump (g) between samples = a squeeze/tap
 const int MIC_SLOT = 0;                      // stereo slot with the ES8311 ADC (verified: left)
+const uint32_t UNO_BAUD = 9600;              // match the Uno sketch's Serial.begin()
+const size_t UNO_LINE_MAX = 200;
 
 I2SClass i2s;
 es8311_handle_t codec;
 StreamBufferHandle_t speaker;
-volatile bool micSerial = false, micBle = false, bleConnected = false;
+volatile bool micSerial = false, micLink = false;  // mic asked for over USB / the wireless link
 volatile uint32_t lastPlayMs = 0;
 bool imuOk = false;
+
+#if PILLOW_LINK == 0
+volatile bool bleConnected = false;
 BLEServer *server;
 BLECharacteristic *micChar, *eventChar;
+bool linkUp() { return bleConnected; }
 
 // ---------- G.711 mu-law ----------
 uint8_t ulawEncode(int16_t sample) {
@@ -74,6 +105,11 @@ int16_t ulawDecode(uint8_t u) {
   int v = ((((u & 0x0F) << 3) + 0x84) << ((u >> 4) & 7)) - 0x84;
   return (u & 0x80) ? -v : v;
 }
+#else
+using radio::ulawDecode;
+using radio::ulawEncode;
+bool linkUp() { return radio::paired; }
+#endif
 
 // ---------- codec ----------
 bool codecInit() {
@@ -110,14 +146,19 @@ void speakerTask(void *) {
   }
 }
 
-void sendMicBle(const int16_t *mono) {
+void sendMicLink(const int16_t *mono) {
   static uint8_t ulaw[FRAME_SAMPLES];
   for (size_t i = 0; i < FRAME_SAMPLES; i++) ulaw[i] = ulawEncode(mono[i]);
+#if PILLOW_LINK == 0
   size_t chunk = min(BLE_CHUNK_MAX, (size_t)server->getPeerMTU(server->getConnId()) - 3);
   for (size_t i = 0; i < FRAME_SAMPLES; i += chunk) {
     micChar->setValue(ulaw + i, min(chunk, FRAME_SAMPLES - i));
     micChar->notify();
   }
+#else
+  for (size_t i = 0; i < FRAME_SAMPLES; i += radio::AUDIO_CHUNK)
+    radio::send(radio::PKT_MIC, ulaw + i, min(radio::AUDIO_CHUNK, FRAME_SAMPLES - i));
+#endif
 }
 
 void sendMicSerial(const int16_t *mono) {
@@ -134,16 +175,17 @@ void micTask(void *) {
   static int16_t stereo[FRAME_SAMPLES * 2], mono[FRAME_SAMPLES];
   for (;;) {
     size_t got = i2s.readBytes((char *)stereo, sizeof(stereo));
-    if (got < sizeof(stereo) || !(micSerial || (micBle && bleConnected))) continue;
+    bool toLink = micLink && linkUp();
+    if (got < sizeof(stereo) || !(micSerial || toLink)) continue;
     for (size_t i = 0; i < FRAME_SAMPLES; i++) mono[i] = stereo[2 * i + MIC_SLOT];
-    if (micBle && bleConnected) sendMicBle(mono);
+    if (toLink) sendMicLink(mono);
     if (micSerial) sendMicSerial(mono);
   }
 }
 
 // ---------- commands (both links) ----------
-void handleCommand(const String &cmd, bool fromBle) {
-  volatile bool &mic = fromBle ? micBle : micSerial;
+void handleCommand(const String &cmd, bool fromLink) {
+  volatile bool &mic = fromLink ? micLink : micSerial;
   if (cmd == "MIC ON") {
     mic = true;
   } else if (cmd == "MIC OFF") {
@@ -155,14 +197,23 @@ void handleCommand(const String &cmd, bool fromBle) {
   }
 }
 
-void talkEvent() {
-  Serial.println("KEY talk");
-  if (bleConnected) {
-    eventChar->setValue("talk");
-    eventChar->notify();
-  }
+// A short text message over the wireless link: "talk", or "UNO <line>"
+void sendLinkText(const char *text, bool isTalk) {
+  if (!linkUp()) return;
+#if PILLOW_LINK == 0
+  eventChar->setValue((uint8_t *)text, min(strlen(text), BLE_CHUNK_MAX));
+  eventChar->notify();
+#else
+  radio::sendText(isTalk ? radio::PKT_EVENT : radio::PKT_LINE, text);
+#endif
 }
 
+void talkEvent() {
+  Serial.println("KEY talk");
+  sendLinkText("talk", true);
+}
+
+#if PILLOW_LINK == 0
 // ---------- BLE ----------
 class ServerEvents : public BLEServerCallbacks {
   void onConnect(BLEServer *s, ble_gap_conn_desc *desc) override {
@@ -174,7 +225,7 @@ class ServerEvents : public BLEServerCallbacks {
   }
   void onDisconnect(BLEServer *) override {
     bleConnected = false;
-    micBle = false;
+    micLink = false;
     Serial.println("ble: disconnected, advertising");
     BLEDevice::startAdvertising();
   }
@@ -216,6 +267,52 @@ void bleInit() {
   adv->setScanResponse(true);
   bool ok = adv->start();
   Serial.printf("ble: advertising %s, address %s\n", ok ? "started" : "FAILED", BLEDevice::getAddress().toString().c_str());
+}
+
+void linkInit() { bleInit(); }
+#else
+// ---------- radio (ESP-NOW or the relay's access point) ----------
+// On the radio task.
+void onRadio(char type, const uint8_t *data, size_t len) {
+  if (type == radio::PKT_HELLO) {
+    micLink = data[0] & 1;  // the relay's hellos carry the mic state: survives our reboot
+  } else if (type == radio::PKT_SPK) {
+    static int16_t pcm[radio::MAX_PACKET];
+    for (size_t i = 0; i < len; i++) pcm[i] = ulawDecode(data[i]);
+    xStreamBufferSend(speaker, pcm, len * 2, pdMS_TO_TICKS(50));
+  } else if (type == radio::PKT_CMD) {
+    handleCommand(String((const char *)data, len), true);
+  }
+}
+
+void linkInit() {
+  bool ok = radio::begin(PILLOW_LINK, false, onRadio);
+  Serial.printf("radio: %s %s, channel %d, mac %s\n", PILLOW_LINK == LINK_WIFI ? "joining hidden access point" : "esp-now",
+                ok ? "started" : "FAILED", RADIO_CHANNEL, WiFi.macAddress().c_str());
+}
+#endif
+
+// ---------- Uno passthrough ----------
+void readUno() {
+  static String line;
+  static bool garbled = false;  // wrong baud or a floating pin: drop the whole line
+  while (Serial1.available()) {
+    char ch = Serial1.read();
+    if (ch == '\r') continue;
+    if (ch != '\n') {
+      if (ch == '\t') ch = ' ';  // Serial.print("\t") between readings is common
+      if (ch < 0x20 || ch > 0x7e) garbled = true;
+      else if (line.length() < UNO_LINE_MAX) line += ch;
+      continue;
+    }
+    if (!garbled && line.length()) {
+      String out = "UNO " + line;
+      Serial.println(out);
+      sendLinkText(out.c_str(), false);
+    }
+    line = "";
+    garbled = false;
+  }
 }
 
 // ---------- IMU tap (QMI8658, raw registers) ----------
@@ -305,15 +402,18 @@ void setup() {
   bool i2sOk = i2s.begin(I2S_MODE_STD, RATE, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO, I2S_STD_SLOT_BOTH);
   bool codecOk = i2sOk && codecInit();
   speaker = xStreamBufferCreate(SPK_BUFFER, 2);
-  bleInit();
-  Serial.printf("voice_unit: i2s %s, es8311 %s, imu %s, ble advertising as pillow-voice\n",
-                i2sOk ? "ok" : "FAILED", codecOk ? "ok" : "FAILED", imuOk ? "ok" : "missing");
+  Serial1.begin(UNO_BAUD, SERIAL_8N1, UNO_RX, UNO_TX);
+  gpio_pullup_en((gpio_num_t)UNO_RX);  // idle high when no Uno is wired: no garbage lines
+  linkInit();
+  Serial.printf("voice_unit: i2s %s, es8311 %s, imu %s, link %d, uno rx gpio %d @ %u\n", i2sOk ? "ok" : "FAILED",
+                codecOk ? "ok" : "FAILED", imuOk ? "ok" : "missing", PILLOW_LINK, UNO_RX, (unsigned)UNO_BAUD);
   xTaskCreatePinnedToCore(speakerTask, "spk", 4096, NULL, 5, NULL, 1);
   xTaskCreatePinnedToCore(micTask, "mic", 8192, NULL, 4, NULL, 1);
 }
 
 void loop() {
   readSerial();
+  readUno();
   static uint32_t lastImu = 0;
   if (millis() - lastImu >= 20) {
     lastImu = millis();

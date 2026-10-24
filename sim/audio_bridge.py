@@ -18,7 +18,8 @@ offers it to any program on the laptop over a localhost socket, one request per 
 voice/voice.py uses it when PILLOW_AUDIO=pillow. Clients see the same thing over either link.
 
   uv run sim/audio_bridge.py                          # Bluetooth: finds "pillow-voice"
-  uv run sim/audio_bridge.py --serial /dev/ttyACM0    # USB serial instead
+  uv run sim/audio_bridge.py --serial /dev/ttyACM0    # USB serial instead, or the ESP-NOW relay
+                                                      # (firmware/espnow_relay) on that port
 """
 
 import argparse
@@ -182,6 +183,13 @@ class BleBoard(Board):
         except Exception as err:  # bleak raises its own error types; callers expect OSError
             raise OSError(f"bluetooth: {err}") from err
 
+    def _event(self, data: bytes) -> None:
+        """EVENT notify: "talk", or a line from the Uno ("UNO ...")."""
+        if data == b"talk":
+            self._talk()
+        else:
+            print(f"board: {data.decode(errors='replace')}", flush=True)
+
     def command(self, cmd: str) -> None:
         self._call(lambda c: c.write_gatt_char(CTRL_UUID, cmd.encode(), response=True))
 
@@ -214,7 +222,7 @@ class BleBoard(Board):
                     if hasattr(client._backend, "_acquire_mtu"):  # BlueZ reports 23 until asked
                         await client._backend._acquire_mtu()
                     await client.start_notify(MIC_UUID, lambda _, data: self._mic(ulaw_decode(data)))
-                    await client.start_notify(EVENT_UUID, lambda _, data: data == b"talk" and self._talk())
+                    await client.start_notify(EVENT_UUID, lambda _, data: self._event(data))
                     self.client = client
                     print(f"audio_bridge: voice unit on bluetooth {device.address} (mtu {client.mtu_size})", flush=True)
                     if self.listeners:
