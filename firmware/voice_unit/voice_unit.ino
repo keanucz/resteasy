@@ -1,10 +1,15 @@
-// Voice unit: the Waveshare ESP32-S3-Touch-AMOLED-1.8 in Mum's pillow, used only as a speaker and
-// microphone. It posts no state: the booth ESP32 is "mum". sim/audio_bridge.py on the laptop turns
-// it into a local speaker + mic for voice/voice.py, over USB serial (always on) plus one wireless
-// link, chosen at build time with PILLOW_LINK:
+// Voice unit: the Waveshare ESP32-S3-Touch-AMOLED-1.8, used as a speaker and microphone. It posts
+// no state. sim/audio_bridge.py on the laptop turns it into a local speaker + mic for
+// voice/voice.py, over USB serial (always on) plus one wireless link, chosen at build time with
+// PILLOW_LINK:
 //
 //   LINK_BLE (0, default)  Bluetooth LE straight to the laptop, below
-//   LINK_ESPNOW (1)        ESP-NOW to the relay board on the laptop's USB (firmware/espnow_relay)
+//   LINK_ESPNOW (1)        ESP-NOW to the other board, either:
+//                          - the pillow node (firmware/pillow_node), with this unit at the bedside
+//                            on the laptop's USB: the pillow's Uno lines and talk-key presses come
+//                            in over the radio and go out on USB as "UNO <line>" / "KEY talk"
+//                          - or the relay on the laptop's USB (firmware/espnow_relay), with this
+//                            unit in the pillow: audio and commands over the radio
 //   LINK_WIFI (2)          the relay's hidden 2.4 GHz access point + UDP. Experiment: it is a
 //                          hotspot, never at the venue
 //
@@ -161,13 +166,14 @@ void sendMicLink(const int16_t *mono) {
 #endif
 }
 
+// USB lines go out in one write each: the mic task, loop() and the radio task all print, and one
+// write is atomic (HWCDC's tx lock), so lines never interleave. println() is two writes.
 void sendMicSerial(const int16_t *mono) {
-  static unsigned char b64[((FRAME_SAMPLES * 2 + 2) / 3) * 4 + 1];
+  static unsigned char line[4 + ((FRAME_SAMPLES * 2 + 2) / 3) * 4 + 3] = "MIC ";
   size_t len = 0;
-  if (mbedtls_base64_encode(b64, sizeof(b64), &len, (const unsigned char *)mono, FRAME_SAMPLES * 2)) return;
-  b64[len] = 0;
-  Serial.print("MIC ");
-  Serial.println((char *)b64);
+  if (mbedtls_base64_encode(line + 4, sizeof(line) - 6, &len, (const unsigned char *)mono, FRAME_SAMPLES * 2)) return;
+  memcpy(line + 4 + len, "\r\n", 2);
+  Serial.write(line, 4 + len + 2);
 }
 
 // Mic: read 100 ms stereo frames, keep the ADC slot, send it wherever the mic was asked for.
@@ -210,7 +216,7 @@ void sendLinkText(const char *text, bool isTalk) {
 }
 
 void talkEvent() {
-  Serial.println("KEY talk");
+  Serial.print("KEY talk\r\n");
   sendLinkText("talk", true);
 }
 
@@ -283,10 +289,20 @@ void onRadio(char type, const uint8_t *data, size_t len) {
     xStreamBufferSend(speaker, pcm, len * 2, pdMS_TO_TICKS(50));
   } else if (type == radio::PKT_CMD) {
     handleCommand(String((const char *)data, len), true);
+  } else if (type == radio::PKT_LINE) {
+    static uint8_t line[radio::MAX_PACKET + 2];  // the pillow node's "UNO <line>"
+    memcpy(line, data, len);
+    memcpy(line + len, "\r\n", 2);
+    Serial.write(line, len + 2);
+  } else if (type == radio::PKT_EVENT && len == 4 && memcmp(data, "talk", 4) == 0) {
+    Serial.print("KEY talk\r\n");  // the pillow's talk key (not talkEvent(): never send from this task)
   }
 }
 
+void logLine(const char *line) { Serial.printf("%s\r\n", line); }
+
 void linkInit() {
+  radio::logHook = logLine;
   bool ok = radio::begin(PILLOW_LINK, false, onRadio);
   Serial.printf("radio: %s %s, channel %d, mac %s\n", PILLOW_LINK == LINK_WIFI ? "joining hidden access point" : "esp-now",
                 ok ? "started" : "FAILED", RADIO_CHANNEL, WiFi.macAddress().c_str());
@@ -308,7 +324,7 @@ void readUno() {
     }
     if (!garbled && line.length()) {
       String out = "UNO " + line;
-      Serial.println(out);
+      Serial.print(out + "\r\n");
       sendLinkText(out.c_str(), false);
     }
     line = "";

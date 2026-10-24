@@ -64,7 +64,8 @@ agents), Factory Droid (trigger you designed, limited access, visible plans/diff
 
 ## Hardware
 
-- Ours: Keanu's Waveshare ESP32-S3 AMOLED 1.8" (mic, speaker, IMU, battery, Wi-Fi), a 3-key
+- Ours: Keanu's Waveshare ESP32-S3 AMOLED 1.8" (mic, speaker, IMU, battery, Wi-Fi; enclosed, no
+  header to wire), the Elegoo kit's bare ESP32-S3-N16R8, a 3-key
   keypad with a knob, ELEGOO Super Starter Kit (UNO R3 Project: DHT11, HC-SR04, photoresistors, LEDs,
   transistors, diodes, fan motor, buttons, IR remote; no PIR, IMU or mic), Szymon's Raspberry Pi +
   HTN badge. Full list: `firmware/PARTS.md`.
@@ -77,7 +78,10 @@ agents), Factory Droid (trigger you designed, limited access, visible plans/diff
   Implications: Night Watch needs a non-PIR trigger (MPU6050 head-off-pillow, sound sensor, or the
   HC-SR04 ultrasonic; the ELEGOO kit has no PIR); hit sensors can be "tap = I'm fine" alongside key 2 (one per pillow); KY-001 can
   stand in for DHT11. Only one pillow is built (see decisions log).
-- Only sensors go in the pillow; the ESP32, power and USB stay on the nightstand (no base box).
+- In the pillow: the Uno with its sensors and the N16R8 "pillow node", which sends the Uno's lines
+  over ESP-NOW. Next to the bed: the Waveshare voice unit (mic, speaker, screen) on the laptop's
+  USB. Power dangles outside the pillow: the starter kit's 9 V battery in the Uno's barrel jack
+  (the Uno's 5V feeds the N16R8), a USB power bank as backup (see decisions log, PR #36).
   No LiPo or heater inside bedding. 3D printers (4, queued) for a vented sensor pod.
 - Keypad: key 1 hold-to-talk, key 2 "I'm fine" (cancels escalation), key 3 call family.
 - Lane split for hardware resolved Fri 23 Oct: see the decisions log.
@@ -184,6 +188,15 @@ Defaults in brackets are what's built; settle together, then log the answer belo
   app = `POST /api/pillows/{id}/ack`. Built in Night Watch (PR #21).
 - Sat 24 Oct: no base / pedestal box (Keanu). The booth ESP32, its power and USB sit on the
   nightstand, still outside the pillow; nothing else changes. Parts list in `firmware/PARTS.md`.
+- Sat 24 Oct: pillow senses, a bedside unit talks (Keanu, PR #36). The Waveshare is enclosed, so
+  the Uno can't be wired to it. The Uno + the bare N16R8 go in the pillow; the N16R8 sends every Uno
+  line over ESP-NOW (no access point, nothing beacons) to the Waveshare at the bedside, on the
+  laptop's USB. It prints them as `UNO {...}` and the talk key as `KEY talk`, so
+  `sim/audio_bridge.py --serial <Waveshare port>` is unchanged. Power dangles outside the pillow
+  on one cable: the starter kit's 9 V battery in the Uno's barrel jack, a USB power bank as backup.
+  No CONTRACT, backend or agent change. Adam's `buzz` command plays on the voice unit's speaker
+  (no buzzer in this layout). **Update (Keanu, same day): the Uno is dropped.** The sensors go
+  straight onto the N16R8's breadboard and it builds the same JSON line itself (Adyan, in progress).
 - Sat 24 Oct: reminders = the Routine agent (Adam; from talking to two older women outside the
   venue: what they forget is recurring commitments). Adam builds backend + voice; Szymon builds the
   app page, Keanu the buzzer. **Schema (live, migration `20261024185028_reminders`):** `reminders`

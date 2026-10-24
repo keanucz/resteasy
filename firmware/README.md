@@ -16,7 +16,10 @@
   `uv run sim/audio_bridge.py` makes it the speaker and mic for `voice/voice.py`
   (`PILLOW_AUDIO=pillow`). FQBN `esp32:esp32:esp32s3:CDCOnBoot=cdc`, no libraries to install.
   Also reads the Uno's sensor lines (below).
-- `espnow_relay/` + `libraries/PillowRadio/`: the laptop end of the ESP-NOW link.
+- `pillow_node/`: the Elegoo N16R8 **inside the pillow** next to the Uno: sends the Uno's lines to
+  the voice unit over ESP-NOW (the demo layout, below).
+- `espnow_relay/` + `libraries/PillowRadio/`: the laptop end of the ESP-NOW link when the voice
+  unit is in the pillow (the older layout).
 - `i2c_scan/`, `wifi_diag/`: one-off diagnostics (onboard bus = SDA 15 / SCL 14; Wi-Fi reasons).
 
 ## Connectivity: USB serial bridge (default)
@@ -31,6 +34,42 @@ python3 sim/serial_bridge.py --port /dev/ttyACM0 --server https://pillow.keanuc.
 
 The board prints `STATE {json}` lines; the bridge POSTs them and writes `CMD {json}` lines back.
 Comment out `SERIAL_BRIDGE` to use Wi-Fi instead (e.g. at home).
+
+## Demo layout: pillow node + bedside voice unit
+
+The Waveshare is enclosed (no header to wire), so it sits at the bedside on the laptop's USB, and
+the bare N16R8 goes in the pillow with the Uno. One power cable leaves the pillow; the battery
+dangles outside it (no lithium inside bedding).
+
+```
+PILLOW                                   BEDSIDE                        LAPTOP
+Uno ── TX, 1k/2k ──> N16R8 pillow_node ──ESP-NOW──> Waveshare voice_unit ──USB──> audio_bridge.py
+battery (outside) -> Uno; Uno 5V/GND -> N16R8 5V/GND            (mic, speaker, screen)
+```
+
+| Uno | | N16R8 |
+|---|---|---|
+| pin 1 (TX) | 1 kΩ in series, then 2 kΩ to GND at the S3 end | GPIO18 |
+| 5V | | 5V |
+| GND | | GND |
+
+Never wire an S3 TX pin to Uno pin 0, and don't power the S3 from the Uno's 3.3V pin (too weak
+for the radio). Unplug the 5V wire before plugging the N16R8 into a laptop. A USB power bank in
+the Uno runs both for hours (~150 mA). The starter kit's 9V battery in the barrel jack works too,
+for ~1-2 h: put in a fresh one before the demo.
+
+```bash
+L="--libraries firmware/libraries --build-property compiler.cpp.extra_flags=-DPILLOW_LINK=1"
+arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc $L firmware/voice_unit   # bedside
+arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc --libraries firmware/libraries firmware/pillow_node
+uv run sim/audio_bridge.py --serial <the Waveshare's port> --server https://pillow.keanuc.net
+```
+
+The voice unit's audio stays on USB; the radio carries only the pillow's lines (`UNO {...}`) and
+its talk key (`"talk":1` after `"talk":0`, acked, arrives as `KEY talk`). The node's LED: red =
+looking for the voice unit, green = paired, blue blink = a line sent. On its USB (115200) it
+prints what it forwards, and a line typed there is forwarded as if the Uno sent it (`STATS`:
+link health).
 
 ## Wireless voice link: ESP-NOW relay (no access point)
 
@@ -72,6 +111,9 @@ UDP. A hidden SSID still beacons; **it is a hotspot, so never at the venue**. Th
 the access point off and starts it only on the serial command `AP ON`.
 
 ### The Uno (pillow sensors)
+
+In the demo layout the Uno is wired to the pillow node instead (above). This section is the older
+layout, for a voice unit with a reachable header.
 
 The pillow's sensors are on the starter kit's Arduino Uno R3, which has no radio. The voice unit
 reads the Uno's serial output and sends each line on as `UNO <line>` (over the link and its own
