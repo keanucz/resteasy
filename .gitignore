@@ -5,3 +5,4 @@ __pycache__/
 node_modules/
 coord/.tokens
 coord/.bus_last_*
+firmware/**/secrets.h
