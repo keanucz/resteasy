@@ -1,8 +1,9 @@
 """Night Watch against the simulator's scripted nights (sim/pillow_sim.py) and a few edge cases."""
 
 import importlib.util
-from datetime import datetime
+from datetime import datetime, time
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -23,8 +24,9 @@ _spec = importlib.util.spec_from_file_location("pillow_sim", _SIM)
 sim = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(sim)
 
-NIGHT = datetime(2026, 10, 24, 23, 0).timestamp()  # scenarios start at 23:00 local
-DAY = datetime(2026, 10, 24, 13, 0).timestamp()
+TZ = ZoneInfo("America/Los_Angeles")  # NightWatchConfig default
+NIGHT = datetime(2026, 10, 24, 23, 0, tzinfo=TZ).timestamp()  # scenarios start at 23:00 there
+DAY = datetime(2026, 10, 24, 13, 0, tzinfo=TZ).timestamp()
 
 
 def run(phases, *, checkin="silent", start=NIGHT, ack_after_min=None, config=None, end_min=None):
@@ -135,3 +137,33 @@ def test_a_brief_head_lift_is_not_a_bed_exit():
     phases = [(0, sim.ASLEEP), (10, sim.OUT_OF_BED), (10.33, sim.ASLEEP), (20, sim.ASLEEP)]  # 20 s off
     _, log = run(phases)
     assert "bed_exit" not in events(log)
+
+
+def test_quiet_hours_follow_her_timezone_not_the_servers():
+    london = NightWatchConfig(timezone="Europe/London")
+    start = datetime(2026, 10, 24, 23, 0, tzinfo=ZoneInfo("Europe/London")).timestamp()  # 15:00 in LA
+    _, log = run(scenario("no_return"), start=start, config=london)
+    assert any(isinstance(a, StartCheckin) for _, a in log)
+
+
+def test_equal_quiet_start_and_end_watch_all_day():
+    always = NightWatchConfig(quiet_hours=(time(0), time(0)))
+    _, log = run(scenario("no_return"), start=DAY, config=always)
+    assert any(isinstance(a, StartCheckin) for _, a in log)
+
+
+def test_paused_monitoring_starts_no_watch():
+    _, log = run(scenario("no_return"), config=NightWatchConfig(paused=True))
+    assert not any(isinstance(a, (StartCheckin, Alert)) for _, a in log)
+
+
+@pytest.mark.parametrize("saved, next_state", [(State.IN_BED, State.UP), (State.CHECK_IN, State.CHECK_IN)])
+def test_resume_after_restart(saved, next_state):
+    nw = NightWatch()
+    nw.resume(saved, since=NIGHT)
+    acts = []
+    for second in range(0, 40):  # 40 s with her head off the pillow
+        acts += nw.observe({"ts": NIGHT + 60 + second, **sim.EMPTY_ROOM})
+    assert nw.state is next_state  # in bed -> she gets up; mid check-in -> asked again at once
+    if saved is State.CHECK_IN:
+        assert isinstance(acts[1], StartCheckin)

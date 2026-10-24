@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import acreate_client
 
+from app.agents.watch_service import WatchService
 from app.core.app_constants import API_PREFIX, CORS_ALLOW_HEADERS, CORS_ALLOW_METHODS
 from app.core.config import get_settings
 from app.routers import api_router
@@ -21,6 +22,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if settings.supabase_configured
         else None
     )
+    app.state.night_watch = WatchService()
     yield
 
 

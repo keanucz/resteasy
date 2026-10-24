@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["anthropic", "httpx>=0.27", "numpy>=1.26", "sounddevice>=0.4", "websockets>=14"]
+# dependencies = ["anthropic", "httpx>=0.27", "numpy>=1.26", "sounddevice>=0.4", "tzdata", "websockets>=14"]
 # ///
 """Play a simulated night through Night Watch on one laptop, no server or pillow needed.
 
@@ -23,6 +23,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "sim"), str(ROOT / "backend"), str(ROOT / "voice")]
@@ -46,7 +47,7 @@ def main() -> None:
     parser.add_argument("--checkin", default="silent", choices=["silent", "fine", "voice"],
                         help="how the check-in goes: nobody answers, she says fine, or you answer live")
     parser.add_argument("--contact", default="Sarah")
-    parser.add_argument("--start", default="23:00", help="simulated clock at the start, HH:MM")
+    parser.add_argument("--start", default="23:00", help="simulated clock at the start, HH:MM, in her timezone")
     parser.add_argument("--speed", type=float, default=120, help="simulated seconds per real second")
     parser.add_argument("--ack-after-min", type=float, help="Sarah taps her pillow this long after alerts start")
     parser.add_argument("--list", action="store_true")
@@ -64,15 +65,17 @@ def main() -> None:
 
         judge.warm_up_in_background()  # SDK import is slow: pay it now, not when she first answers
 
+    cfg = NightWatchConfig(contacts=(args.contact,))
+    tz = ZoneInfo(cfg.timezone)  # Night Watch judges "night" in her timezone, not the laptop's
     hh, mm = map(int, args.start.split(":"))
-    start = datetime.now().replace(hour=hh, minute=mm, second=0, microsecond=0).timestamp()
+    start = datetime.now(tz).replace(hour=hh, minute=mm, second=0, microsecond=0).timestamp()
     _, phases = pillow_sim.SCENARIOS[args.scenario]
-    nw = NightWatch(NightWatchConfig(contacts=(args.contact,)))
+    nw = NightWatch(cfg)
     escalated_at = None
 
     def show(ts: float, acts: list) -> None:
         for a in acts:
-            clock = datetime.fromtimestamp(ts).strftime("%H:%M:%S")
+            clock = datetime.fromtimestamp(ts, tz).strftime("%H:%M:%S")
             if isinstance(a, Event):
                 print(f"{clock}  event    {a.type} {a.data or ''}")
             elif isinstance(a, Command):

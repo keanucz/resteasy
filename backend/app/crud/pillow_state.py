@@ -35,6 +35,12 @@ async def save_state(db: AsyncClient, pillow_id: str, state: DeviceState) -> Pil
     return PillowState(**response.data[0])
 
 
+async def set_night_state(db: AsyncClient, pillow_id: str, night_state: str, since: float) -> None:
+    """Record Night Watch's state for the pillow, so the app and a restarted server can see it."""
+    row = {"night_state": night_state, "state_since": datetime.fromtimestamp(since, UTC).isoformat()}
+    await db.table(PILLOW_STATE_TABLE).update(row).eq("pillow_id", pillow_id).execute()
+
+
 async def get_state(db: AsyncClient, pillow_id: str) -> PillowState | None:
     """Return the pillow's latest state, or None if it has never reported."""
     row = await fetch_one(db.table(PILLOW_STATE_TABLE).select("*").eq("pillow_id", pillow_id))

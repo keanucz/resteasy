@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Request, status
 from supabase import AsyncClient
 
+from app.agents.watch_service import WatchService
 from app.core.app_constants import SUPABASE_NOT_CONFIGURED
 from app.crud.pillows import get_pillow
 from app.schemas.pillow import Pillow
@@ -30,3 +31,11 @@ async def existing_pillow(pillow_id: str, db: SupabaseDep) -> Pillow:
 
 
 PillowDep = Annotated[Pillow, Depends(existing_pillow)]
+
+
+def get_night_watch(request: Request) -> WatchService:
+    """Return the process-wide Night Watch service (one watch per pillow)."""
+    return request.app.state.night_watch
+
+
+NightWatchDep = Annotated[WatchService, Depends(get_night_watch)]

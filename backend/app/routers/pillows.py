@@ -2,8 +2,9 @@
 
 from fastapi import APIRouter, HTTPException, status
 
-from app.core.dependencies import PillowDep, SupabaseDep
+from app.core.dependencies import NightWatchDep, PillowDep, SupabaseDep
 from app.crud.pillow_state import get_state, save_state
+from app.schemas.checkin import CheckinResult, NightStatus
 from app.schemas.pillow import Pillow
 from app.schemas.pillow_state import DeviceState, PillowState
 
@@ -17,9 +18,13 @@ async def read_pillow(pillow: PillowDep) -> Pillow:
 
 
 @router.post("/state")
-async def report_state(pillow: PillowDep, state: DeviceState, db: SupabaseDep) -> PillowState:
-    """Store the device's latest sensor report (CONTRACT.md section 1)."""
-    return await save_state(db, pillow.id, state)
+async def report_state(
+    pillow: PillowDep, state: DeviceState, db: SupabaseDep, night_watch: NightWatchDep
+) -> PillowState:
+    """Store the device's latest sensor report (CONTRACT.md section 1) and let Night Watch act on it."""
+    stored = await save_state(db, pillow.id, state)
+    await night_watch.report_state(db, pillow, state)
+    return stored
 
 
 @router.get("/state")
@@ -30,3 +35,12 @@ async def read_state(pillow: PillowDep, db: SupabaseDep) -> PillowState:
         detail = f"Pillow {pillow.id} has no state yet"
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     return state
+
+
+@router.post("/checkin")
+async def report_checkin(
+    pillow: PillowDep, result: CheckinResult, db: SupabaseDep, night_watch: NightWatchDep
+) -> NightStatus:
+    """The base laptop's voice check-in finished: escalate to family, or she said she's fine."""
+    night_state = await night_watch.checkin_done(db, pillow, result.escalate, result.reason)
+    return NightStatus(night_state=night_state)

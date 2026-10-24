@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, time
 from enum import StrEnum
+from zoneinfo import ZoneInfo
 
 LAY_DOWN_S = 5  # head on this long = lying down / back in bed (coord/CONTRACT.md 2)
 BED_EXIT_S = 30  # head off this long = out of bed
@@ -46,7 +47,10 @@ class NightWatchConfig:
     resident: str = "Mum"
     contacts: tuple[str, ...] = ("Sarah",)  # alert order
     checkin_timeout_min: float = 20  # week one fixed; later the personal baseline (CONTEXT.md)
-    quiet_hours: tuple[int, int] | None = (22, 7)  # local hours; None = always night (daytime demos)
+    timezone: str = "America/Los_Angeles"  # the resident's; decides what "night" means
+    # Watched hours in her timezone. start == end, or None, watches all day (daytime demos).
+    quiet_hours: tuple[time, time] | None = (time(22), time(7))
+    paused: bool = False  # she (or the owner) paused monitoring: start no new watch
     path_light: dict = field(default_factory=lambda: dict(PATH_LIGHT_ON))
     step_wait_min: float = 2  # between escalation steps
 
@@ -115,8 +119,23 @@ class NightWatch:
         self._next_step_at = math.inf
         self._alerted: list[str] = []  # contacts told so far, to tell them when she's okay
         self._reason = ""  # why we escalated, repeated in every alert
+        self._acked = False  # a family member acknowledged this escalation
 
     # ---------- inputs ----------
+
+    def resume(self, state: State, since: float) -> None:
+        """Pick up after a server restart from `pillow_state.night_state` and `state_since`.
+
+        A check-in or escalation in flight can't be resumed exactly: both become an immediate new
+        check-in, because asking her again is safer than going quiet.
+        """
+        self._head_on = state is State.IN_BED
+        if state in (State.AWAKE, State.IN_BED):
+            self.state = state
+            return
+        self.state = State.UP
+        self._left_at = since
+        self._checkin_due = since + self.cfg.checkin_timeout_min * 60 if state is State.UP else -math.inf
 
     def observe(self, s: dict) -> list[Action]:
         """Take one state message from her pillow (coord/CONTRACT.md 1) and return what to do."""
@@ -147,8 +166,9 @@ class NightWatch:
 
     def family_acknowledged(self, ts: float, contact: str) -> list[Action]:
         """A family member tapped their pillow (or replied): stop alerting anyone else."""
-        if self.state is not State.ESCALATING:
-            return []
+        if self.state is not State.ESCALATING or self._acked:
+            return []  # a held tap arrives twice a second; only the first one counts
+        self._acked = True
         self._ladder, self._next_step_at = [], math.inf
         return [Event(ts, "family_ack", {"contact": contact}),
                 Say(f"{contact} knows, and is checking on you.")]
@@ -226,6 +246,7 @@ class NightWatch:
 
     def _escalate(self, ts: float, reason: str) -> list[Action]:
         self.state = State.ESCALATING
+        self._acked = False
         self._ladder = [("pillow", self.cfg.contacts[0])] if self.cfg.family_pillow_id else []
         for contact in self.cfg.contacts:
             self._ladder += [("sms", contact), ("call", contact)]
@@ -238,7 +259,7 @@ class NightWatch:
             return [Event(ts, "ladder_exhausted", {})]
         channel, contact = self._ladder.pop(0)
         self._next_step_at = ts + self.cfg.step_wait_min * 60
-        left = datetime.fromtimestamp(self._left_at).strftime("%H:%M")
+        left = datetime.fromtimestamp(self._left_at, ZoneInfo(self.cfg.timezone)).strftime("%H:%M")
         away = round((ts - self._left_at) / 60)
         message = (f"{self.cfg.resident} got up at {left} and hasn't come back to bed ({away} min). "
                    f"{self._reason}")
@@ -267,8 +288,11 @@ class NightWatch:
         self._ladder, self._next_step_at, self._alerted = [], math.inf, []
 
     def _is_night(self, ts: float) -> bool:
-        if self.cfg.quiet_hours is None:
+        """Whether a new watch may start at `ts`: inside her quiet hours and not paused."""
+        if self.cfg.paused:
+            return False
+        if self.cfg.quiet_hours is None or self.cfg.quiet_hours[0] == self.cfg.quiet_hours[1]:
             return True
         start, end = self.cfg.quiet_hours
-        hour = datetime.fromtimestamp(ts).hour
-        return hour >= start or hour < end if start > end else start <= hour < end
+        now = datetime.fromtimestamp(ts, ZoneInfo(self.cfg.timezone)).time()
+        return now >= start or now < end if start > end else start <= now < end
