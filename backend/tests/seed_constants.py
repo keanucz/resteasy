@@ -9,3 +9,7 @@ TEST_USER_ID = "00000000-0000-0000-0000-000000000012"
 UNKNOWN_PILLOW_ID = "no-such-pillow"
 # A contact id with no residents, for empty-list checks
 UNKNOWN_CONTACT_ID = "00000000-0000-0000-0000-0000000000ff"
+# A well-formed resident id that is never seeded, for 404 checks
+UNKNOWN_RESIDENT_ID = "00000000-0000-0000-0000-0000000000fe"
+# resident_contacts.priority for a throwaway plain contact of the test resident (after the owner's 1)
+TEST_HELPER_PRIORITY = 99

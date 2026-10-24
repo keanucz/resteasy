@@ -4,12 +4,12 @@ Every request here carries the app's Supabase access token (`Authorization: Bear
 the agents' shared token, which must not ship inside the app.
 """
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter
 
-from app.core.app_constants import FAMILY_APP_AGENT, NOT_LINKED, NOT_OWNER
-from app.core.dependencies import PillowDep, SupabaseDep, UserIdDep, resident_of
+from app.core.app_constants import FAMILY_APP_AGENT, SETTINGS_CHANGE_INTENT
+from app.core.dependencies import PillowDep, SupabaseDep, UserIdDep, require_role, resident_of
 from app.core.voice_constants import VOICES
-from app.crud.accounts import get_contact_for_user, get_role, list_account_pillows
+from app.crud.accounts import get_contact_for_user, list_account_pillows
 from app.crud.night_log import log_action
 from app.crud.residents import update_resident
 from app.schemas.account import Account, AccountPillow, Preferences, PreferencesPatch, Voice
@@ -43,7 +43,7 @@ async def list_voices() -> list[Voice]:
 async def read_preferences(user_id: UserIdDep, pillow: PillowDep, db: SupabaseDep) -> Preferences:
     """The settings the app shows: voice, quiet hours, check-in timeout and whether watching is paused."""
     resident = await resident_of(db, pillow)
-    await _require_role(db, user_id, resident["id"], owner=False)
+    await require_role(db, user_id, resident["id"], owner=False)
     return Preferences(**{key: resident[key] for key in PREFERENCE_KEYS})
 
 
@@ -53,17 +53,11 @@ async def update_preferences(
 ) -> Preferences:
     """Change any of the preferences. Owner only; the change shows in the app's live agent log."""
     resident = await resident_of(db, pillow)
-    await _require_role(db, user_id, resident["id"], owner=True)
+    await require_role(db, user_id, resident["id"], owner=True)
     fields = patch.model_dump(exclude_none=True, mode="json")
     await update_resident(db, resident["id"], fields)
     if fields:
-        await log_action(db, pillow.id, FAMILY_APP_AGENT, "change settings", tool="preferences", args=fields)
+        await log_action(
+            db, pillow.id, FAMILY_APP_AGENT, SETTINGS_CHANGE_INTENT, tool="preferences", args=fields
+        )
     return Preferences(**{key: resident[key] for key in PREFERENCE_KEYS} | fields)
-
-
-async def _require_role(db: SupabaseDep, user_id: str, resident_id: str, *, owner: bool) -> None:
-    """403 unless the user's contact looks after this resident (as the owner, when `owner`)."""
-    contact = await get_contact_for_user(db, user_id)
-    role = await get_role(db, contact["id"], resident_id) if contact else None
-    if role is None or (owner and role != "owner"):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=NOT_OWNER if role else NOT_LINKED)

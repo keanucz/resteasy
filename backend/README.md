@@ -33,6 +33,8 @@ uv run ruff check .  # lint
 | `GET` `POST` | `/api/pillows/{pillow_id}/brief` | family agent reads the latest Morning Brief; the droid posts it (bearer); diff goes through the Guardian |
 | `PATCH` | `/api/pillows/{pillow_id}/settings` | family agent: quiet hours / timeout, Guardian-bounded (bearer) |
 | `GET` `POST` | `/api/pillows/{pillow_id}/goodnight` | family agent queues a goodnight message; the base laptop reads it and posts `/goodnight/played` (bearer) |
+| `GET` `PUT` | `/api/residents/{resident_id}/watch-hours` | app, "when it watches": `{"quiet_start": "22:00", "quiet_end": "07:00"}`, equal times watch all day. Any linked login reads, the owner writes (app login bearer) |
+| `GET` `PUT` | `/api/residents/{resident_id}/checkin-wait` | app, "before telling family": `{"checkin_timeout_min": 20}`, 10 to 30 (422 outside). Same access as above |
 
 Unknown pillows get 404; a server without Supabase credentials answers 503 on these routes.
 

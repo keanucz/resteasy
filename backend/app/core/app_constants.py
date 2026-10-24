@@ -34,10 +34,15 @@ REMINDERS_TICK_S = 15
 # Detail returned with a 503 when CHECKIN_TOKEN is not set (POST /checkin fails closed)
 CHECKIN_TOKEN_NOT_CONFIGURED = "CHECKIN_TOKEN is not configured on this server"
 
-# Details returned when an app request has no valid Supabase login, or isn't the pillow's owner
+# Details returned when an app request has no valid Supabase login, or isn't the resident's owner
 NOT_SIGNED_IN = "Sign in to the app first"
-NOT_OWNER = "Only the pillow's owner can change its settings"
-NOT_LINKED = "This login does not look after that pillow"
+NOT_OWNER = "Only the owner can change these settings"
+NOT_LINKED = "This login does not look after them"
+
+# resident_contacts.role of the one login that may change a resident's settings
+OWNER_ROLE = "owner"
 
 # agent_log.agent for changes made from the family app, so the app's live log can say who did it
 FAMILY_APP_AGENT = "family_app"
+# agent_log.intent for a settings change made from the family app
+SETTINGS_CHANGE_INTENT = "change settings"

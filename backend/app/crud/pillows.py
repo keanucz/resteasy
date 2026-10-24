@@ -25,3 +25,9 @@ async def list_pillows_for_contact(db: AsyncClient, contact_id: UUID) -> list[Pi
         return []
     pillows = await db.table(PILLOWS_TABLE).select("*").in_("resident_id", resident_ids).order("id").execute()
     return [Pillow(**row) for row in pillows.data]
+
+
+async def list_pillow_ids_for_resident(db: AsyncClient, resident_id: str) -> list[str]:
+    """Return the ids of the resident's pillows (none before a pillow is set up for them)."""
+    response = await db.table(PILLOWS_TABLE).select("id").eq("resident_id", resident_id).order("id").execute()
+    return [row["id"] for row in response.data]

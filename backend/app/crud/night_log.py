@@ -12,6 +12,7 @@ from app.crud.crud_constants import (
     NIGHT_TRIPS_VIEW,
     NOTIFICATIONS_TABLE,
 )
+from app.crud.pillows import list_pillow_ids_for_resident
 
 
 def _iso(ts: float) -> str:
@@ -57,16 +58,44 @@ async def log_action(
     """Append one agent decision to agent_log, which the family app shows live.
 
     `guardian` is the Guardian's verdict on it ("allowed" / "blocked"), None for a plain note."""
-    row = {"pillow_id": pillow_id, "agent": agent, "intent": intent, "tool": tool, "args": args or {},
-           "incident_id": incident_id, "guardian": guardian, "reason": reason}
+    row = {
+        "pillow_id": pillow_id,
+        "agent": agent,
+        "intent": intent,
+        "tool": tool,
+        "args": args or {},
+        "incident_id": incident_id,
+        "guardian": guardian,
+        "reason": reason,
+    }
     await db.table(AGENT_LOG_TABLE).insert(row).execute()
+
+
+async def log_resident_action(
+    db: AsyncClient,
+    resident_id: str,
+    agent: str,
+    intent: str,
+    tool: str | None = None,
+    args: dict | None = None,
+) -> None:
+    """Append the action to the agent log of each of the resident's pillows.
+
+    agent_log rows belong to a pillow, so a resident with no pillow yet gets no row."""
+    for pillow_id in await list_pillow_ids_for_resident(db, resident_id):
+        await log_action(db, pillow_id, agent, intent, tool=tool, args=args)
 
 
 async def list_events_between(db: AsyncClient, pillow_id: str, start_iso: str, end_iso: str) -> list[dict]:
     """The pillow's events in [start, end), oldest first (one night, for the summary)."""
     response = await (
-        db.table(EVENTS_TABLE).select("event_type, device_ts, data").eq("pillow_id", pillow_id)
-        .gte("device_ts", start_iso).lt("device_ts", end_iso).order("device_ts").execute()
+        db.table(EVENTS_TABLE)
+        .select("event_type, device_ts, data")
+        .eq("pillow_id", pillow_id)
+        .gte("device_ts", start_iso)
+        .lt("device_ts", end_iso)
+        .order("device_ts")
+        .execute()
     )
     return response.data
 
@@ -74,8 +103,13 @@ async def list_events_between(db: AsyncClient, pillow_id: str, start_iso: str, e
 async def list_trips_between(db: AsyncClient, pillow_id: str, start_iso: str, end_iso: str) -> list[dict]:
     """The pillow's completed trips (bed_exit to bed_return) that started in [start, end), oldest first."""
     response = await (
-        db.table(NIGHT_TRIPS_VIEW).select("left_at, trip_min").eq("pillow_id", pillow_id)
-        .gte("left_at", start_iso).lt("left_at", end_iso).order("left_at").execute()
+        db.table(NIGHT_TRIPS_VIEW)
+        .select("left_at, trip_min")
+        .eq("pillow_id", pillow_id)
+        .gte("left_at", start_iso)
+        .lt("left_at", end_iso)
+        .order("left_at")
+        .execute()
     )
     return response.data
 
@@ -85,8 +119,13 @@ async def list_recent_events_of_type(
 ) -> list[dict]:
     """The pillow's latest events of the given types, oldest first."""
     response = await (
-        db.table(EVENTS_TABLE).select("event_type, device_ts, data").eq("pillow_id", pillow_id)
-        .in_("event_type", types).order("device_ts", desc=True).limit(limit).execute()
+        db.table(EVENTS_TABLE)
+        .select("event_type, device_ts, data")
+        .eq("pillow_id", pillow_id)
+        .in_("event_type", types)
+        .order("device_ts", desc=True)
+        .limit(limit)
+        .execute()
     )
     return list(reversed(response.data))
 
@@ -94,8 +133,13 @@ async def list_recent_events_of_type(
 async def list_agent_log_between(db: AsyncClient, pillow_id: str, start_iso: str, end_iso: str) -> list[dict]:
     """What the agents did in [start, end), oldest first: intent, tool, Guardian verdict, reason."""
     response = await (
-        db.table(AGENT_LOG_TABLE).select("ts, agent, intent, tool, args, guardian, reason")
-        .eq("pillow_id", pillow_id).gte("ts", start_iso).lt("ts", end_iso).order("ts").execute()
+        db.table(AGENT_LOG_TABLE)
+        .select("ts, agent, intent, tool, args, guardian, reason")
+        .eq("pillow_id", pillow_id)
+        .gte("ts", start_iso)
+        .lt("ts", end_iso)
+        .order("ts")
+        .execute()
     )
     return response.data
 
@@ -103,7 +147,12 @@ async def list_agent_log_between(db: AsyncClient, pillow_id: str, start_iso: str
 async def latest_log_row(db: AsyncClient, pillow_id: str, agent: str) -> dict | None:
     """The most recent agent_log row written by `agent` (e.g. the last Morning Brief), or None."""
     response = await (
-        db.table(AGENT_LOG_TABLE).select("ts, agent, intent, args, guardian, reason")
-        .eq("pillow_id", pillow_id).eq("agent", agent).order("ts", desc=True).limit(1).execute()
+        db.table(AGENT_LOG_TABLE)
+        .select("ts, agent, intent, args, guardian, reason")
+        .eq("pillow_id", pillow_id)
+        .eq("agent", agent)
+        .order("ts", desc=True)
+        .limit(1)
+        .execute()
     )
     return response.data[0] if response.data else None

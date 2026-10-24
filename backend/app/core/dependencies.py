@@ -2,6 +2,7 @@
 
 import secrets
 from typing import Annotated, Any
+from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException, Request, status
 from supabase import AsyncClient
@@ -9,8 +10,16 @@ from supabase_auth.errors import AuthError
 
 from app.agents.reminders import ReminderService
 from app.agents.watch_service import WatchService
-from app.core.app_constants import CHECKIN_TOKEN_NOT_CONFIGURED, NOT_SIGNED_IN, SUPABASE_NOT_CONFIGURED
+from app.core.app_constants import (
+    CHECKIN_TOKEN_NOT_CONFIGURED,
+    NOT_LINKED,
+    NOT_OWNER,
+    NOT_SIGNED_IN,
+    OWNER_ROLE,
+    SUPABASE_NOT_CONFIGURED,
+)
 from app.core.config import get_settings
+from app.crud.accounts import get_role_for_user
 from app.crud.pillows import get_pillow
 from app.crud.residents import get_resident
 from app.schemas.pillow import Pillow
@@ -75,8 +84,11 @@ def require_checkin_token(authorization: Annotated[str | None, Header()] = None)
     if not expected:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=CHECKIN_TOKEN_NOT_CONFIGURED)
     if not secrets.compare_digest((authorization or "").encode(), f"Bearer {expected}".encode()):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid check-in token",
-                            headers={"WWW-Authenticate": "Bearer"})
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid check-in token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 async def current_user_id(db: SupabaseDep, authorization: Annotated[str | None, Header()] = None) -> str:
@@ -94,3 +106,38 @@ async def current_user_id(db: SupabaseDep, authorization: Annotated[str | None, 
 
 
 UserIdDep = Annotated[str, Depends(current_user_id)]
+
+
+async def require_role(db: AsyncClient, user_id: str, resident_id: str, *, owner: bool) -> None:
+    """403 unless the login's contact looks after this resident (as the owner, when `owner`)."""
+    role = await get_role_for_user(db, user_id, resident_id)
+    if role is None or (owner and role != OWNER_ROLE):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=NOT_OWNER if role else NOT_LINKED)
+
+
+async def existing_resident(resident_id: UUID, db: SupabaseDep) -> dict[str, Any]:
+    """Resolve the `resident_id` path parameter to the resident's row, or 404."""
+    resident = await get_resident(db, str(resident_id))
+    if resident is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Resident {resident_id} not found")
+    return resident
+
+
+async def viewed_resident(
+    user_id: UserIdDep, resident: Annotated[dict[str, Any], Depends(existing_resident)], db: SupabaseDep
+) -> dict[str, Any]:
+    """The resident in the path, for a login that looks after them (owner or contact)."""
+    await require_role(db, user_id, resident["id"], owner=False)
+    return resident
+
+
+async def owned_resident(
+    user_id: UserIdDep, resident: Annotated[dict[str, Any], Depends(existing_resident)], db: SupabaseDep
+) -> dict[str, Any]:
+    """The resident in the path, for the login of their owner only."""
+    await require_role(db, user_id, resident["id"], owner=True)
+    return resident
+
+
+ViewedResidentDep = Annotated[dict[str, Any], Depends(viewed_resident)]
+OwnedResidentDep = Annotated[dict[str, Any], Depends(owned_resident)]
