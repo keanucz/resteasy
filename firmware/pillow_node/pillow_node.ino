@@ -11,24 +11,32 @@
 //   head switch plate: two foil-faced cardboard sheets, a head pressing them together closes the
 //     circuit. One sheet -> PLATE_PIN (INPUT_PULLUP, pressed reads LOW), the other -> GND.
 //   (room light, temp/humidity, motion: not wired yet, reported as null)
+// Buzzer: the kit's passive buzzer, BUZZER_PIN -> 100 ohm -> buzzer +, buzzer - -> GND. It plays
+//   the server's `buzz` command ("BUZZ chime 1", from the voice unit over ESP-NOW: firmware/libraries/
+//   PillowBuzz). Our hellos tell the voice unit a buzzer is here, so it doesn't play the same sound
+//   on its speaker too. No buzzer wired: set BUZZER_PIN to -1 and the voice unit plays it instead.
 //
 // Power: the node on its own USB cable from the power bank outside the pillow (no lithium in bedding).
 //
 // RGB LED: red = looking for the voice unit, green = paired, blue blink = a line sent.
 // USB (115200, debugging only): every forwarded line, link events, STATS every 30 s. A JSON line
-// typed on USB is forwarded as if the sensors produced it: a bench test. "STATS" prints link health.
+// typed on USB is forwarded as if the sensors produced it: a bench test. "STATS" prints link health,
+// "BUZZ chime 1" plays the buzzer.
 //
 // Build: arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc --libraries firmware/libraries firmware/pillow_node
 // The voice unit must be built with PILLOW_LINK=1, and both with the same secrets.h.
 
+#include <PillowBuzz.h>
 #include <PillowRadio.h>
 #include "driver/gpio.h"
 
-#define PLATE_PIN 4  // <- one foil sheet; the other sheet -> GND
+#define PLATE_PIN 4   // <- one foil sheet; the other sheet -> GND
+#define BUZZER_PIN 5  // -> 100 ohm -> passive buzzer; -1 = none wired
+const uint8_t HELLO_HAS_BUZZER = 2;  // bit in our hellos' app byte (firmware/libraries/PillowRadio)
 
 const uint32_t REPORT_MS = 500;        // the contract's ~2 reports per second
 const uint32_t PLATE_DEBOUNCE_MS = 150; // foil bounce and a head shifting; meaning is the server's
-const size_t LINE_MAX = 200;
+const size_t STATE_LINE_MAX = 200;
 const uint32_t STATS_MS = 30000, BLINK_MS = 40;
 const uint8_t LED_LEVEL = 24;  // of 255: visible through the pillow, not a night light
 
@@ -42,8 +50,48 @@ void showLink() {
 #endif
 }
 
-// Nothing comes back from the voice unit but hellos: it has no commands for the pillow.
-void onRadio(char, const uint8_t *, size_t) {}
+// ---------- buzzer ----------
+void buzzerOut(uint16_t hz) {
+#if BUZZER_PIN >= 0
+  if (hz) tone(BUZZER_PIN, hz);
+  else noTone(BUZZER_PIN);
+#endif
+}
+
+buzz::Player buzzer(buzzerOut);
+// A BUZZ from the radio task, picked up by loop(): the player is only touched from loop()
+portMUX_TYPE buzzMux = portMUX_INITIALIZER_UNLOCKED;
+bool buzzPending = false;
+buzz::Pattern buzzPattern = buzz::CHIME;
+int buzzRepeat = 1;
+
+void requestBuzz(const String &cmd) {
+  buzz::Pattern pattern;
+  int repeat;
+  if (!buzz::parse(cmd, pattern, repeat)) return;
+  portENTER_CRITICAL(&buzzMux);
+  buzzPattern = pattern;
+  buzzRepeat = repeat;
+  buzzPending = true;
+  portEXIT_CRITICAL(&buzzMux);
+}
+
+void startPendingBuzz() {
+  portENTER_CRITICAL(&buzzMux);
+  bool pending = buzzPending;
+  buzz::Pattern pattern = buzzPattern;
+  int repeat = buzzRepeat;
+  buzzPending = false;
+  portEXIT_CRITICAL(&buzzMux);
+  if (!pending) return;
+  Serial.printf("buzz: %s x%d\n", pattern.notes == buzz::CHIME.notes ? "chime" : "alert", repeat);
+  buzzer.start(pattern, repeat);
+}
+
+// From the voice unit: hellos, and C packets (acked, once each): "BUZZ chime 1". On the radio task.
+void onRadio(char type, const uint8_t *data, size_t len) {
+  if (type == radio::PKT_CMD) requestBuzz(String((const char *)data, len));
+}
 
 // The talk key's value in a line like {"head_on":1,...,"talk":0,...}: 1, 0, or -1 if absent
 int talkKey(const String &line) {
@@ -64,6 +112,10 @@ void printStats() {
 void forward(const String &line) {
   if (line == "STATS") {  // typed on USB
     printStats();
+    return;
+  }
+  if (line.startsWith("BUZZ ")) {  // typed on USB
+    requestBuzz(line);
     return;
   }
   String out = "UNO " + line;
@@ -101,7 +153,7 @@ bool readPlate(uint32_t now) {
 // The same line the Uno sketch printed, so nothing downstream changes. Unwired sensors are null.
 String stateLine() {
   String s;
-  s.reserve(LINE_MAX);
+  s.reserve(STATE_LINE_MAX);
   s += "{\"head_on\":";
   s += headOn ? "1" : "0";
   s += ",\"motion\":null,\"room_motion\":null,\"light\":null,\"temp_c\":null,\"humidity\":null";
@@ -117,7 +169,7 @@ void readUsb(String &line, bool &garbled) {
     if (ch != '\n') {
       if (ch == '\t') ch = ' ';
       if (ch < 0x20 || ch > 0x7e) garbled = true;
-      else if (line.length() < LINE_MAX) line += ch;
+      else if (line.length() < STATE_LINE_MAX) line += ch;
       continue;
     }
     if (!garbled && line.length()) forward(line);
@@ -129,9 +181,12 @@ void readUsb(String &line, bool &garbled) {
 void setup() {
   Serial.begin(115200);
   pinMode(PLATE_PIN, INPUT_PULLUP);
+#if BUZZER_PIN >= 0
+  radio::helloApp = HELLO_HAS_BUZZER;
+#endif
   bool ok = radio::begin(LINK_ESPNOW, false, onRadio);
-  Serial.printf("pillow_node: esp-now %s on channel %d, mac %s, plate gpio %d\n", ok ? "started" : "FAILED",
-                RADIO_CHANNEL, WiFi.macAddress().c_str(), PLATE_PIN);
+  Serial.printf("pillow_node: esp-now %s on channel %d, mac %s, plate gpio %d, buzzer gpio %d\n",
+                ok ? "started" : "FAILED", RADIO_CHANNEL, WiFi.macAddress().c_str(), PLATE_PIN, BUZZER_PIN);
 }
 
 void loop() {
@@ -146,6 +201,8 @@ void loop() {
     forward(stateLine());  // on change at once: don't make the server wait for the next tick
   }
   readUsb(usbLine, usbGarbled);
+  startPendingBuzz();
+  buzzer.update();
   showLink();
   if (now - lastStats >= STATS_MS) {
     lastStats = now;

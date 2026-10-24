@@ -24,8 +24,9 @@ off by itself when those stop (the bridge died), instead of streaming forever.
   uv run sim/audio_bridge.py --serial /dev/ttyACM0    # USB serial instead, or the ESP-NOW relay
                                                       # (firmware/espnow_relay) on that port
   uv run sim/audio_bridge.py --server https://pillow.keanuc.net --pillow-id mum
-                                                      # also forward the Uno's lines ("UNO {...}",
-                                                      # firmware/pillow_uno) as pillow state
+                                                      # also forward the pillow's lines ("UNO {...}",
+                                                      # firmware/pillow_node) as pillow state, and
+                                                      # pass `buzz` commands on to the voice unit
 """
 
 import argparse
@@ -61,6 +62,9 @@ SPK_UUID = "6e9d0003-5a1c-4c5e-9b7e-70696c6c6f77"
 CTRL_UUID = "6e9d0004-5a1c-4c5e-9b7e-70696c6c6f77"
 EVENT_UUID = "6e9d0005-5a1c-4c5e-9b7e-70696c6c6f77"
 MIC_KEEPALIVE_S = 2  # the relay gives up on the mic after 6 s without MIC ON
+COMMAND_POLL_S = 0.5  # coord/CONTRACT.md 3
+BUZZ_PATTERNS = ("chime", "alert")
+BUZZ_REPEAT_MAX = 3
 
 
 def ulaw_encode(pcm: bytes) -> bytes:
@@ -90,7 +94,8 @@ class Board:
         self.watchers: list[queue.Queue] = []
 
     def command(self, cmd: str) -> None:
-        """MIC ON / MIC OFF / VOL n / GAIN n. Raises OSError when the board isn't connected."""
+        """MIC ON / MIC OFF / VOL n / GAIN n / BUZZ pattern n. Raises OSError when the board isn't
+        connected."""
         raise NotImplementedError
 
     def speak(self, pcm: bytes) -> None:
@@ -324,6 +329,66 @@ def play(board: Board, conn: socket.socket, first: bytes) -> None:
     conn.sendall(b"DONE\n")
 
 
+def http_json(url: str) -> object:
+    req = urllib.request.Request(url, headers={"User-Agent": "calhacks-audio-bridge/1.0"})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        raw = resp.read()
+        return json.loads(raw) if raw else None
+
+
+def buzz_line(args: object) -> str | None:
+    """A buzz command's args ({"pattern": "chime", "repeat": 1}) as the voice unit's "BUZZ chime 1",
+    or None if they aren't a buzz it can play."""
+    if not isinstance(args, dict) or args.get("pattern") not in BUZZ_PATTERNS:
+        return None
+    try:
+        repeat = int(args.get("repeat", 1))
+    except (TypeError, ValueError):
+        repeat = 1
+    return f"BUZZ {args['pattern']} {min(max(repeat, 1), BUZZ_REPEAT_MAX)}"
+
+
+def poll_commands(board: Board, server: str, pillow_id: str) -> None:
+    """GET /api/pillows/{id}/commands (coord/CONTRACT.md 3) and pass `buzz` on to the voice unit, which
+    makes the sound itself (firmware/libraries/PillowBuzz): on the pillow's buzzer, or its speaker.
+    The other commands are for the pillow's motor and lights, which nothing here drives: ignored.
+    Like sim/serial_bridge.py, skips the backlog on start so a restart doesn't replay old buzzes."""
+    url = f"{server.rstrip('/')}/api/pillows/{pillow_id}/commands?after="
+    last_id = None
+    failures = 0
+    while True:
+        time.sleep(COMMAND_POLL_S)
+        try:
+            commands = http_json(url + str(last_id or 0)) or []
+            if failures:
+                print("audio_bridge: command polling recovered", flush=True)
+            failures = 0
+        except (urllib.error.URLError, OSError, ValueError) as err:
+            failures += 1
+            if failures in (1, 10, 100):
+                print(f"audio_bridge: GET commands failed ({err}), will keep trying", flush=True)
+            continue
+        if not isinstance(commands, list):
+            continue
+        if last_id is None:
+            last_id = max((int(cmd.get("id", 0)) for cmd in commands), default=0)
+            print(f"audio_bridge: skipped {len(commands)} old commands (up to id {last_id})", flush=True)
+            continue
+        for cmd in commands:
+            last_id = max(last_id, int(cmd.get("id", 0)))
+            if cmd.get("cmd") != "buzz":
+                continue
+            line = buzz_line(cmd.get("args"))
+            if line is None:
+                print(f"audio_bridge: buzz with bad args {cmd.get('args')!r}; skipped", flush=True)
+                continue
+            print(f"audio_bridge: {line}", flush=True)
+            try:
+                board.command(line)
+            except OSError as err:
+                print(f"audio_bridge: buzz: {err}", file=sys.stderr, flush=True)
+
+
 def stream(board: Board, kind: list, conn: socket.socket) -> None:
     q: queue.Queue = queue.Queue()
     board.subscribe(kind, q)
@@ -375,14 +440,16 @@ def main() -> None:
     parser.add_argument("--serial", metavar="PORT", help="use USB serial (e.g. /dev/ttyACM0) instead of Bluetooth")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--listen", default="127.0.0.1:8765", help="host:port for local clients")
-    parser.add_argument("--server", help="also POST the Uno's lines as pillow state to this server")
-    parser.add_argument("--pillow-id", default="mum", help="pillow id for those state posts")
+    parser.add_argument("--server", help="also POST the pillow's lines as state to this server and pass "
+                        "its buzz commands to the voice unit")
+    parser.add_argument("--pillow-id", default="mum", help="pillow id for state posts and commands")
     args = parser.parse_args()
     host, _, port = args.listen.rpartition(":")
     board = SerialBoard(args.serial, args.baud) if args.serial else BleBoard(args.ble_name)
     if args.server:
         board.poster = StatePoster(args.server, args.pillow_id)
         print(f"audio_bridge: Uno lines -> {board.poster.url}", flush=True)
+        threading.Thread(target=poll_commands, args=(board, args.server, args.pillow_id), daemon=True).start()
     threading.Thread(target=board.run, daemon=True).start()
     threading.Thread(target=board.keep_mic_alive, daemon=True).start()
     serve(board, host, int(port))

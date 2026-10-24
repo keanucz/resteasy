@@ -19,20 +19,25 @@
 // (8 bits a sample, 128 kbit/s), small enough for BLE with room to spare.
 //   MIC   notify  mic audio, only while the mic is on
 //   SPK   write   audio to play (write without response; the bridge paces it to real time)
-//   CTRL  write   text: "MIC ON", "MIC OFF", "VOL <0-100>", "GAIN <0-7>" (mic gain, 6 dB steps)
+//   CTRL  write   text: "MIC ON", "MIC OFF", "VOL <0-100>", "GAIN <0-7>" (mic gain, 6 dB steps),
+//                 "BUZZ <chime|alert> <1-3>" (below)
 //   EVENT notify  "talk": a squeeze/tap of the pillow (IMU jump), "I want to say something";
 //                 or "UNO <line>", a line from the Uno
 //
 // USB serial (fallback, when the board is plugged into the laptop): the same as text lines.
 //   board -> laptop:  MIC <base64 of 100 ms 16 kHz mono s16le>,  KEY talk,  UNO <line>,  boot log
-//   laptop -> board:  SPK <base64 s16le>,  MIC ON|OFF,  VOL n,  GAIN n
+//   laptop -> board:  SPK <base64 s16le>,  MIC ON|OFF,  VOL n,  GAIN n,  BUZZ <pattern> <repeat>
+//
+// BUZZ: the server's `buzz` command (coord/CONTRACT.md 3; sounds in firmware/libraries/PillowBuzz),
+// made here, not streamed. With PILLOW_LINK=1 and a pillow node that says (in its hellos) it has a
+// buzzer, it goes on to the pillow and the buzzer plays it; otherwise this unit's speaker does.
 //
 // Uno passthrough: the Arduino Uno R3 with the pillow's sensors has no radio, so its serial output
 // (pin 1, TX) comes in on UNO_RX, through a 1k/2k divider (the Uno is 5 V, the S3 3.3 V). Each line
 // goes on over the wireless link and USB as "UNO <line>", unchanged.
 //
-// Build: arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc firmware/voice_unit
-//   radio: add --libraries firmware/libraries --build-property compiler.cpp.extra_flags=-DPILLOW_LINK=1
+// Build: arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc --libraries firmware/libraries firmware/voice_unit
+//   radio: add --build-property compiler.cpp.extra_flags=-DPILLOW_LINK=1
 // Codec driver es8311.* is Espressif's (Apache-2.0), as shipped in Waveshare's 15_ES8311 example.
 
 #include <Wire.h>
@@ -41,6 +46,7 @@
 #include "mbedtls/base64.h"
 #include "freertos/stream_buffer.h"
 #include "es8311.h"
+#include <PillowBuzz.h>
 
 #ifndef PILLOW_LINK
 #define PILLOW_LINK 0
@@ -82,10 +88,16 @@ const float TAP_G = 0.45;                    // accel jump (g) between samples =
 const int MIC_SLOT = 0;                      // stereo slot with the ES8311 ADC (verified: left)
 const uint32_t UNO_BAUD = 9600;              // match the Uno sketch's Serial.begin()
 const size_t UNO_LINE_MAX = 200;
+const float CHIME_LEVEL = 0.25, ALERT_LEVEL = 0.35;  // of full scale: soft, it plays in a bedroom at night
+const uint8_t HELLO_HAS_BUZZER = 2;          // bit in the pillow node's hellos (firmware/pillow_node)
+const size_t BUZZ_CMD_MAX = 24;
 
 I2SClass i2s;
 es8311_handle_t codec;
 StreamBufferHandle_t speaker;
+SemaphoreHandle_t speakerLock;  // a stream buffer takes one writer at a time: speech links + buzz
+QueueHandle_t buzzQueue;        // "BUZZ ..." commands for buzzTask
+volatile bool pillowBuzzer = false;  // the paired pillow node has a buzzer
 volatile bool micSerial = false, micLink = false;  // mic asked for over USB / the wireless link
 volatile uint32_t lastPlayMs = 0;
 bool imuOk = false;
@@ -131,6 +143,14 @@ bool codecInit() {
 }
 
 // ---------- audio tasks ----------
+// Queue audio for the speaker. Every writer goes through here: the stream buffer allows one at a time.
+size_t speakerWrite(const void *pcm, size_t bytes, TickType_t wait) {
+  if (xSemaphoreTake(speakerLock, wait) != pdTRUE) return 0;
+  size_t sent = xStreamBufferSend(speaker, pcm, bytes, wait);
+  xSemaphoreGive(speakerLock);
+  return sent;
+}
+
 // Speaker: drain the stream buffer into I2S (mono -> both slots); write silence when empty so the
 // DMA never replays a stale buffer.
 void speakerTask(void *) {
@@ -200,6 +220,68 @@ void handleCommand(const String &cmd, bool fromLink) {
     es8311_voice_volume_set(codec, constrain(cmd.substring(4).toInt(), 0, 100), NULL);
   } else if (cmd.startsWith("GAIN ")) {
     es8311_microphone_gain_set(codec, (es8311_mic_gain_t)constrain(cmd.substring(5).toInt(), 0, 7));
+  } else if (cmd.startsWith("BUZZ ")) {
+    char text[BUZZ_CMD_MAX] = {};
+    cmd.substring(0, BUZZ_CMD_MAX - 1).toCharArray(text, BUZZ_CMD_MAX);
+    if (xQueueSend(buzzQueue, text, 0) != pdTRUE) Serial.print("buzz: busy, dropped\r\n");
+  }
+}
+
+// ---------- buzz ----------
+// One note as a sine wave into the speaker, 10 ms at a time. Bell notes fade out; every note fades
+// in and out over 10 ms so there are no clicks.
+void renderNote(const buzz::Note &note, bool bell, float level) {
+  static int16_t pcm[RATE / 100];
+  const size_t total = (size_t)RATE * note.ms / 1000, edge = RATE / 100;
+  const float step = 2 * PI * note.hz / RATE;
+  float phase = 0;
+  for (size_t done = 0; done < total;) {
+    size_t n = min(total - done, sizeof(pcm) / 2);
+    for (size_t i = 0; i < n; i++, done++) {
+      float env = bell ? expf(-4.0f * done / RATE) : 1.0f;
+      env *= min(1.0f, min((float)done / edge, (float)(total - 1 - done) / edge));
+      pcm[i] = note.hz ? (int16_t)(sinf(phase) * level * env * 32767) : 0;
+      phase += step;
+      if (phase > 2 * PI) phase -= 2 * PI;
+    }
+    while (xStreamBufferSpacesAvailable(speaker) < n * 2) vTaskDelay(pdMS_TO_TICKS(5));
+    speakerWrite(pcm, n * 2, portMAX_DELAY);
+  }
+}
+
+void playBuzz(const buzz::Pattern &pattern, int repeat) {
+  float level = pattern.bell ? CHIME_LEVEL : ALERT_LEVEL;
+  for (int r = 0; r < repeat; r++) {
+    if (r) renderNote({0, buzz::REPEAT_GAP_MS}, false, 0);
+    for (size_t i = 0; i < pattern.count; i++) renderNote(pattern.notes[i], pattern.bell, level);
+  }
+}
+
+// Its own task: a buzz takes 1-4 s, and sending it to the pillow waits for an ack, which the radio
+// task (one source of commands) must never do.
+void buzzTask(void *) {
+  char text[BUZZ_CMD_MAX];
+  for (;;) {
+    if (xQueueReceive(buzzQueue, text, portMAX_DELAY) != pdTRUE) continue;
+    buzz::Pattern pattern;
+    int repeat;
+    if (!buzz::parse(String(text), pattern, repeat)) {
+      Serial.printf("buzz: bad command '%s'\r\n", text);
+      continue;
+    }
+#if PILLOW_LINK != 0
+    if (radio::paired && pillowBuzzer) {
+      char out[BUZZ_CMD_MAX];
+      snprintf(out, sizeof(out), "BUZZ %s %d", pattern.bell ? "chime" : "alert", repeat);
+      if (radio::sendReliableText(radio::PKT_CMD, out)) {
+        Serial.printf("buzz: %s, on the pillow's buzzer\r\n", out);
+        continue;
+      }
+      Serial.print("buzz: the pillow didn't ack, playing it here\r\n");
+    }
+#endif
+    Serial.printf("buzz: %s x%d on the speaker\r\n", pattern.bell ? "chime" : "alert", repeat);
+    playBuzz(pattern, repeat);
   }
 }
 
@@ -244,7 +326,7 @@ class SpeakerWrites : public BLECharacteristicCallbacks {
     size_t n = min(c->getLength(), sizeof(pcm) / 2);
     const uint8_t *ulaw = c->getData();
     for (size_t i = 0; i < n; i++) pcm[i] = ulawDecode(ulaw[i]);
-    xStreamBufferSend(speaker, pcm, n * 2, pdMS_TO_TICKS(20));
+    speakerWrite(pcm, n * 2, pdMS_TO_TICKS(20));
   }
 };
 
@@ -283,10 +365,11 @@ void linkInit() { bleInit(); }
 void onRadio(char type, const uint8_t *data, size_t len) {
   if (type == radio::PKT_HELLO) {
     micLink = data[0] & 1;  // the relay's hellos carry the mic state: survives our reboot
+    pillowBuzzer = data[0] & HELLO_HAS_BUZZER;  // the pillow node's carry "I have a buzzer"
   } else if (type == radio::PKT_SPK) {
     static int16_t pcm[radio::MAX_PACKET];
     for (size_t i = 0; i < len; i++) pcm[i] = ulawDecode(data[i]);
-    xStreamBufferSend(speaker, pcm, len * 2, pdMS_TO_TICKS(50));
+    speakerWrite(pcm, len * 2, pdMS_TO_TICKS(50));
   } else if (type == radio::PKT_CMD) {
     handleCommand(String((const char *)data, len), true);
   } else if (type == radio::PKT_LINE) {
@@ -394,7 +477,7 @@ void handleSerialLine(const String &line) {
   size_t len = 0;
   if (mbedtls_base64_decode(pcm, sizeof(pcm), &len, (const unsigned char *)line.c_str() + 4,
                             line.length() - 4) == 0)
-    xStreamBufferSend(speaker, pcm, len & ~1u, pdMS_TO_TICKS(200));
+    speakerWrite(pcm, len & ~1u, pdMS_TO_TICKS(200));
 }
 
 void readSerial() {
@@ -419,6 +502,8 @@ void setup() {
   bool i2sOk = i2s.begin(I2S_MODE_STD, RATE, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO, I2S_STD_SLOT_BOTH);
   bool codecOk = i2sOk && codecInit();
   speaker = xStreamBufferCreate(SPK_BUFFER, 2);
+  speakerLock = xSemaphoreCreateMutex();
+  buzzQueue = xQueueCreate(4, BUZZ_CMD_MAX);
   Serial1.setRxBufferSize(1024);  // ~1 s at 9600 baud: loop() can wait ~0.4 s on a "talk" ack
   Serial1.begin(UNO_BAUD, SERIAL_8N1, UNO_RX, UNO_TX);
   gpio_pullup_en((gpio_num_t)UNO_RX);  // idle high when no Uno is wired: no garbage lines
@@ -427,6 +512,7 @@ void setup() {
                 codecOk ? "ok" : "FAILED", imuOk ? "ok" : "missing", PILLOW_LINK, UNO_RX, (unsigned)UNO_BAUD);
   xTaskCreatePinnedToCore(speakerTask, "spk", 4096, NULL, 5, NULL, 1);
   xTaskCreatePinnedToCore(micTask, "mic", 8192, NULL, 4, NULL, 1);
+  xTaskCreatePinnedToCore(buzzTask, "buzz", 4096, NULL, 3, NULL, 1);
 }
 
 void loop() {

@@ -3,7 +3,8 @@
 // built with PILLOW_LINK = LINK_ESPNOW or LINK_WIFI. Both transports carry the same packets: one
 // type byte, then the payload, at most 1470 bytes (ESP-NOW v2):
 //
-//   H  hello: MAGIC, "sender is paired" byte, app byte (relay -> unit: 1 = mic on). Pairs the two
+//   H  hello: MAGIC, "sender is paired" byte, app byte (relay -> unit: 1 = mic on; pillow node ->
+//      unit: 2 = has a buzzer). Pairs the two
 //      boards and keeps the link alive: broadcast until paired, then sent to the peer every 2 s
 //   M  mic audio, unit -> relay: 16 kHz G.711 mu-law
 //   S  speaker audio, relay -> unit: the same
