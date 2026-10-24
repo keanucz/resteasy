@@ -9,7 +9,7 @@ it starts the check-in, then walks the family alert ladder. Prints a timeline of
 
   uv run sim/night_watch_demo.py --scenario no_return                  # nobody answers the check-in
   uv run sim/night_watch_demo.py --scenario no_return --checkin voice  # YOU answer, via the laptop
-  uv run sim/night_watch_demo.py --scenario no_return --ack-after-min 1  # Sarah taps her pillow
+  uv run sim/night_watch_demo.py --scenario no_return --ack-after-min 1  # Sarah presses "I'm on it" in the app
   uv run sim/night_watch_demo.py --list
 
 --checkin voice speaks through the laptop (needs CARTESIA_API_KEY and ANTHROPIC_API_KEY); the
@@ -49,7 +49,7 @@ def main() -> None:
     parser.add_argument("--contact", default="Sarah")
     parser.add_argument("--start", default="23:00", help="simulated clock at the start, HH:MM, in her timezone")
     parser.add_argument("--speed", type=float, default=120, help="simulated seconds per real second")
-    parser.add_argument("--ack-after-min", type=float, help="Sarah taps her pillow this long after alerts start")
+    parser.add_argument("--ack-after-min", type=float, help="Sarah presses \"I'm on it\" in the app this long after alerts start")
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args()
     if args.list:
