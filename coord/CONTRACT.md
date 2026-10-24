@@ -14,7 +14,7 @@ the backend stores them in Supabase but the HTTP endpoints and message shapes st
 
 ```json
 {
-  "pillow_id": "mum",            // the resident's pillow; string, stable per device
+  "pillow_id": "mum",            // one pillow only; string, stable per device
   "ts": 1792815000.25,           // real Unix seconds. Boards have no clock: the serial bridge
                                  // stamps the laptop's time (sim: simulated clock)
   "head_on": true,               // touch sensor / IMU says a head is on the pillow
@@ -58,7 +58,6 @@ The device polls every 500 ms, runs each command, then remembers its `id`.
 | `pulse` | `start_bpm`, `end_bpm` (4–14), `duration_min` (1–30) | motor + glow breathing ramp |
 | `vibrate` | `pattern` `tap`/`double`/`long`, `repeat` 1–5 | motor |
 | `fan` | `speed_pct` 0–100 | kit fan motor |
-| `glow_presence` | `on` bool | unused since Sat 24 Oct (no second pillow); firmware ignores harmlessly |
 | `stop_all` | none | everything off |
 
 Speech and audio (`say`, `play_audio`) play on the base laptop/speaker, not the ESP32, so they are
@@ -70,4 +69,5 @@ not device commands. Guardian caps brightness, volume and intensity before a com
 |---|---|---|
 | `mum` | the resident (older adult living alone) | booth ESP32 + sensors (`firmware/pillow/`) |
 
-**One pillow only** (decision Sat 24 Oct): the adult child does not get a pillow; they use the app.
+There is no second pillow. The adult child / carer uses only the family app: live status card,
+in-app alerts and an "I'm on it" button (see the decisions log in `coord/CONTEXT.md`).
