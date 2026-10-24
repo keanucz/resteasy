@@ -6,7 +6,8 @@
 ## Two pillows, two boards
 
 - `pillow/`: **Mum's pillow**, booth ESP32 DevKit + breadboard sensors (pins below).
-- `kid_pillow/`: **the adult child's pillow**, Waveshare ESP32-S3 AMOLED V2, no wiring: screen glows
+- `kid_pillow/`: **not used** (decision Sat 24 Oct: no second pillow, the adult child only uses the app).
+  Kept for reference: Waveshare ESP32-S3 AMOLED V2, no wiring: screen glows
   "Mum's in bed", flashes "Check on Mum" on alerts, tap or touch = `keys.fine`. FQBN
   `esp32:esp32:esp32s3:CDCOnBoot=cdc`.
 - `i2c_scan/`, `wifi_diag/`: one-off diagnostics (onboard bus = SDA 15 / SCL 14; Wi-Fi reasons).

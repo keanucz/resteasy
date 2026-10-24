@@ -107,3 +107,5 @@ agents), Factory Droid (trigger you designed, limited access, visible plans/diff
 - Sat 24 Oct: backend = Supabase (Postgres + Realtime) behind FastAPI, not Spacetime (Szymon + Adam
   agreed). Agents in Python against Supabase; family app via supabase-js Realtime. Trade-off
   accepted: no backend sponsor prize (Spacetime, Convex).
+- Sat 24 Oct (Keanu): **no kid pillow.** The adult child only uses the app (alerts, live status,
+  morning note). One pillow: Mum's. Ladder step 1 is an app alert, not a pillow glow.
