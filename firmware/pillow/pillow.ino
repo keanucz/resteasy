@@ -52,7 +52,8 @@ long lastCommandId = 0;
 // path by itself when she's out of bed in the dark, so the light never depends on the cloud.
 const uint32_t LINK_TIMEOUT_MS = 15000;
 uint32_t lastLinkOk = 0;
-bool offlineLight = false;
+uint8_t offlinePct = 0;        // offline path light level, 0 = off
+uint32_t offlineSince = 0;
 bool linkUp() { return lastLinkOk != 0 && millis() - lastLinkOk < LINK_TIMEOUT_MS; }
 
 // One TLS connection, reused for every request (a fresh handshake twice a second is too slow).
@@ -133,12 +134,24 @@ void updateHeadOn(float probeC, float humidRh) {
   headOn = warmHead || humidHead;
 }
 
-float readDistanceCm() {
+float pingCm() {
   digitalWrite(PIN_TRIG, LOW); delayMicroseconds(2);
   digitalWrite(PIN_TRIG, HIGH); delayMicroseconds(10);
   digitalWrite(PIN_TRIG, LOW);
   unsigned long us = pulseIn(PIN_ECHO, HIGH, 25000);  // ~4 m max, 25 ms timeout
   return us == 0 ? NAN : us / 58.0;
+}
+
+// Max of 3 pings ~0.3 s apart-ish (HC-SR04 needs >= 60 ms between pings): one stray short echo
+// can't fake "someone by the bed". Anything beyond the bedside zone counts as nobody there.
+float readDistanceCm() {
+  float best = NAN;
+  for (int i = 0; i < 3; i++) {
+    float d = pingCm();
+    if (!isnan(d) && (isnan(best) || d > best)) best = d;
+    if (i < 2) delay(70);
+  }
+  return (!isnan(best) && best > 250) ? NAN : best;
 }
 
 // ---------- actuators ----------
@@ -159,7 +172,7 @@ void applyActuators() {
   if (millis() < vibrateUntil) motorDuty = 220;
   if (fanPct > 0 && motorDuty == 0) motorDuty = map(fanPct, 0, 100, 0, 255);
   if (presenceGlow) ledDuty = max<uint8_t>(ledDuty, 40);
-  if (offlineLight) ledDuty = max<uint8_t>(ledDuty, 77);  // ~30% path light, never overrides brighter
+  if (offlinePct) ledDuty = max<uint8_t>(ledDuty, map(offlinePct, 0, 100, 0, 255));  // never overrides brighter
   ledcWrite(PIN_MOTOR, motorDuty);
   ledcWrite(PIN_LED, ledDuty);
 }
@@ -295,11 +308,19 @@ void loop() {
   }
 #endif
   bool outOfBedInDark = !headOn && !isnan(distCm) && distCm < ROOM_NEAR_CM && light < 0.2;
+  // Offline path light, timed like published bedside lighting (warm, low): 30% for 5 min, then
+  // 10% until 35 min, then off. Back in bed = off; moving by the bed again restarts it.
   if (!linkUp()) {
-    if (outOfBedInDark && !offlineLight) Serial.println("offline: path light on");
-    offlineLight = offlineLight ? !headOn : outOfBedInDark;  // stays on until she's back in bed
+    if (outOfBedInDark) {
+      if (!offlinePct) Serial.println("offline: path light on");
+      offlineSince = millis();
+    }
+    if (headOn) offlineSince = 0;  // back in bed: the trip is over
+    uint32_t on = millis() - offlineSince;
+    bool lit = offlineSince != 0 && !headOn && on < 35UL * 60000UL;
+    offlinePct = !lit ? 0 : (on < 5UL * 60000UL ? 30 : 10);
   } else {
-    offlineLight = false;
+    offlinePct = 0;
   }
   applyActuators();
   uint32_t spent = millis() - started;
