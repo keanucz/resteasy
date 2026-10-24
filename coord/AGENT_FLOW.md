@@ -50,12 +50,17 @@ Claude also writes the spoken lines and the family message. It never decides tim
 
 ## 4. Family Liaison ladder (least intrusive first)
 
-1. App alert to contact 1 ("Check on Mum": push notification + in-app incident). Wait 2 min.
+1. App alert to **every** contact at once ("Check on Mum": push notification + in-app incident).
+   Wait 2 min.
 2. SMS to contact 1. Wait 2 min.
 3. Phone call to contact 1. Wait 2 min.
 4. Repeat from step 2 with the next contact.
 
-Contacts are tried in priority order. There is no second pillow: the adult child only has the app.
+Contacts go in `resident_contacts.priority` order, but those who are reachable (`on_call` and
+outside their own quiet hours) move ahead of those who aren't. Nobody is dropped: if nobody is
+reachable, everyone is still tried. Any contact's "I'm on it" in the app
+(`POST /api/pillows/{id}/ack`) stops the ladder, and Mum hears "<name> knows, and is checking on
+you." There is no second pillow: the adult child only has the app.
 **Never auto-calls 911**; the message tells the contact to call if they can't reach her.
 
 ## 5. Guardian (plain code, checks every tool call before it is queued)
