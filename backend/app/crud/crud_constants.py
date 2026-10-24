@@ -7,6 +7,7 @@ RESIDENT_CONTACTS_TABLE = "resident_contacts"
 CONTACTS_TABLE = "contacts"
 RESIDENTS_TABLE = "residents"
 EVENTS_TABLE = "events"
+NIGHT_TRIPS_VIEW = "night_trips"  # each bed_exit paired with the next bed_return
 INCIDENTS_TABLE = "incidents"
 NOTIFICATIONS_TABLE = "notifications"
 AGENT_LOG_TABLE = "agent_log"

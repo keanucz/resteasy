@@ -97,6 +97,9 @@ Merged on master and deployed to Keanu's VPS (pillow.keanuc.net, PR -> master au
 - Guardian, Family Liaison, sleep events, family API, laptop voice client (`voice/checkin_client.py`),
   Morning Brief droid, Fetch family agent: Adyan's PR #30, detail in his section below.
 - Reminders, the Routine agent (PR #37): see the decisions log (Sat 24 Oct, reminders). Live on the VPS.
+- Personal night baseline (`backend/app/agents/baseline.py`, PR pending): see the decisions log
+  (Sat 24 Oct, baseline). On `mum`'s seeded demo week: wait 14 min, usual trip 9 min, 2 long trips
+  in the Brief. GET /night carries it as `summary.baseline`.
 
 Not built or not yet run, in rough order:
 1. A sender for queued `notifications` (Twilio SMS / call, push). The ladder writes rows but nothing
@@ -106,8 +109,6 @@ Not built or not yet run, in rough order:
 3. Morning Brief (Factory) and family agent (Fetch.ai) written but never run live: need
    `FACTORY_API_KEY` + Droid CLI, and `AGENT_SEED` + an Agentverse mailbox. No agent-to-agent hop yet
    (the family agent only calls the backend).
-4. Personal night baseline from the `night_trips` view (timeout is still a fixed 20 min; open
-   decision 6).
 
 Findings worth keeping:
 - Daytime demo (judging 10:30): set the resident's `quiet_start` = `quiet_end` to watch all day.
@@ -227,3 +228,15 @@ still open:
   `night_trips` (rules as in the Fri 23 Oct baseline entry); next feature in the agents lane.
   (7) Guardian rules as built: brightness <= 40 % at night, max 6 alerts per contact per night,
   medical words blocked. (5) still open.
+- Sat 24 Oct: personal night baseline rules (Adam; plain code, `backend/app/agents/baseline.py`).
+  Window = the 7 nights before the current night (night = 18:00 to noon). Usual trip = under 20 min;
+  longer trips never move the baseline, they go to the Brief as "not counted as usual". Learning
+  mode until >= 5 usual trips on >= 4 nights. Learned wait = p90 of usual trips (nearest rank) + 5
+  min, clamped to the Guardian's 10-30. **Owner vs learned: the shorter wins**
+  (`min(owner checkin_timeout_min, learned)`): the owner's value (app #45, PATCH /settings, brief
+  diff) is the longest she's ever left, learning only brings a check-in sooner, and a demo value
+  below 10 set by SQL still wins. Night Watch re-reads it with the other settings (every 60 s) and
+  logs a change to agent_log (tool `baseline`). Unusual hour = a trip starting > 60 min outside the
+  week's earliest-latest start. Drift lines in `summary.unusual`: last night's trips >= the week's
+  average + 1 (and >= 2), each long trip, and learned > owner ("she may be checked on during
+  ordinary trips"). No schema change; one week of data, so no multi-week trend yet.

@@ -6,9 +6,11 @@ family see are computed, never guessed by a model. Times are in the resident's t
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
+
+from app.agents.baseline import Baseline
 
 NIGHT_STARTS_H = 18  # a "night" runs from 18:00 ...
 NIGHT_ENDS_H = 12  # ... to noon the next day
@@ -33,8 +35,11 @@ def _hhmm(dt: datetime | None) -> str | None:
     return dt.strftime("%H:%M") if dt else None
 
 
-def summarize_night(events: list[dict[str, Any]], timezone: str) -> dict[str, Any]:
-    """Trips, check-ins, escalations and anything unusual, from events ordered by time."""
+def summarize_night(
+    events: list[dict[str, Any]], timezone: str, baseline: Baseline | None = None
+) -> dict[str, Any]:
+    """Trips, check-ins, escalations and anything unusual, from events ordered by time. Given her
+    `baseline` (app/agents/baseline.py), it also flags trips at unusual hours and drift."""
     tz = ZoneInfo(timezone)
     rows = sorted(events, key=lambda e: e["device_ts"])
     trips: list[dict[str, Any]] = []
@@ -80,8 +85,12 @@ def summarize_night(events: list[dict[str, Any]], timezone: str) -> dict[str, An
             unusual.append(f"got up at {t['left']} and had not come back to bed by morning")
         elif t["min"] >= LONG_TRIP_MIN:
             unusual.append(f"a {t['min']}-minute trip at {t['left']}")
+        if baseline is not None and baseline.unusual_hour(time.fromisoformat(t["left"])):
+            unusual.append(f"got up at {t['left']}, over an hour outside her usual {baseline.usual_hours()}")
     if len(trips) >= 3:
         unusual.append(f"{len(trips)} trips in one night")
+    if baseline is not None:
+        unusual += baseline.drift(len(trips))
     return {
         "lay_down": _hhmm(lay_down),
         "asleep": _hhmm(asleep),
@@ -94,6 +103,7 @@ def summarize_night(events: list[dict[str, Any]], timezone: str) -> dict[str, An
         "acknowledged_by": acked,
         "restless_spells": restless,
         "unusual": unusual,
+        **({"baseline": baseline.as_dict()} if baseline is not None else {}),
     }
 
 

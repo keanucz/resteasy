@@ -27,8 +27,10 @@ from zoneinfo import ZoneInfo
 
 from supabase import AsyncClient
 
+from app.agents.baseline import build_baseline, history_start
 from app.agents.guardian import Guardian, GuardianConfig
 from app.agents.liaison import Liaison, Situation
+from app.agents.night_summary import last_night_window
 from app.agents.night_watch import (
     Action,
     Alert,
@@ -40,7 +42,14 @@ from app.agents.night_watch import (
 )
 from app.agents.sleep_events import SleepTracker
 from app.crud.commands import queue_command
-from app.crud.night_log import add_event, add_notification, log_action, open_incident, update_incident
+from app.crud.night_log import (
+    add_event,
+    add_notification,
+    list_trips_between,
+    log_action,
+    open_incident,
+    update_incident,
+)
 from app.crud.pillow_state import get_state, set_night_state
 from app.crud.pillows import get_pillow
 from app.crud.residents import get_resident, list_contacts_in_order
@@ -68,6 +77,7 @@ class _Watch:
     contact_ids: dict[str, str] = field(default_factory=dict)  # alert name -> contacts.id
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)  # one report at a time, in order
     loaded_at: float = 0.0  # monotonic, last settings load
+    wait_note: str = ""  # the check-in wait as last logged, so a change shows in the app once
     last_ts: float = 0.0  # last device ts seen, the clock for check-in results
     last_seen: float = 0.0  # monotonic time of that report, to let device time run on without reports
     incident_id: int | None = None
@@ -87,7 +97,7 @@ class WatchService:
         try:
             if pillow.resident_id is None:
                 return  # nobody to watch
-            w = await self._watch(db, pillow)
+            w = await self._watch(db, pillow, state.ts)
             async with w.lock:
                 w.last_ts, w.last_seen = state.ts, clock.monotonic()
                 before = w.nw.state
@@ -150,28 +160,37 @@ class WatchService:
 
     # ---------- setup ----------
 
-    async def _watch(self, db: AsyncClient, pillow: Pillow) -> _Watch:
-        """The pillow's watch, created (and resumed from the database) on first use."""
+    async def _watch(self, db: AsyncClient, pillow: Pillow, ts: float | None = None) -> _Watch:
+        """The pillow's watch, created (and resumed from the database) on first use. `ts` is the
+        reporting device's clock, if any, so settings follow the device's night, not the server's."""
         w = self._watches.get(pillow.id)
         if w is None:
             async with self._create_lock:
                 w = self._watches.get(pillow.id)
                 if w is None:
                     w = _Watch(NightWatch())
-                    await self._load_settings(db, pillow, w)
+                    await self._load_settings(db, pillow, w, ts)
                     saved = await get_state(db, pillow.id)
                     if saved and saved.night_state != State.AWAKE:
                         w.nw.resume(State(saved.night_state), saved.state_since.timestamp())
                     self._watches[pillow.id] = w
         elif clock.monotonic() - w.loaded_at > CONFIG_REFRESH_S:
-            await self._load_settings(db, pillow, w)
+            await self._load_settings(db, pillow, w, ts)
         return w
 
-    async def _load_settings(self, db: AsyncClient, pillow: Pillow, w: _Watch) -> None:
-        """Build the Night Watch config from the resident's row and contacts."""
+    async def _load_settings(
+        self, db: AsyncClient, pillow: Pillow, w: _Watch, ts: float | None = None
+    ) -> None:
+        """Build the Night Watch config from the resident's row, contacts and her night baseline."""
         resident = await get_resident(db, str(pillow.resident_id))
         contacts = await list_contacts_in_order(db, str(pillow.resident_id))
-        now = datetime.fromtimestamp(w.last_ts or clock.time(), ZoneInfo(resident["timezone"])).time()
+        now_ts = ts or w.last_ts or clock.time()
+        now = datetime.fromtimestamp(now_ts, ZoneInfo(resident["timezone"])).time()
+        # The check-in wait: the owner's, or what the past week of trips says when that is shorter
+        night_start, _ = last_night_window(now_ts, resident["timezone"])
+        trips = await list_trips_between(db, pillow.id, history_start(night_start).isoformat(),
+                                         night_start.isoformat())
+        baseline = build_baseline(trips, night_start, resident["timezone"], resident["checkin_timeout_min"])
         # Reachable contacts (on call, outside their own quiet hours) first, in priority order; the
         # rest after them, so nobody is ever left out of an alert.
         contacts.sort(key=lambda c: not _reachable(c, now))
@@ -186,7 +205,7 @@ class WatchService:
             pillow_id=pillow.id,
             resident=resident["preferred_name"],
             contacts=tuple(w.contact_ids) or ("family",),
-            checkin_timeout_min=resident["checkin_timeout_min"],
+            checkin_timeout_min=baseline.checkin_timeout_min,
             timezone=resident["timezone"],
             quiet_hours=quiet_hours,
             paused=resident["monitoring_paused"],
@@ -197,6 +216,10 @@ class WatchService:
         w.guardian.cfg = GuardianConfig(timezone=resident["timezone"], quiet_hours=quiet_hours,
                                         step_wait_min=resident["step_wait_min"], sms_consent=consent)
         w.loaded_at = clock.monotonic()
+        if baseline.note() != w.wait_note:
+            w.wait_note = baseline.note()
+            await log_action(db, pillow.id, AGENT, intent=w.wait_note, tool="baseline",
+                             args=baseline.as_dict())
 
     # ---------- writing decisions back ----------
 

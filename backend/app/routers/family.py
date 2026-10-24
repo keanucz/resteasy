@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.agents.baseline import build_baseline, history_start
 from app.agents.guardian import Guardian
 from app.agents.night_summary import last_night_window, pending_goodnight, summarize_night
 from app.core.dependencies import PillowDep, SupabaseDep, require_checkin_token, resident_of
@@ -19,6 +20,7 @@ from app.crud.night_log import (
     list_agent_log_between,
     list_events_between,
     list_recent_events_of_type,
+    list_trips_between,
     log_action,
 )
 from app.crud.residents import update_resident
@@ -48,10 +50,12 @@ async def read_night(pillow: PillowDep, db: SupabaseDep) -> NightReport:
     start, end = last_night_window(clock.time(), resident["timezone"])
     events = await list_events_between(db, pillow.id, start.isoformat(), end.isoformat())
     log = await list_agent_log_between(db, pillow.id, start.isoformat(), end.isoformat())
+    trips = await list_trips_between(db, pillow.id, history_start(start).isoformat(), start.isoformat())
+    baseline = build_baseline(trips, start, resident["timezone"], resident["checkin_timeout_min"])
     return NightReport(
         pillow_id=pillow.id, resident=resident["preferred_name"],
         window_start=start.isoformat(), window_end=end.isoformat(),
-        summary=summarize_night(events, resident["timezone"]), events=events, agent_log=log,
+        summary=summarize_night(events, resident["timezone"], baseline), events=events, agent_log=log,
         settings={k: resident[k] for k in SETTINGS_KEYS},
     )
 

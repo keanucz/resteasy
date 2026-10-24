@@ -5,7 +5,13 @@ from typing import Any
 
 from supabase import AsyncClient
 
-from app.crud.crud_constants import AGENT_LOG_TABLE, EVENTS_TABLE, INCIDENTS_TABLE, NOTIFICATIONS_TABLE
+from app.crud.crud_constants import (
+    AGENT_LOG_TABLE,
+    EVENTS_TABLE,
+    INCIDENTS_TABLE,
+    NIGHT_TRIPS_VIEW,
+    NOTIFICATIONS_TABLE,
+)
 
 
 def _iso(ts: float) -> str:
@@ -61,6 +67,15 @@ async def list_events_between(db: AsyncClient, pillow_id: str, start_iso: str, e
     response = await (
         db.table(EVENTS_TABLE).select("event_type, device_ts, data").eq("pillow_id", pillow_id)
         .gte("device_ts", start_iso).lt("device_ts", end_iso).order("device_ts").execute()
+    )
+    return response.data
+
+
+async def list_trips_between(db: AsyncClient, pillow_id: str, start_iso: str, end_iso: str) -> list[dict]:
+    """The pillow's completed trips (bed_exit to bed_return) that started in [start, end), oldest first."""
+    response = await (
+        db.table(NIGHT_TRIPS_VIEW).select("left_at, trip_min").eq("pillow_id", pillow_id)
+        .gte("left_at", start_iso).lt("left_at", end_iso).order("left_at").execute()
     )
     return response.data
 
