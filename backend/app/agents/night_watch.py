@@ -24,6 +24,9 @@ BED_EXIT_S = 30  # head off this long = out of bed
 PATH_LIGHT_ON = {"brightness_pct": 20, "color": "warm", "fade_s": 3}
 PATH_LIGHT_OFF = {"brightness_pct": 0, "color": "off", "fade_s": 10}
 KID_ALERT = {"pattern": "long", "repeat": 5}  # kid pillow: "Check on Mum, tap to reply" for ~20 s
+# After this many "I'm fine" check-ins on one trip, family gets an informational heads-up (not an
+# alarm). Provisional: the team still has to decide this (PR #21).
+FINE_ROUNDS_BEFORE_HEADS_UP = 2
 
 
 class State(StrEnum):
@@ -107,7 +110,7 @@ class NightWatch:
         self._fine_held = False
         self._left_at = 0.0  # when her head left the pillow this trip
         self._checkin_due = math.inf
-        self._fine_used = False  # one "I'm fine" restarts the timer; the next no-return escalates
+        self._fine_rounds = 0  # check-ins this trip where she said she was fine
         self._ladder: list[tuple[str, str]] = []  # (channel, contact) steps still to run
         self._next_step_at = math.inf
         self._alerted: list[str] = []  # contacts told so far, to tell them when she's okay
@@ -187,13 +190,13 @@ class NightWatch:
 
     def _tick(self, ts: float) -> list[Action]:
         if self.state is State.UP and ts >= self._checkin_due:
+            # Every no-return goes through the voice check-in: it alone decides to escalate, so she
+            # is always asked and warned (with a chance to cancel) before family are alarmed.
             away = round((ts - self._left_at) / 60)
-            if self._fine_used:
-                return [Event(ts, "no_return", {"away_min": away, "second": True}),
-                        *self._escalate(ts, f"She said she was fine earlier but has been up {away} min.")]
             self.state = State.CHECK_IN
             self._checkin_due = math.inf
-            return [Event(ts, "no_return", {"away_min": away}), StartCheckin()]
+            return [Event(ts, "no_return", {"away_min": away, "round": self._fine_rounds + 1}),
+                    StartCheckin()]
         if self.state is State.ESCALATING and ts >= self._next_step_at:
             return self._next_step(ts)
         return []
@@ -211,9 +214,15 @@ class NightWatch:
 
     def _said_fine(self, ts: float) -> list[Action]:
         self.state = State.UP
-        self._fine_used = True
+        self._fine_rounds += 1
         self._checkin_due = ts + self.cfg.checkin_timeout_min * 60
-        return []
+        if self._fine_rounds != FINE_ROUNDS_BEFORE_HEADS_UP:
+            return []
+        away = round((ts - self._left_at) / 60)
+        contact = self.cfg.contacts[0]
+        return [Event(ts, "heads_up", {"contact": contact, "away_min": away}),
+                Alert(contact, "sms", f"Heads-up, no action needed: {self.cfg.resident} has been up "
+                                      f"{away} min but says she's fine.")]
 
     def _escalate(self, ts: float, reason: str) -> list[Action]:
         self.state = State.ESCALATING
@@ -254,7 +263,7 @@ class NightWatch:
 
     def _reset_trip(self) -> None:
         self._checkin_due = math.inf
-        self._fine_used = False
+        self._fine_rounds = 0
         self._ladder, self._next_step_at, self._alerted = [], math.inf, []
 
     def _is_night(self, ts: float) -> bool:

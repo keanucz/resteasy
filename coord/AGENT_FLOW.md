@@ -39,9 +39,12 @@ then the personal baseline (decisions log, Fri 23 Oct).
 
 Claude receives the transcript and recent state and returns exactly one of:
 
-- **FINE**: "Glad you're OK." → back to `UP` with the timer reset once, then a second no-return goes straight to `ESCALATING`.
-- **CONFUSED**: gentle reorienting ("It's night, you're at home, the light's on by the bed") → ask again (counts as a try).
-- **DISTRESS** or no answer after 2 tries → `ESCALATING`, with the reason in one plain sentence for the family.
+- **FINE**: "Glad you're OK." → back to `UP`, timer restarts. **Every** no-return runs a new
+  check-in, so she is always asked and warned before family are alarmed. After the 2nd "fine" on
+  one trip, family get an informational heads-up, not an alarm (provisional, to decide: PR #21).
+- **CONFUSED**: gentle reorienting ("It's night, you're at home, the light's on by the bed") → ask again.
+- **DISTRESS** → `ESCALATING` at once. Silence / unclear after 3 asks → a warning with 15 s to say
+  "I'm fine" → `ESCALATING`, with the reason in one plain sentence for the family.
 
 Claude also writes the spoken lines and the family message. It never decides timers or who to call.
 

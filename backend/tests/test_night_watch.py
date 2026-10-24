@@ -98,13 +98,16 @@ def test_tap_during_escalation_tells_family_she_is_okay():
     assert nw.state is State.IN_BED
 
 
-def test_fine_restarts_the_timer_once_then_the_next_no_return_escalates_directly():
+def test_every_no_return_checks_in_again_and_never_alarms_while_she_says_fine():
     phases = [(0, sim.ASLEEP), (5, sim.EMPTY_ROOM), (70, sim.EMPTY_ROOM)]
     nw, log = run(phases, checkin="fine")
-    assert [m for m, a in log if isinstance(a, StartCheckin)] == [pytest.approx(25, abs=0.02)]
-    first_alert = first(log, lambda a: isinstance(a, Alert))
-    assert first_alert == pytest.approx(45, abs=0.02)  # 20 min after she said she was fine
-    assert "said she was fine earlier" in next(a.message for _, a in log if isinstance(a, Alert))
+    checkins = [m for m, a in log if isinstance(a, StartCheckin)]
+    assert checkins == [pytest.approx(m, abs=0.02) for m in (25, 45, 65)]
+    alerts = [(m, a.channel, a.message) for m, a in log if isinstance(a, Alert)]
+    assert len(alerts) == 1  # one heads-up after the second "fine", no alarm ladder
+    m, channel, message = alerts[0]
+    assert m == pytest.approx(45, abs=0.02) and channel == "sms" and message.startswith("Heads-up")
+    assert not any(isinstance(a, Command) and a.cmd == "vibrate" for _, a in log)
 
 
 def test_family_ack_stops_the_ladder():
