@@ -10,6 +10,10 @@
   Kept for reference: Waveshare ESP32-S3 AMOLED V2, no wiring: screen glows
   "Mum's in bed", flashes "Check on Mum" on alerts, tap or touch = `keys.fine`. FQBN
   `esp32:esp32:esp32s3:CDCOnBoot=cdc`.
+- `voice_unit/`: the Waveshare inside Mum's pillow as **speaker + mic only** (ES8311 codec, squeeze
+  = "talk"). Bluetooth LE to the laptop (16 kHz mu-law), USB serial as a fallback;
+  `uv run sim/audio_bridge.py` makes it the speaker and mic for `voice/voice.py`
+  (`PILLOW_AUDIO=pillow`). FQBN `esp32:esp32:esp32s3:CDCOnBoot=cdc`, no libraries to install.
 - `i2c_scan/`, `wifi_diag/`: one-off diagnostics (onboard bus = SDA 15 / SCL 14; Wi-Fi reasons).
 
 ## Connectivity: USB serial bridge (default)

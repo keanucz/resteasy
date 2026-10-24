@@ -15,6 +15,9 @@ cut off, and silence is recognised as no answer.
     uv run voice/voice.py --say "Light's on, take your time."
     uv run voice/voice.py --debug              # listen once, print the reply + mic level and events
 
+Audio goes through the laptop's own speaker and mic by default. PILLOW_AUDIO=pillow uses the voice
+unit inside the pillow instead (firmware/voice_unit, reached through sim/audio_bridge.py).
+
 The full check-in conversation lives in voice/checkin.py.
 """
 
@@ -24,6 +27,7 @@ import argparse
 import asyncio
 import json
 import os
+import socket
 import sys
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -41,8 +45,11 @@ TTS_MODEL = "sonic-3.6"
 STT_MODEL = "ink-2"
 # Gemma, en-GB, a stable voice Cartesia recommends for agents. Swap after a listen test.
 VOICE_ID = os.environ.get("PILLOW_VOICE_ID", "62ae83ad-4f6a-430b-af41-a9bede9286ca")
-TTS_RATE = 24_000
+# "laptop": the laptop's speaker + mic. "pillow": the voice unit, via sim/audio_bridge.py.
+AUDIO = os.environ.get("PILLOW_AUDIO", "laptop")
+BRIDGE_HOST, _, BRIDGE_PORT = os.environ.get("PILLOW_AUDIO_BRIDGE", "127.0.0.1:8765").rpartition(":")
 MIC_RATE = 16_000
+TTS_RATE = MIC_RATE if AUDIO == "pillow" else 24_000  # the voice unit plays 16 kHz only
 CHUNK = MIC_RATE // 10  # 100 ms of audio per frame, as the docs recommend
 # Cartesia's "Patient" turn profile: tolerates pauses mid-sentence from someone half asleep.
 TURN = {
@@ -80,12 +87,30 @@ def speak(text: str, *, speed: float = 0.85, emotion: str = "calm", volume: floa
     r.raise_for_status()
     gain = 10 ** ((min(max(volume, 0.5), 2.0) - 2.0) * 12 / 20)  # 1.0 -> -12 dB, 2.0 -> 0 dB
     audio = (np.frombuffer(r.content, dtype=np.int16) * gain).astype(np.int16)
+    if AUDIO == "pillow":
+        _play_on_pillow(audio.tobytes())
+        return
     sd.play(audio, TTS_RATE)
     sd.wait()
 
 
+def _play_on_pillow(pcm: bytes) -> None:
+    """Send speech to the voice unit through the audio bridge and block until it has played."""
+    with socket.create_connection((BRIDGE_HOST, int(BRIDGE_PORT)), timeout=5) as conn:
+        conn.sendall(b"PLAY\n" + pcm)
+        conn.shutdown(socket.SHUT_WR)
+        conn.settimeout(len(pcm) / (TTS_RATE * 2) + 10)
+        answer = conn.makefile("rb").readline().strip()
+    if answer != b"DONE":
+        raise RuntimeError(f"audio bridge: {answer.decode(errors='replace') or 'no answer'}")
+
+
 async def _mic() -> AsyncIterator[bytes]:
     """Yield 100 ms frames of 16 kHz mono s16le from the default mic, forever."""
+    if AUDIO == "pillow":
+        async for frame in _pillow_mic():
+            yield frame
+        return
     loop = asyncio.get_running_loop()
     frames: asyncio.Queue[bytes] = asyncio.Queue()
 
@@ -95,6 +120,18 @@ async def _mic() -> AsyncIterator[bytes]:
     with sd.RawInputStream(samplerate=MIC_RATE, channels=1, dtype="int16", blocksize=CHUNK, callback=on_audio):
         while True:
             yield await frames.get()
+
+
+async def _pillow_mic() -> AsyncIterator[bytes]:
+    """The voice unit's mic, through the audio bridge, in the same 100 ms frames."""
+    reader, writer = await asyncio.open_connection(BRIDGE_HOST, int(BRIDGE_PORT))
+    try:
+        writer.write(b"LISTEN\n")
+        await writer.drain()
+        while True:
+            yield await reader.readexactly(CHUNK * 2)
+    finally:
+        writer.close()
 
 
 @dataclass
