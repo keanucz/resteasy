@@ -21,3 +21,6 @@ API_PREFIX = "/api"
 
 # Message returned by GET /api/test so the app can show it reached the backend
 CONNECTION_TEST_MESSAGE = "Frontend reached the backend"
+
+# Detail returned with a 503 when SUPABASE_URL / SUPABASE_SECRET_KEY are not set
+SUPABASE_NOT_CONFIGURED = "Supabase is not configured on this server"

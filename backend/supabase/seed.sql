@@ -1,0 +1,50 @@
+-- Seed data, kept out of the migration so the schema can be applied without it.
+-- Safe to re-run: every insert skips rows that already exist.
+--
+-- Demo household: resident Margaret, the real pillow `mum`, carer Sarah (fake 555-01xx number).
+-- Test household: "Test User" owns the hypothetical pillow `test-pillow`. Automated tests only
+-- ever touch this one, so they never send a command to the real device.
+
+-- Demo household -----------------------------------------------------------------------------
+
+insert into residents (id, full_name, preferred_name)
+values ('00000000-0000-0000-0000-000000000001', 'Margaret Test', 'Margaret')
+on conflict do nothing;
+
+insert into pillows (id, resident_id, location_label)
+values ('mum', '00000000-0000-0000-0000-000000000001', 'Bedroom')
+on conflict do nothing;
+
+insert into contacts (id, full_name, phone)
+values ('00000000-0000-0000-0000-000000000002', 'Sarah Test', '+15555550100')
+on conflict do nothing;
+
+insert into resident_contacts (resident_id, contact_id, relationship, role, priority)
+values ('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002',
+        'daughter', 'owner', 1)
+on conflict do nothing;
+
+insert into pillow_state (pillow_id, head_on) values ('mum', false)
+on conflict do nothing;
+
+-- Test household -----------------------------------------------------------------------------
+
+insert into residents (id, full_name, preferred_name)
+values ('00000000-0000-0000-0000-000000000011', 'Test Resident', 'Tess')
+on conflict do nothing;
+
+insert into pillows (id, resident_id, location_label)
+values ('test-pillow', '00000000-0000-0000-0000-000000000011', 'Test bench')
+on conflict do nothing;
+
+insert into contacts (id, full_name, phone)
+values ('00000000-0000-0000-0000-000000000012', 'Test User', '+15555550199')
+on conflict do nothing;
+
+insert into resident_contacts (resident_id, contact_id, relationship, role, priority)
+values ('00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000012',
+        'tester', 'owner', 1)
+on conflict do nothing;
+
+insert into pillow_state (pillow_id, head_on) values ('test-pillow', false)
+on conflict do nothing;
