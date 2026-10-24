@@ -141,3 +141,66 @@ Abstracts read in full; numbers come from the abstracts.
   go to family first.
 - By raw count, most falls happen in the active daytime hours (Wijlhuizen). Claim "night is the
   riskiest time per trip out of bed", not "most falls happen at night".
+
+## IEEE Xplore additions (BPP University access)
+
+Searched Fri 23–Sat 24 Oct 2026 via BPP University's IEEE Xplore subscription (full text is
+available through BPP; numbers below are from the abstracts). All engineering prototypes, mostly
+small samples: technical feasibility, not clinical outcomes.
+
+**Q&A: "Can a pillow really tell her head is on it, and how accurate is that?"**
+- Yes, and people have built it many ways: pressure buttons, strain threads, piezo + IMU, and
+  **temperature + humidity sensors in a pillow classified sleep posture at ~95%** (ICAIIC 2024).
+  We use the cheapest version of that idea: one humidity sensor + one temperature probe + an IMU.
+- Bed-exit detection with low-cost sensors is a solved engineering problem in the lab: an
+  ultrasonic + IR + accelerometer system hit **97.7% sensitivity / 93.8% precision with 11.4 s early
+  warning** on ten older adults; a thermopile system caught **100% of bed exits at 1.9% false alarms**
+  over months in a nursing home. Our contribution is not the detector; it's what happens next.
+- The bedside light we turn on has a published twin: an Arduino LDR + PIR side table that fades in
+  low indirect light on foot movement at night, holds 5 min, dims to 10%, then off (ICISS 2026).
+
+| Finding | Source | Strength |
+|---|---|---|
+| 7 temperature + humidity sensors on a pillow; CNN classified sleep posture with ~95% accuracy; T/H "identify physical changes in the subject" that pressure misses | [Monitoring Sleep Posture Based on Temperature and Humidity Sensor, ICAIIC 2024, 10.1109/ICAIIC60209.2024.10463422](https://doi.org/10.1109/ICAIIC60209.2024.10463422) | weak (conference, small) |
+| Low-cost pillow with piezo sensor + IMU measured heart rate, respiration and **head position**; cosine similarity > 0.99 vs ECG | [Pillow-Type Sleep Monitor, ICCE-Taiwan 2026, 10.1109/ICCE-Taiwan71481.2026.11652538](https://doi.org/10.1109/ICCE-Taiwan71481.2026.11652538) | weak (conference) |
+| FBG pressure buttons in a pillow tracked head position and movement in real time, plus respiratory rate | [SleepSense, IEEE Sensors J 2023, 10.1109/JSEN.2023.3295114](https://doi.org/10.1109/JSEN.2023.3295114) | medium (journal, 41 citations) |
+| Strain-sensing threads sewn into a memory-foam pillow tracked head motion; linear over 50 g–5 kg | [IEEE Sensors 2022, 10.1109/SENSORS52175.2022.9967140](https://doi.org/10.1109/SENSORS52175.2022.9967140) | weak (preliminary) |
+| Tactile-sensor pillow ("uSkin") gave movement, sleep duration, respiratory rate and position; **elderly users rated it user-friendly**, accuracy comparable to commercial devices | [uSkin Pillow, CyberSciTech 2024, 10.1109/CyberSciTech64112.2024.00061](https://doi.org/10.1109/CyberSciTech64112.2024.00061) | weak (conference) |
+| ESP32 smart pillow with temperature, pressure and sound sensors fused to detect sleep disruption | [Zenith Zzz Guard, ICCNCT 2026, 10.1109/ICCNCT68477.2026.11590823](https://doi.org/10.1109/ICCNCT68477.2026.11590823) | weak (conference; close to our stack) |
+| Ultrasonic (in bed) + IR (crossing the bed edge) + accelerometer, SVM: bed-exit **sensitivity 97.7%, precision 93.8%, 11.4 s average lead time**, 10 older adults | [IEEE Sensors Letters 2024, 10.1109/LSENS.2023.3336647](https://doi.org/10.1109/LSENS.2023.3336647) | medium (letter, 10 participants) |
+| 12×16 thermopile behind the bed + pseudo-Siamese CNN: **100% detection, 1.9% false alarms**; 222 and 98 real bed exits over 60 and 41 nights with two nursing-home residents | [IEEE Sensors J 2025, 10.1109/JSEN.2025.3576801](https://doi.org/10.1109/JSEN.2025.3576801) | medium (journal, n=2 long-term) |
+| Capacitive printed electrode under the sheet: detected bed exit **3.5 s earlier than a commercial mat**, no false detections across 95 posture changes and 50 exits | [BSN 2024, 10.1109/BSN63547.2024.10780504](https://doi.org/10.1109/BSN63547.2024.10780504) | weak (5 simulated participants) |
+| IR + pressure sensors with a **finite state machine** detect bed exit and falls for older adults living alone | [ICARM 2016, 10.1109/ICARM.2016.7606895](https://doi.org/10.1109/ICARM.2016.7606895) | weak (conference) |
+| Accelerometer-only bed occupancy (phone on bed, 249 h, 7 patients), LSTM: AUC 0.94; "brief activity bursts interspersed with long periods of little or no activity, even when the bed is occupied" | [IEEE Access 2023, 10.1109/ACCESS.2023.3261557](https://doi.org/10.1109/ACCESS.2023.3261557) | medium |
+| ICASSP 2025 grand challenge on accelerometer-only person-in-bed detection, focused on low-cost, low-latency streaming detection | [ICASSP 2025, 10.1109/ICASSP49660.2025.10887832](https://doi.org/10.1109/ICASSP49660.2025.10887832) | medium (benchmark) |
+| Environmental sensors (CO₂, VOC, temperature, humidity) fused for room occupancy: 81.1% accuracy; detect non-moving occupants that motion sensors miss | [IEEE IoT J 2018, 10.1109/JIOT.2017.2752134](https://doi.org/10.1109/JIOT.2017.2752134) | medium |
+| Arduino LDR + PIR smart side table: low indirect light fades in on foot movement at night, 5 min navigation light, dims to 10% for 30 min, then off; motivated by nocturia falls | [ICISS 2026, 10.1109/ICISS71466.2026.11715027](https://doi.org/10.1109/ICISS71466.2026.11715027) | weak (prototype, no users) |
+| Review: bed-fall systems split into detection vs prediction, classified by sensor type | [IEEE Sensors J 2021, 10.1109/JSEN.2020.3037711](https://doi.org/10.1109/JSEN.2020.3037711) | medium (review) |
+| LLM voice framework for older adults living alone: medication reminders, conversation, kept context | [ICCE 2025, 10.1109/ICCE63647.2025.10930020](https://doi.org/10.1109/ICCE63647.2025.10930020) | weak (framework, no trial) |
+| Privacy-preserving AAL architecture: on-premises local VLMs, IoT, robots, natural-language intents turned into executable task graphs | [CogAAL, MetroLivEnv 2026, 10.1109/MetroLivEnv70468.2026.11659911](https://doi.org/10.1109/MetroLivEnv70468.2026.11659911) | weak (architecture) |
+
+### Build implications (firmware)
+
+- **Accelerometer stillness is not absence.** Occupied beds show long stretches of near-zero motion
+  (IEEE Access 2023), so `head_on` must come from warmth/humidity, not from the MPU6050; use the IMU
+  for restlessness and the moment of getting up. That's how `pillow.ino` already splits it.
+- **Fuse, and detect the transition.** Every accurate bed-exit system combines two or more sensors
+  (ultrasonic + IR + accel; IR + pressure) and models the exit as a sequence: a state machine
+  (ICARM 2016) or classifier on the transition. Our server-side state machine
+  (`lay_down` → `bed_exit` → `no_return`) matches that design; keep thresholds in code, not the LLM.
+- **Ultrasonic placement:** the 97.7% system used ultrasonic to sense the person *in bed* and IR at
+  the bed edge. Our floor-pointing ultrasonic (`ROOM_NEAR_CM`) is the cheaper "standing beside the
+  bed" signal; aim it along the side the resident gets out on.
+- **Path light behaviour to copy:** fade in, low and indirect, ~5 min, then dim to ~10% (ICISS 2026).
+- **Humidity is a real signal** in a pillow (posture at ~95% with T/H), supporting the DHT11 head
+  detection in PR #5; tune `HEAD_DELTA_RH` on a real night.
+
+### Contradictions and caveats
+
+- Several groups already sell or publish smart pillows and bed-exit systems with higher accuracy
+  than ours will have. Don't pitch the sensing as novel; pitch the **agent + voice check-in +
+  family routing**, with sensing "in line with published designs".
+- LLM-based elder-care systems exist (ICCE 2025, CogAAL 2026), all early-stage with no outcome data.
+  "Agentic" alone isn't a differentiator; the night-time, no-camera, act-then-ask-then-escalate loop is.
+- Still no paper found on a pillow detecting **bed exit** specifically; pillow work is about posture,
+  vitals and sleep. That gap remains ours.
