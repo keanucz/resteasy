@@ -1,5 +1,6 @@
 """FastAPI application entry point. Run with `uv run uvicorn app.main:app --reload`."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -7,7 +8,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import acreate_client
 
-from app.core.app_constants import API_PREFIX, CORS_ALLOW_HEADERS, CORS_ALLOW_METHODS
+from app.agents.watch_service import WatchService
+from app.core.app_constants import API_PREFIX, CORS_ALLOW_HEADERS, CORS_ALLOW_METHODS, NIGHT_WATCH_TICK_S
 from app.core.config import get_settings
 from app.routers import api_router
 
@@ -21,7 +23,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if settings.supabase_configured
         else None
     )
+    app.state.night_watch = WatchService()
+    ticker = asyncio.create_task(_tick_night_watch(app)) if app.state.supabase is not None else None
     yield
+    if ticker is not None:
+        ticker.cancel()
+
+
+async def _tick_night_watch(app: FastAPI) -> None:
+    """Run Night Watch's timers even when no pillow reports (unplugged board, silent check-in)."""
+    while True:
+        await asyncio.sleep(NIGHT_WATCH_TICK_S)
+        await app.state.night_watch.tick_all(app.state.supabase)
 
 
 def create_app() -> FastAPI:

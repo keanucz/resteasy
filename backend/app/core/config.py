@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     cors_origins: list[str] = DEFAULT_CORS_ORIGINS
     supabase_url: str = ""
     supabase_secret_key: str = ""
+    # Shared secret the base laptop sends as `Authorization: Bearer ...` with POST /checkin
+    checkin_token: str = ""
 
     @property
     def supabase_configured(self) -> bool:

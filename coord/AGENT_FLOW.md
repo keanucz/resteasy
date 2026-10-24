@@ -39,21 +39,29 @@ then the personal baseline (decisions log, Fri 23 Oct).
 
 Claude receives the transcript and recent state and returns exactly one of:
 
-- **FINE**: "Glad you're OK." → back to `UP` with the timer reset once, then a second no-return goes straight to `ESCALATING`.
-- **CONFUSED**: gentle reorienting ("It's night, you're at home, the light's on by the bed") → ask again (counts as a try).
-- **DISTRESS** or no answer after 2 tries → `ESCALATING`, with the reason in one plain sentence for the family.
+- **FINE**: "Glad you're OK." → back to `UP`, timer restarts. **Every** no-return runs a new
+  check-in, so she is always asked and warned before family are alarmed. After the 2nd "fine" on
+  one trip, family get an informational heads-up, not an alarm (provisional, to decide: PR #21).
+- **CONFUSED**: gentle reorienting ("It's night, you're at home, the light's on by the bed") → ask again.
+- **DISTRESS** → `ESCALATING` at once. Silence / unclear after 3 asks → a warning with 15 s to say
+  "I'm fine" → `ESCALATING`, with the reason in one plain sentence for the family.
 
 Claude also writes the spoken lines and the family message. It never decides timers or who to call.
 
 ## 4. Family Liaison ladder (least intrusive first)
 
-1. In-app alert / push "Check on Mum" to the family app. Wait 2 min.
+1. App alert to **every** contact at once ("Check on Mum": push notification + in-app incident).
+   Wait 2 min.
 2. SMS to contact 1. Wait 2 min.
 3. Phone call to contact 1. Wait 2 min.
 4. Repeat from step 2 with the next contact.
 
-Contacts are tried in `resident_contacts.priority` order, skipping anyone off call or in their quiet
-hours. An "I'm on it" tap in the app acknowledges the incident and stops the ladder.
+Contacts go in `resident_contacts.priority` order, but those who are reachable (`on_call` and
+outside their own quiet hours) move ahead of those who aren't. Nobody is dropped: if nobody is
+reachable, everyone is still tried. Any contact's "I'm on it" in the app
+(`POST /api/pillows/{id}/ack`) stops the ladder, and Mum hears "<name> knows, and is checking on
+you." There is no second pillow: the adult child only has the app.
+
 **Never auto-calls 911**; the message tells the contact to call if they can't reach her.
 
 ## 5. Guardian (plain code, checks every tool call before it is queued)

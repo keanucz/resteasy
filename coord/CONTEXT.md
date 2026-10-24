@@ -155,3 +155,7 @@ Defaults in brackets are what's built; settle together, then log the answer belo
   `vibrate` / "Check on Mum" becomes the first ladder rung (in-app alert or push), the `keys.fine` ack
   becomes an "I'm on it" button that acknowledges the incident, and "who is awake" routing becomes
   on-call + quiet hours per contact. `pillow_id` `kid` and the `glow_presence` command are dropped.
+- Sat 24 Oct: alert ladder never skips a contact (Adam + Szymon). Reachable contacts (on call,
+  outside their own quiet hours) are tried first in priority order, the rest after them, so at 3am
+  someone is always alerted. In-app alert goes to every contact at once first; "I'm on it" in the
+  app = `POST /api/pillows/{id}/ack`. Built in Night Watch (PR #21).
