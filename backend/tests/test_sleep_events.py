@@ -1,7 +1,7 @@
 """The sleep-quality and key events of coord/CONTRACT.md section 2 that Night Watch doesn't derive:
 restless, asleep, key_talk, key_family."""
 
-from app.agents.sleep_events import ASLEEP_S, RESTLESS_S, SleepTracker
+from app.agents.sleep_events import ASLEEP_S, HEAD_OFF_GRACE_S, RESTLESS_S, SleepTracker
 
 T0 = 1_792_815_000.0
 
@@ -30,7 +30,7 @@ def test_asleep_fires_once_until_she_leaves_the_bed():
     tr = SleepTracker()
     ts, ev = feed(tr, T0, ASLEEP_S + 600, motion=0.03)
     assert types(ev).count("asleep") == 1
-    ts, _ = feed(tr, ts, 60, head_on=False)
+    ts, _ = feed(tr, ts, HEAD_OFF_GRACE_S + 1, head_on=False)  # longer than a roll-over: she left
     _, ev = feed(tr, ts, ASLEEP_S + 1, motion=0.03)
     assert types(ev) == ["asleep"]
 
@@ -82,3 +82,21 @@ def test_null_readings_are_skipped_not_counted():
     tr = SleepTracker()
     _, ev = feed(tr, T0, ASLEEP_S + 1, motion=None)
     assert ev == []
+
+
+def test_rolling_off_the_pillow_briefly_keeps_the_sleep_session():
+    """Keanu's roll-off case: a head-off gap shorter than the grace period is still the same sleep."""
+    tr = SleepTracker()
+    ts, ev = feed(tr, T0, ASLEEP_S + 1, motion=0.03)
+    assert types(ev) == ["asleep"]
+    ts, ev = feed(tr, ts, HEAD_OFF_GRACE_S - 1, head_on=False)  # rolls over for just under the grace
+    ts, more = feed(tr, ts, ASLEEP_S + 1, motion=0.03)
+    assert "asleep" not in types(ev + more)  # same session: no second 'asleep'
+
+
+def test_a_longer_absence_ends_the_sleep_session():
+    tr = SleepTracker()
+    ts, _ = feed(tr, T0, ASLEEP_S + 1, motion=0.03)
+    ts, _ = feed(tr, ts, HEAD_OFF_GRACE_S + 1, head_on=False)
+    _, ev = feed(tr, ts, ASLEEP_S + 1, motion=0.03)
+    assert types(ev) == ["asleep"]

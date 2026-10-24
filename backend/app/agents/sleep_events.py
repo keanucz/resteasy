@@ -18,6 +18,8 @@ RESTLESS_MOTION = 0.35  # average motion above this ...
 RESTLESS_S = 10 * 60  # ... over this long, head on the pillow = restless
 ASLEEP_MOTION = 0.08  # motion below this ...
 ASLEEP_S = 15 * 60  # ... continuously for this long, head on the pillow = asleep
+# Head off for less than this (rolling over, turning the pillow) is still the same sleep session
+HEAD_OFF_GRACE_S = 3 * 60
 EDGE_KEYS = ("talk", "family")  # key_fine is Night Watch's (it cancels alerts)
 
 
@@ -28,6 +30,7 @@ class SleepTracker:
         self._last_ts = -math.inf
         self._window: deque[tuple[float, float]] = deque()  # (ts, motion) over the last RESTLESS_S
         self._quiet_since: float | None = None  # first ts of the current run of motion < ASLEEP_MOTION
+        self._off_since: float | None = None  # when her head left the pillow, until the grace runs out
         self._asleep = False  # reported asleep this bed session
         self._restless = False  # a restless spell is open
         self._keys_held = dict.fromkeys(EDGE_KEYS, False)
@@ -42,8 +45,12 @@ class SleepTracker:
         if head is None or motion is None:
             return out  # a sensor that isn't wired can't say anything about sleep
         if not head:
-            self._leave_bed()
+            if self._off_since is None:
+                self._off_since = ts
+            elif ts - self._off_since >= HEAD_OFF_GRACE_S:
+                self._leave_bed()  # really up, not just rolled over
             return out
+        self._off_since = None
         return out + self._motion(ts, float(motion))
 
     # ---------- pieces ----------
