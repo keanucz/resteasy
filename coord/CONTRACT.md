@@ -15,7 +15,8 @@ the backend stores them in Supabase but the HTTP endpoints and message shapes st
 ```json
 {
   "pillow_id": "mum",            // "mum" | "kid" (two pillows); string, stable per device
-  "ts": 1792815000.25,           // unix seconds, device clock (sim: simulated clock)
+  "ts": 1792815000.25,           // real Unix seconds. Boards have no clock: the serial bridge
+                                 // stamps the laptop's time (sim: simulated clock)
   "head_on": true,               // touch sensor / IMU says a head is on the pillow
   "motion": 0.12,                // restlessness 0..1, IMU movement averaged over the last 10 s
   "room_motion": false,          // PIR on the nightstand
