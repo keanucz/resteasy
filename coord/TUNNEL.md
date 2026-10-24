@@ -3,29 +3,21 @@
 The venue Wi-Fi isolates clients (MikroTik, client-to-client forwarding off; tested Fri 23:15:
 laptop -> laptop gets ARP INCOMPLETE / "No route to host"), so ESP32s cannot reach a laptop
 directly, and hotspots are banned. Instead the server sits behind a Cloudflare tunnel on Keanu's
-account: devices and apps use **`https://pillow.keanuc.net`**, the tunnel forwards to whichever
-machine runs the server. HTTPS only (plain HTTP redirects). ~0.2 s round trip from the venue.
+account: devices and apps use **`https://pillow.keanuc.net`**, the tunnel forwards to the server on Keanu's VPS.
+HTTPS only (plain HTTP redirects). 0.3-0.9 s round trip from the venue (the VPS is in Germany).
 
-## Run it (on the machine that runs the server)
+## Where it runs
 
-1. Install `cloudflared` (https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
-2. Save the credentials JSON Keanu sends you on the bus as `pillow-tunnel.json` (outside the repo;
-   it's a secret, never commit it).
-3. Save this as `pillow-tunnel.yml` next to it, with your server's port:
+The tunnel and the backend run on Keanu's VPS, in Docker, deployed from master by GitHub Actions:
+see `deploy/README.md`. Changes reach the server only by PR -> master.
 
-```yaml
-tunnel: 5a23a49f-52a1-426d-a08c-03c21a1a9be6
-credentials-file: ./pillow-tunnel.json
-ingress:
-  - hostname: pillow.keanuc.net
-    service: http://127.0.0.1:8000
-  - service: http_status:404
-```
+**Never run `cloudflared` for `calhacks-pillow` on a laptop.** Two runners split requests between
+them, so half go to a stale or dead backend (Sat 24 Oct: 502s for half an hour). Develop against
+your own `uvicorn` on localhost instead.
 
-4. `cloudflared --config pillow-tunnel.yml tunnel run`, then check `curl https://pillow.keanuc.net/`.
-
-Only **one machine** should run the tunnel at a time: two runners load-balance requests between
-them. For the demo, move it to a box that doesn't sleep (Keanu's `planner` VPS) if a laptop is risky.
+Check the tunnel has exactly one connector (the VPS, `linux_amd64`), from Keanu's laptop:
+`cloudflared tunnel info calhacks-pillow`. A stray one: `cloudflared tunnel cleanup --connector-id <id>
+calhacks-pillow` drops it, but it reconnects until its process is killed.
 
 End-to-end check with a board on USB (stop the bridge first; posts as `test-pillow`):
 `python3 sim/link_test.py --port /dev/ttyACM0`. It prints PASS/FAIL per hop (server, up, down)
