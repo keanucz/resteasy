@@ -4,6 +4,7 @@
 
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <NetworkClientSecure.h>
 #include <Wire.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
@@ -40,6 +41,18 @@ uint32_t probeMinResetAt = 0;
 bool headOn = false;
 uint32_t fineUntil = 0;         // hit sensor latch so a tap survives one state message
 long lastCommandId = 0;
+
+// One TLS connection, reused for every request (a fresh handshake twice a second is too slow).
+// setInsecure() skips certificate checks: acceptable for the hackathon, not for production.
+NetworkClientSecure tls;
+NetworkClient plain;
+bool useTls() { return strncmp(SERVER_URL, "https://", 8) == 0; }
+
+bool beginRequest(HTTPClient &http, const String &url) {
+  http.setReuse(true);
+  http.setTimeout(3000);
+  return useTls() ? http.begin(tls, url) : http.begin(plain, url);
+}
 
 // Actuator state, updated by commands and advanced every loop
 struct Pulse { bool on; float startBpm, endBpm; uint32_t startMs, durMs; } pulse = {false};
@@ -172,8 +185,7 @@ void postState(float motion, float probeC, float distCm, float light) {
   String body;
   serializeJson(doc, body);
   HTTPClient http;
-  http.setTimeout(1500);
-  http.begin(base() + "/state");
+  beginRequest(http, base() + "/state");
   http.addHeader("Content-Type", "application/json");
   int code = http.POST(body);
   if (code < 200 || code >= 300) Serial.printf("state POST -> %d\n", code);
@@ -182,8 +194,7 @@ void postState(float motion, float probeC, float distCm, float light) {
 
 void pollCommands() {
   HTTPClient http;
-  http.setTimeout(1500);
-  http.begin(base() + "/commands?after=" + String(lastCommandId));
+  beginRequest(http, base() + "/commands?after=" + String(lastCommandId));
   int code = http.GET();
   if (code == 200) {
     JsonDocument doc;
@@ -209,6 +220,7 @@ void setup() {
   imuInit();
   probe.begin();
   probe.setWaitForConversion(true);
+  tls.setInsecure();
   ensureWifi();
 }
 

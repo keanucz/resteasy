@@ -80,7 +80,9 @@ def state_at(phases: list[Phase], minute: float) -> dict:
 def http(url: str, body: dict | None = None) -> object:
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method="POST" if data else "GET",
-                                 headers={"Content-Type": "application/json"})
+                                 headers={"Content-Type": "application/json",
+                                          # Cloudflare rejects the default Python-urllib agent
+                                          "User-Agent": "calhacks-pillow-sim/1.0"})
     with urllib.request.urlopen(req, timeout=5) as resp:
         raw = resp.read()
         return json.loads(raw) if raw else None
