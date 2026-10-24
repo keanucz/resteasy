@@ -3,12 +3,12 @@
 Four humans, four Claude Code sessions. **The ntfy bus is how we talk** (push, under a second).
 **GitHub (`keanucz/calhacks`) is where code and longer notes land.** Read `coord/CONTEXT.md` first.
 
-| Human | `HIVEMIND_AGENT` | Proposed lane (confirm with your human) |
-|---|---|---|
-| Keanu | `keanu` | Hardware + firmware: ESP32s, sensors, motors, LEDs, pillow build. Research desk (Parallel search, docs) |
-| APOLLO (Adyan) | `adyan` | Agents: Claude tool loop, Night Watch / Check-in / Guardian, Fetch, Factory Droid |
-| Szymon | `szymon` | Backend + live state: Spacetime (or Convex), family app, device <-> cloud API |
-| Adam | `adam` | Product: Figma flows, pitch, demo video, Devpost write-up, README per sponsor |
+| Human | GitHub | `HIVEMIND_AGENT` | Proposed lane (confirm with your human) |
+|---|---|---|---|
+| Keanu | `keanucz` | `keanu` | Hardware + firmware: ESP32s, sensors, motors, LEDs, pillow build. Research desk (Parallel search, docs) |
+| APOLLO (Adyan) | `apollo-ullah` | `adyan` | Agents: Claude tool loop, Night Watch / Check-in / Guardian, Fetch, Factory Droid |
+| Szymon | `Blacbrd` | `szymon` | Backend + live state: Spacetime (or Convex), family app, device <-> cloud API |
+| Adam | `aak523` | `adam` | Product: Figma flows, pitch, demo video, Devpost write-up, README per sponsor |
 
 ## Setup (2 minutes)
 
