@@ -49,7 +49,7 @@ Somnox 2 is a $600 breathing cushion on a fixed program. Nobody owns the night w
    flag, config diff limited to whitelisted keys).
 
 Design rule: timers and thresholds are plain code (a state machine); the LLM does language and
-judgement. Two pillows (parent ↔ adult child) share live state.
+judgement. One pillow (the parent's); the adult child follows it live in the family app.
 
 ## Prize targets
 
@@ -74,7 +74,7 @@ agents), Factory Droid (trigger you designed, limited access, visible plans/diff
 - Not reserved after all: touch sensors, heartbeat module, PIR, USB charger blocks, second ESP32.
   Implications: Night Watch needs a non-PIR trigger (MPU6050 head-off-pillow, sound sensor, or the
   Elegoo kit's PIR if it has one); hit sensors can be "tap = I'm fine" alongside key 2 (one per pillow); KY-001 can
-  stand in for DHT11; booth ESP32 + Waveshare still make two pillows.
+  stand in for DHT11. Only one pillow is built (see decisions log).
 - Only sensors go in the pillow; compute and power stay in a nightstand base. No LiPo or heater
   inside bedding. 3D printers (4, queued) for a vented sensor pod.
 - Keypad: key 1 hold-to-talk, key 2 "I'm fine" (cancels escalation), key 3 call family.
@@ -107,5 +107,8 @@ agents), Factory Droid (trigger you designed, limited access, visible plans/diff
 - Sat 24 Oct: backend = Supabase (Postgres + Realtime) behind FastAPI, not Spacetime (Szymon + Adam
   agreed). Agents in Python against Supabase; family app via supabase-js Realtime. Trade-off
   accepted: no backend sponsor prize (Spacetime, Convex).
-- Sat 24 Oct (Keanu): **no kid pillow.** The adult child only uses the app (alerts, live status,
-  morning note). One pillow: Mum's. Ladder step 1 is an app alert, not a pillow glow.
+- Sat 24 Oct: ONE pillow only (Szymon). No kid pillow: the adult child / carer uses only the family
+  app. Kid-pillow features move into the app: "Mum is in bed" glow becomes the live status card,
+  `vibrate` / "Check on Mum" becomes the first ladder rung (in-app alert or push), the `keys.fine` ack
+  becomes an "I'm on it" button that acknowledges the incident, and "who is awake" routing becomes
+  on-call + quiet hours per contact. `pillow_id` `kid` and the `glow_presence` command are dropped.
