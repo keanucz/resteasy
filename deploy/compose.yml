@@ -1,0 +1,26 @@
+# The public server on the VPS: the backend plus the calhacks-pillow tunnel that serves it as
+# https://pillow.keanuc.net. Run by deploy/deploy.sh; see deploy/README.md.
+name: pillow
+
+services:
+  backend:
+    build: ../backend
+    env_file: /opt/pillow/backend.env
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"  # loopback only: deploy.sh's health check; the public path is the tunnel
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  tunnel:
+    image: cloudflare/cloudflared:2026.10.3
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    restart: unless-stopped
+    volumes:
+      - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
+      - /opt/pillow/tunnel.json:/etc/cloudflared/tunnel.json:ro  # the secret; never in git
+    depends_on:
+      - backend
