@@ -1,0 +1,6 @@
+.env
+.env.*
+coord/.topic
+__pycache__/
+node_modules/
+coord/.tokens
