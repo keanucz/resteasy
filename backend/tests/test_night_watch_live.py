@@ -20,7 +20,7 @@ from app.crud.crud_constants import (
     NOTIFICATIONS_TABLE,
     PILLOW_STATE_TABLE,
 )
-from tests.seed_constants import TEST_PILLOW_ID
+from tests.seed_constants import TEST_PILLOW_ID, TEST_USER_ID, UNKNOWN_CONTACT_ID
 
 # 23:00 in the test resident's timezone (the residents default), inside her quiet hours
 NIGHT = datetime(2026, 10, 24, 23, 0, tzinfo=ZoneInfo("America/Los_Angeles")).timestamp()
@@ -53,18 +53,22 @@ def _rows(db: Client, table: str, columns: str = "*") -> list[dict]:
     return db.table(table).select(columns).eq("pillow_id", TEST_PILLOW_ID).order("id").execute().data
 
 
+def _escalate(client: TestClient) -> None:
+    """Lies down, gets up, doesn't return for 20 min, and the check-in escalates."""
+    _report(client, 0, True)
+    _report(client, 6, True)  # head on 5 s: lay_down
+    _report(client, 60, False)
+    _report(client, 91, False)  # head off 30 s: bed_exit
+    _report(client, 60 + 20 * 60, False)  # 20 min since she left: check-in
+    assert client.get(STATE_URL).json()["night_state"] == "check_in"
+    escalated = client.post(f"/api/pillows/{TEST_PILLOW_ID}/checkin",
+                            json={"escalate": True, "reason": "She didn't answer."})
+    assert escalated.json() == {"night_state": "escalating"}
+
+
 def test_a_night_with_no_return_escalates_and_resolves(db: Client, night: TestClient) -> None:
     """Lies down, gets up, doesn't return, check-in escalates, back in bed: all stored."""
-    _report(night, 0, True)
-    _report(night, 6, True)  # head on 5 s: lay_down
-    _report(night, 60, False)
-    _report(night, 91, False)  # head off 30 s: bed_exit
-    _report(night, 60 + 20 * 60, False)  # 20 min since she left: check-in
-    assert night.get(STATE_URL).json()["night_state"] == "check_in"
-
-    escalated = night.post(f"/api/pillows/{TEST_PILLOW_ID}/checkin",
-                           json={"escalate": True, "reason": "She didn't answer."})
-    assert escalated.json() == {"night_state": "escalating"}
+    _escalate(night)
 
     _report(night, 1300, True)
     _report(night, 1306, True)  # back in bed
@@ -80,8 +84,24 @@ def test_a_night_with_no_return_escalates_and_resolves(db: Client, night: TestCl
     (incident,) = _rows(db, INCIDENTS_TABLE)
     assert incident["status"] == "resolved" and incident["step"] == 1 and incident["resolved_at"]
     notes = db.table(NOTIFICATIONS_TABLE).select("channel").eq("incident_id", incident["id"]).execute().data
-    assert [n["channel"] for n in notes] == ["sms", "sms"]  # the alert, then "back in bed"
+    assert [n["channel"] for n in notes] == ["app", "sms"]  # the in-app alert, then "back in bed"
 
     log = _rows(db, AGENT_LOG_TABLE, "id, agent, intent")
     assert all(row["agent"] == "night_watch" for row in log)
     assert any(row["intent"] == "check_in -> escalating" for row in log)
+
+
+def test_im_on_it_in_the_app_acknowledges_and_stops_the_alerts(db: Client, night: TestClient) -> None:
+    """The app's "I'm on it" marks the incident acknowledged by that contact; strangers get a 404."""
+    _escalate(night)
+    ack_url = f"/api/pillows/{TEST_PILLOW_ID}/ack"
+    assert night.post(ack_url, json={"contact_id": UNKNOWN_CONTACT_ID}).status_code == 404
+    assert night.post(ack_url, json={"contact_id": TEST_USER_ID}).json() == {"night_state": "escalating"}
+
+    (incident,) = _rows(db, INCIDENTS_TABLE)
+    assert incident["status"] == "acknowledged" and incident["acked_by"] == TEST_USER_ID
+    _report(night, 60 + 30 * 60, False)  # 10 more minutes: the ladder must not move on
+    notes = db.table(NOTIFICATIONS_TABLE).select("channel").eq("incident_id", incident["id"]).execute().data
+    assert [n["channel"] for n in notes] == ["app"]
+    said = [r["intent"] for r in _rows(db, AGENT_LOG_TABLE, "id, intent")]
+    assert "Test knows, and is checking on you." in said

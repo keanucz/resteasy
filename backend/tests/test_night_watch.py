@@ -76,10 +76,9 @@ def test_no_return_checks_in_after_20_min_then_escalates_up_the_ladder():
     assert exit_min == pytest.approx(60.5, abs=0.02)  # head off at 60, confirmed after 30 s
     assert first(log, lambda a: isinstance(a, StartCheckin)) == pytest.approx(80, abs=0.02)  # from head-off
     alerts = [(m, a.channel) for m, a in log if isinstance(a, Alert)]
-    assert alerts == [(pytest.approx(80, abs=0.02), "pillow"), (pytest.approx(82, abs=0.02), "sms"),
+    assert alerts == [(pytest.approx(80, abs=0.02), "app"), (pytest.approx(82, abs=0.02), "sms"),
                       (pytest.approx(84, abs=0.02), "call")]
-    kid = [a for _, a in log if isinstance(a, Command) and a.pillow_id == "kid" and a.cmd == "vibrate"]
-    assert len(kid) == 1
+    assert all(a.pillow_id == "mum" for _, a in log if isinstance(a, Command))  # one pillow only
     assert "She didn't answer." in next(a.message for _, a in log if isinstance(a, Alert))
     assert "ladder_exhausted" in events(log)
 
@@ -114,7 +113,7 @@ def test_every_no_return_checks_in_again_and_never_alarms_while_she_says_fine():
 
 def test_family_ack_stops_the_ladder():
     nw, log = run(scenario("no_return"), ack_after_min=1)
-    assert [a.channel for _, a in log if isinstance(a, Alert)] == ["pillow"]
+    assert [a.channel for _, a in log if isinstance(a, Alert)] == ["app"]
     assert "family_ack" in events(log)
     assert any(isinstance(a, Say) and "Sarah knows" in a.text for _, a in log)
 
@@ -167,3 +166,11 @@ def test_resume_after_restart(saved, next_state):
     assert nw.state is next_state  # in bed -> she gets up; mid check-in -> asked again at once
     if saved is State.CHECK_IN:
         assert isinstance(acts[1], StartCheckin)
+
+
+def test_every_contact_gets_the_app_alert_first_then_sms_and_calls_in_turn():
+    cfg = NightWatchConfig(contacts=("Sarah", "Tom"))
+    _, log = run(scenario("no_return"), config=cfg)
+    steps = [(round(m), a.channel, a.contact) for m, a in log if isinstance(a, Alert)]
+    assert steps == [(80, "app", "Sarah"), (80, "app", "Tom"), (82, "sms", "Sarah"), (84, "call", "Sarah"),
+                     (86, "sms", "Tom"), (88, "call", "Tom")]

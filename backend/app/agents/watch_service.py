@@ -4,6 +4,9 @@ Loads each pillow's settings from its resident in Supabase, feeds Night Watch ev
 and writes back what it decides: events, device commands, incidents and notifications, agent_log
 (shown live in the family app) and `pillow_state.night_state`.
 
+Family get alerts through the app (incidents + notifications) and acknowledge with the app's
+"I'm on it" button (POST /api/pillows/{id}/ack). There is no family pillow.
+
 Speech and the check-in run on the base laptop, not here: that laptop watches `night_state` (it
 becomes `check_in`) and reports the result to POST /api/pillows/{id}/checkin. `Say` lines are only
 logged until that laptop has a way to receive them.
@@ -14,6 +17,7 @@ import logging
 import time as clock
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, time
+from zoneinfo import ZoneInfo
 
 from supabase import AsyncClient
 
@@ -26,7 +30,6 @@ from app.agents.night_watch import (
     NightWatchConfig,
     State,
 )
-from app.core.app_constants import FAMILY_PILLOWS
 from app.crud.commands import queue_command
 from app.crud.night_log import add_event, add_notification, log_action, open_incident, update_incident
 from app.crud.pillow_state import get_state, set_night_state
@@ -40,9 +43,8 @@ log = logging.getLogger(__name__)
 
 AGENT = "night_watch"
 CONFIG_REFRESH_S = 60  # re-read the resident's settings (pause, quiet hours) this often
-# Night Watch's alert channels -> notifications.channel. The family pillow is a device command,
-# shown to the family as an in-app alert.
-CHANNELS = {"pillow": "app", "sms": "sms", "call": "call"}
+# Night Watch's alert channels -> notifications.channel
+CHANNELS = {"app": "app", "sms": "sms", "call": "call"}
 
 
 @dataclass
@@ -65,11 +67,8 @@ class WatchService:
         self._watches: dict[str, _Watch] = {}
 
     async def report_state(self, db: AsyncClient, pillow: Pillow, state: DeviceState) -> None:
-        """Feed one state report to the pillow's Night Watch, or a family tap to the one it watches."""
+        """Feed one state report to the pillow's Night Watch."""
         try:
-            for watched, family in FAMILY_PILLOWS.items():
-                if family == pillow.id and state.keys.fine and watched in self._watches:
-                    await self._family_tap(db, watched, state.ts)
             if pillow.resident_id is None or state.head_on is None:
                 return  # nobody to watch, or no head sensor reading to watch with
             w = await self._watch(db, pillow)
@@ -80,6 +79,22 @@ class WatchService:
                 await self._apply(db, pillow.id, w, actions, before, state.ts)
         except Exception:  # the device's report is stored already; never fail it over an agent error
             log.exception("Night Watch failed on %s", pillow.id)
+
+    async def acknowledge(self, db: AsyncClient, pillow: Pillow, contact_id: str) -> str | None:
+        """A contact pressed "I'm on it" in the app: stop the alerts and return the night state.
+
+        None if `contact_id` isn't one of this resident's contacts. Pressing it when nothing is
+        being escalated, or twice, changes nothing.
+        """
+        w = await self._watch(db, pillow)
+        async with w.lock:
+            name = next((n for n, cid in w.contact_ids.items() if cid == contact_id), None)
+            if name is None:
+                return None
+            before = w.nw.state
+            actions = w.nw.family_acknowledged(w.last_ts, name)
+            await self._apply(db, pillow.id, w, actions, before, w.last_ts)
+            return str(w.nw.state)
 
     async def checkin_done(self, db: AsyncClient, pillow: Pillow, escalate: bool, reason: str) -> str:
         """Pass the base laptop's check-in result to Night Watch; return the new night state."""
@@ -110,10 +125,13 @@ class WatchService:
         """Build the Night Watch config from the resident's row and contacts."""
         resident = await get_resident(db, str(pillow.resident_id))
         contacts = await list_contacts_in_order(db, str(pillow.resident_id))
+        now = datetime.fromtimestamp(w.last_ts or clock.time(), ZoneInfo(resident["timezone"])).time()
+        # Reachable contacts (on call, outside their own quiet hours) first, in priority order; the
+        # rest after them, so nobody is ever left out of an alert.
+        contacts.sort(key=lambda c: not _reachable(c, now))
         w.contact_ids = {c["full_name"].split()[0]: c["id"] for c in contacts}
         w.nw.cfg = NightWatchConfig(
             pillow_id=pillow.id,
-            family_pillow_id=FAMILY_PILLOWS.get(pillow.id),
             resident=resident["preferred_name"],
             contacts=tuple(w.contact_ids) or ("family",),
             checkin_timeout_min=resident["checkin_timeout_min"],
@@ -124,14 +142,6 @@ class WatchService:
             step_wait_min=resident["step_wait_min"],
         )
         w.loaded_at = clock.monotonic()
-
-    async def _family_tap(self, db: AsyncClient, watched_id: str, ts: float) -> None:
-        """A tap on a family pillow acknowledges the alert on the pillow it watches."""
-        w = self._watches[watched_id]
-        async with w.lock:
-            before = w.nw.state
-            contact = w.nw.cfg.contacts[0]
-            await self._apply(db, watched_id, w, w.nw.family_acknowledged(ts, contact), before, ts)
 
     # ---------- writing decisions back ----------
 
@@ -196,6 +206,18 @@ def _intent(a: Action) -> str:
     if isinstance(a, Alert):
         return f"alert {a.contact} by {a.channel}: {a.message}"
     return getattr(a, "text", None) or type(a).__name__
+
+
+def _reachable(contact: dict, now: time) -> bool:
+    """On call and not inside the contact's own quiet hours (times in the resident's timezone)."""
+    if not contact.get("on_call", True):
+        return False
+    start, end = contact.get("quiet_start"), contact.get("quiet_end")
+    if not start or not end:
+        return True
+    start, end = time.fromisoformat(start), time.fromisoformat(end)
+    quiet = now >= start or now < end if start > end else start <= now < end
+    return not quiet
 
 
 def _now_iso() -> str:
