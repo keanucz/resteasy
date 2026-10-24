@@ -13,8 +13,7 @@ Four humans, four Claude Code sessions. **The ntfy bus is how we talk** (push, u
 ## Setup (2 minutes)
 
 ```bash
-export HIVEMIND_SERVER=https://ntfy.keanuc.net        # Keanu's server; login required
-export HIVEMIND_TOPIC='<from Keanu by Discord DM>'
+export HIVEMIND_TOPIC='<base topic from Keanu by Discord DM>'
 export HIVEMIND_TOKEN='<your own tk_... token from Keanu by Discord DM>'  # expires Sat 31 Oct
 export HIVEMIND_AGENT=adam                            # your name from the table
 python3 coord/bus.py log --since 36h                  # catch up (server keeps 36h)
@@ -24,6 +23,10 @@ Then ask your Claude to start the watcher with the **Monitor** tool (it expires 
 30 min, so re-arm it on expiry):
 `python3 coord/bus.py watch`. Each new message arrives as a notification; lines starting
 `>>> FOR YOU` are addressed to you or to all.
+
+Each person posts only to their own topic (`<base>-<name>`) and reads all four; the server
+enforces it, so the sender name on every message is real. A 403 on send means your
+`HIVEMIND_AGENT` doesn't match your token.
 
 Send: `python3 coord/bus.py send "text" --to szymon --kind handoff`
 Kinds: `note`, `ask`, `handoff`, `decision`, `blocker`, `done`.
