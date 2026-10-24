@@ -204,7 +204,8 @@ void sendLinkText(const char *text, bool isTalk) {
   eventChar->setValue((uint8_t *)text, min(strlen(text), BLE_CHUNK_MAX));
   eventChar->notify();
 #else
-  radio::sendText(isTalk ? radio::PKT_EVENT : radio::PKT_LINE, text);
+  if (isTalk) radio::sendReliableText(radio::PKT_EVENT, text);  // acked and resent: never lost
+  else radio::sendText(radio::PKT_LINE, text);  // a sensor snapshot: the next one is 500 ms away
 #endif
 }
 
@@ -402,6 +403,7 @@ void setup() {
   bool i2sOk = i2s.begin(I2S_MODE_STD, RATE, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO, I2S_STD_SLOT_BOTH);
   bool codecOk = i2sOk && codecInit();
   speaker = xStreamBufferCreate(SPK_BUFFER, 2);
+  Serial1.setRxBufferSize(1024);  // ~1 s at 9600 baud: loop() can wait ~0.4 s on a "talk" ack
   Serial1.begin(UNO_BAUD, SERIAL_8N1, UNO_RX, UNO_TX);
   gpio_pullup_en((gpio_num_t)UNO_RX);  // idle high when no Uno is wired: no garbage lines
   linkInit();

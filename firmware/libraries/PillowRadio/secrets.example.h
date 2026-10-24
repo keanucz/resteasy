@@ -9,6 +9,12 @@
 const uint8_t RADIO_PMK[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 const uint8_t RADIO_LMK[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
+// Optional: radio rate and power (defaults in PillowRadio.h: 6 Mbit/s OFDM, 15 dBm). Sturdier
+// still, at a third of the airtime left for retries: 802.11b at 2 Mbit/s.
+// #define RADIO_PHY_MODE WIFI_PHY_MODE_11B
+// #define RADIO_PHY_RATE WIFI_PHY_RATE_2M_L
+// #define RADIO_TX_POWER WIFI_POWER_19_5dBm
+
 // PILLOW_LINK 2 (experiment) only: the relay's hidden access point. WPA2 password, 8+ characters.
 #define RADIO_AP_SSID "change-me"
 #define RADIO_AP_PASS "change-me-too"

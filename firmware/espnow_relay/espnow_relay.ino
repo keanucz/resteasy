@@ -7,6 +7,11 @@
 //   relay -> laptop:  MIC <base64 of 16 kHz mono s16le>,  KEY talk,  UNO <line>,  log lines
 //   laptop -> relay:  SPK <base64 s16le>,  MIC ON|OFF,  VOL n,  GAIN n  (passed on to the voice unit)
 //                     AP ON | AP OFF  (PILLOW_LINK 2 only: the hidden access point starts off)
+//                     STATS  (one line of link health: rssi, drops, failures; also every 30 s)
+//
+// The bridge repeats MIC ON every 2 s while a program listens. If those stop for MIC_TIMEOUT_MS
+// (the bridge or the laptop died), the relay turns the mic off itself: it would otherwise stream
+// forever, and the voice unit reads the mic state from our hellos.
 //
 // Build (LINK_ESPNOW by default; -DPILLOW_LINK=2 for the access point experiment):
 //   arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc --libraries firmware/libraries firmware/espnow_relay
@@ -20,8 +25,11 @@
 #define PILLOW_LINK LINK_ESPNOW
 #endif
 
+const uint32_t MIC_TIMEOUT_MS = 6000, STATS_MS = 30000;
+
 SemaphoreHandle_t usbLock;  // whole lines only: the radio task and loop() both write to USB
 volatile bool micOn = false;
+uint32_t lastMicOnMs = 0;
 
 void usbLine(const char *prefix, const char *text, size_t len) {
   xSemaphoreTake(usbLock, portMAX_DELAY);
@@ -29,6 +37,20 @@ void usbLine(const char *prefix, const char *text, size_t len) {
   Serial.write((const uint8_t *)text, len);
   Serial.println();
   xSemaphoreGive(usbLock);
+}
+
+void usbLog(const char *line) { usbLine("", line, strlen(line)); }
+
+void printStats() {
+  char line[200];
+  radio::formatStats(line, sizeof(line));
+  usbLog(line);
+}
+
+void setMic(bool on) {
+  micOn = on;
+  radio::helloApp = on;  // a voice unit that reboots picks the mic state up from our hellos
+  radio::sendReliableText(radio::PKT_CMD, on ? "MIC ON" : "MIC OFF");
 }
 
 // Radio -> USB (on the radio task)
@@ -78,11 +100,17 @@ void handleUsbLine(const String &line) {
     return;
   }
 #endif
-  if (line == "MIC ON" || line == "MIC OFF") {
-    micOn = line == "MIC ON";
-    radio::helloApp = micOn;  // a voice unit that reboots picks the mic state up from our hellos
+  if (line == "STATS") {
+    printStats();
+    return;
   }
-  radio::sendText(radio::PKT_CMD, line.c_str());
+  if (line == "MIC ON" || line == "MIC OFF") {
+    bool on = line == "MIC ON";
+    if (on) lastMicOnMs = millis();
+    if (on != micOn) setMic(on);  // a repeat (the bridge's keepalive) changes nothing
+    return;
+  }
+  radio::sendReliableText(radio::PKT_CMD, line.c_str());
 }
 
 void readUsb() {
@@ -100,6 +128,7 @@ void setup() {
   Serial.setRxBufferSize(16384);  // SPK lines arrive in bursts
   Serial.begin(921600);
   usbLock = xSemaphoreCreateMutex();
+  radio::logHook = usbLog;
   bool ok = radio::begin(PILLOW_LINK, true, onRadio);
 #if PILLOW_LINK == LINK_WIFI
   Serial.printf("relay: udp %s; hidden access point is OFF. Send \"AP ON\" to start it (it is a hotspot: never at the venue)\n",
@@ -112,13 +141,14 @@ void setup() {
 
 void loop() {
   readUsb();
-  static uint32_t lastReport = 0, reportedFails = 0;
-  if (millis() - lastReport >= 30000) {
-    lastReport = millis();
-    if (radio::sendFails != reportedFails) {
-      Serial.printf("relay: %u radio sends failed so far\n", (unsigned)radio::sendFails);
-      reportedFails = radio::sendFails;
-    }
+  if (micOn && millis() - lastMicOnMs > MIC_TIMEOUT_MS) {
+    usbLog("relay: no MIC ON from the laptop for 6 s, turning the mic off");
+    setMic(false);
+  }
+  static uint32_t lastStats = 0;
+  if (millis() - lastStats >= STATS_MS) {
+    lastStats = millis();
+    printStats();
   }
   delay(1);
 }

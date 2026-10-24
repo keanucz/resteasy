@@ -46,12 +46,26 @@ cp firmware/libraries/PillowRadio/secrets{.example,}.h   # gitignored: channel +
 L="--libraries firmware/libraries --build-property compiler.cpp.extra_flags=-DPILLOW_LINK=1"
 arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc $L firmware/voice_unit   # in the pillow
 arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc $L firmware/espnow_relay # on the laptop
-uv run sim/audio_bridge.py --serial /dev/ttyACM0                                      # the relay's port
+uv run sim/audio_bridge.py --serial /dev/ttyACM0 --server https://pillow.keanuc.net  # the relay's port
 ```
 
 Plug the relay into its native "USB" port. If you only have its USB-UART ("COM") port, build it
 without `CDCOnBoot=cdc` and add `--baud 921600` to the bridge. The two boards pair by themselves
 within a few seconds of both being on ("radio: paired with ..." on each side).
+
+Link defaults: 6 Mbit/s OFDM at 15 dBm, so a body between the boards still gets through. Override
+`RADIO_PHY_MODE` / `RADIO_PHY_RATE` / `RADIO_TX_POWER` in `secrets.h`. The relay prints one health
+line every 30 s, and again when it gets `STATS` on USB: `radio: paired, rssi -28 dBm, ... queue
+drops, ... send fails, ... control msgs lost`. Commands and squeezes are acked and resent; audio is
+not. The bridge repeats `MIC ON` every 2 s while something listens; after 6 s without one the
+relay turns the mic off.
+
+The Elegoo N16R8 reads GPIO0 low on a USB chip reset, so esptool's usual reset after flashing
+leaves it in the ROM bootloader ("waiting for download"). Reset it with the watchdog instead (no
+buttons needed): `esptool --port <relay port> --after watchdog-reset read-mac`. Its port number
+moves around between resets; `/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_<MAC>-if00`
+doesn't. Out of the box it runs Elegoo's TinyUSB demo, which ignores the reset lines: hold BOOT, tap
+RST once to flash it the first time.
 
 `PILLOW_LINK=2` is an **experiment**: the relay runs a hidden 2.4 GHz access point and both talk
 UDP. A hidden SSID still beacons; **it is a hotspot, so never at the venue**. The relay boots with

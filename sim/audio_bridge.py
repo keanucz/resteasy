@@ -17,6 +17,9 @@ offers it to any program on the laptop over a localhost socket, one request per 
 
 voice/voice.py uses it when PILLOW_AUDIO=pillow. Clients see the same thing over either link.
 
+While any program listens, the bridge repeats MIC ON every 2 s: the ESP-NOW relay turns the mic
+off by itself when those stop (the bridge died), instead of streaming forever.
+
   uv run sim/audio_bridge.py                          # Bluetooth: finds "pillow-voice"
   uv run sim/audio_bridge.py --serial /dev/ttyACM0    # USB serial instead, or the ESP-NOW relay
                                                       # (firmware/espnow_relay) on that port
@@ -57,6 +60,7 @@ MIC_UUID = "6e9d0002-5a1c-4c5e-9b7e-70696c6c6f77"
 SPK_UUID = "6e9d0003-5a1c-4c5e-9b7e-70696c6c6f77"
 CTRL_UUID = "6e9d0004-5a1c-4c5e-9b7e-70696c6c6f77"
 EVENT_UUID = "6e9d0005-5a1c-4c5e-9b7e-70696c6c6f77"
+MIC_KEEPALIVE_S = 2  # the relay gives up on the mic after 6 s without MIC ON
 
 
 def ulaw_encode(pcm: bytes) -> bytes:
@@ -117,6 +121,18 @@ class Board:
         with self.lists_lock:
             for q in self.listeners:
                 q.put(pcm)
+
+    def keep_mic_alive(self) -> None:
+        """Repeat MIC ON while anyone listens (see the module docstring)."""
+        while True:
+            time.sleep(MIC_KEEPALIVE_S)
+            with self.subs_lock:
+                if not self.listeners:
+                    continue
+                try:
+                    self.command("MIC ON")
+                except OSError:
+                    pass  # not connected: run() sends MIC ON again on reconnect
 
     def _talk(self) -> None:
         print("audio_bridge: talk (pillow squeezed)", flush=True)
@@ -368,6 +384,7 @@ def main() -> None:
         board.poster = StatePoster(args.server, args.pillow_id)
         print(f"audio_bridge: Uno lines -> {board.poster.url}", flush=True)
     threading.Thread(target=board.run, daemon=True).start()
+    threading.Thread(target=board.keep_mic_alive, daemon=True).start()
     serve(board, host, int(port))
 
 
