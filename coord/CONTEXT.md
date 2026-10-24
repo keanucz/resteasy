@@ -67,12 +67,13 @@ agents), Factory Droid (trigger you designed, limited access, visible plans/diff
   keypad with a knob, Elegoo UNO R3 starter kit (DHT11, photoresistor, LEDs, transistors, diodes,
   fan motor; PIR/GY-521/sound sensor if it's the Most Complete kit), Szymon's Raspberry Pi + HTN badge.
 - Reserved from the booth (actual, Adam + Keanu + Szymon, awaiting pickup): 1 ESP32, 2 MPU6050,
-  2 DC motors (vibration via off-centre weight, PN2222 + 1N4007 driver), 1 hit sensor, 2 microphone
+  2 DC motors (vibration via off-centre weight, PN2222 + 1N4007 driver), 2 hit sensors (one each
+  from Adam and Keanu), 2 microphone
   sound sensor modules, 2 temperature sensor modules (KY-001), 1 small passive buzzer module.
   Pickup window is 20 min after the Slack DM.
 - Not reserved after all: touch sensors, heartbeat module, PIR, USB charger blocks, second ESP32.
   Implications: Night Watch needs a non-PIR trigger (MPU6050 head-off-pillow, sound sensor, or the
-  Elegoo kit's PIR if it has one); hit sensor can be "tap = I'm fine" alongside key 2; KY-001 can
+  Elegoo kit's PIR if it has one); hit sensors can be "tap = I'm fine" alongside key 2 (one per pillow); KY-001 can
   stand in for DHT11; booth ESP32 + Waveshare still make two pillows.
 - Only sensors go in the pillow; compute and power stay in a nightstand base. No LiPo or heater
   inside bedding. 3D printers (4, queued) for a vented sensor pod.
