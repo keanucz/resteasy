@@ -63,8 +63,9 @@ def _key() -> str:
 def speak(text: str, *, speed: float = 0.85, emotion: str = "calm", volume: float = 1.0) -> None:
     """Say `text` through the laptop speaker and block until it finishes.
 
-    Slower than default and calm: the listener is likely older and just woken up. `volume` is
-    Cartesia's 0.5-2.0 scale.
+    Slower than default and calm: the listener is likely older and just woken up. `volume` (0.5-2.0)
+    is applied here, not by Cartesia: its own control barely changes loudness because speech already
+    peaks near full scale. 1.0 plays 12 dB under full scale (gentle at night), 2.0 at full scale.
     """
     body = {
         "model_id": TTS_MODEL,
@@ -72,12 +73,14 @@ def speak(text: str, *, speed: float = 0.85, emotion: str = "calm", volume: floa
         "voice": {"id": VOICE_ID},
         "language": "en",
         "output_format": {"container": "raw", "encoding": "pcm_s16le", "sample_rate": TTS_RATE},
-        "generation_config": {"speed": speed, "emotion": emotion, "volume": volume},
+        "generation_config": {"speed": speed, "emotion": emotion},
     }
     headers = {"Authorization": f"Bearer {_key()}", "Cartesia-Version": VERSION}
     r = httpx.post(f"{API}/tts/bytes", headers=headers, json=body, timeout=30)
     r.raise_for_status()
-    sd.play(np.frombuffer(r.content, dtype=np.int16), TTS_RATE)
+    gain = 10 ** ((min(max(volume, 0.5), 2.0) - 2.0) * 12 / 20)  # 1.0 -> -12 dB, 2.0 -> 0 dB
+    audio = (np.frombuffer(r.content, dtype=np.int16) * gain).astype(np.int16)
+    sd.play(audio, TTS_RATE)
     sd.wait()
 
 

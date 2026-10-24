@@ -119,7 +119,7 @@ def run_checkin(
             prompt = "I just want to check you're okay. Are you alright?"
 
     kind = ask(f"I haven't been able to hear you, so I'm going to let {contact} know to check on you. "
-               "If you're okay, just say I'm fine.", 1.6, cancel_s)
+               "If you're okay, just say I'm fine.", 2.0, cancel_s)
     if kind is Kind.FINE:
         return fine()
     if kind is Kind.DISTRESS:
