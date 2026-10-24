@@ -19,7 +19,7 @@ pillow state ─> event deriver ─> Night Watch state machine ─> Claude tool 
 | someone by the bed | HC-SR04 ultrasonic aimed at the floor → `room_motion` | replaces the PIR the contract assumed |
 | restlessness | MPU6050 → `motion` | |
 | "I'm fine" | hit sensor tap → `keys.fine` | the only key on Mum's pillow |
-| talk | laptop mic in the base | no talk / family keys on the pillow |
+| talk | laptop mic (Waveshare voice unit in the pillow in progress) | no talk / family keys on the pillow |
 | dark | photoresistor → `light` | |
 
 ## 2. Night Watch (plain-code state machine)

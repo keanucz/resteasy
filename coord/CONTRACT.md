@@ -60,7 +60,7 @@ The device polls every 500 ms, runs each command, then remembers its `id`.
 | `fan` | `speed_pct` 0–100 | kit fan motor |
 | `stop_all` | none | everything off |
 
-Speech and audio (`say`, `play_audio`) play on the base laptop/speaker, not the ESP32, so they are
+Speech and audio (`say`, `play_audio`) play from `voice/voice.py` on the laptop, not the ESP32, so they are
 not device commands. Guardian caps brightness, volume and intensity before a command is queued.
 
 ## 4. Pillows

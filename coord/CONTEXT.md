@@ -64,8 +64,9 @@ agents), Factory Droid (trigger you designed, limited access, visible plans/diff
 ## Hardware
 
 - Ours: Keanu's Waveshare ESP32-S3 AMOLED 1.8" (mic, speaker, IMU, battery, Wi-Fi), a 3-key
-  keypad with a knob, Elegoo UNO R3 starter kit (DHT11, photoresistor, LEDs, transistors, diodes,
-  fan motor; PIR/GY-521/sound sensor if it's the Most Complete kit), Szymon's Raspberry Pi + HTN badge.
+  keypad with a knob, ELEGOO Super Starter Kit (UNO R3 Project: DHT11, HC-SR04, photoresistors, LEDs,
+  transistors, diodes, fan motor, buttons, IR remote; no PIR, IMU or mic), Szymon's Raspberry Pi +
+  HTN badge. Full list: `firmware/PARTS.md`.
 - Reserved from the booth (actual, Adam + Keanu + Szymon, awaiting pickup): 1 ESP32, 2 MPU6050,
   2 DC motors (vibration via off-centre weight, PN2222 + 1N4007 driver), 2 hit sensors (one each
   from Adam and Keanu), 2 microphone
@@ -73,10 +74,10 @@ agents), Factory Droid (trigger you designed, limited access, visible plans/diff
   Pickup window is 20 min after the Slack DM.
 - Not reserved after all: touch sensors, heartbeat module, PIR, USB charger blocks, second ESP32.
   Implications: Night Watch needs a non-PIR trigger (MPU6050 head-off-pillow, sound sensor, or the
-  Elegoo kit's PIR if it has one); hit sensors can be "tap = I'm fine" alongside key 2 (one per pillow); KY-001 can
+  HC-SR04 ultrasonic; the ELEGOO kit has no PIR); hit sensors can be "tap = I'm fine" alongside key 2 (one per pillow); KY-001 can
   stand in for DHT11. Only one pillow is built (see decisions log).
-- Only sensors go in the pillow; compute and power stay in a nightstand base. No LiPo or heater
-  inside bedding. 3D printers (4, queued) for a vented sensor pod.
+- Only sensors go in the pillow; the ESP32, power and USB stay on the nightstand (no base box).
+  No LiPo or heater inside bedding. 3D printers (4, queued) for a vented sensor pod.
 - Keypad: key 1 hold-to-talk, key 2 "I'm fine" (cancels escalation), key 3 call family.
 - Lane split for hardware resolved Fri 23 Oct: see the decisions log.
 
@@ -91,7 +92,7 @@ Built and tested (PR #20 voice, PR #21 Night Watch, both ready for review; merge
   notifications, agent_log, pillow_state.night_state. Demo: `uv run sim/night_watch_demo.py`.
 
 Not built yet, in rough order:
-1. Base-laptop voice client: watch `pillow_state.night_state` for `check_in`, run `voice/checkin.py`,
+1. Laptop voice client: watch `pillow_state.night_state` for `check_in`, run `voice/checkin.py`,
    POST the result to `/checkin`. `Say` lines ("The light's on") have no route to that laptop yet.
 2. Guardian (AGENT_FLOW 5): `agent_log.guardian` is always empty until it exists.
 3. A sender for queued `notifications` (Twilio SMS / call, push). Nothing is actually sent today.
@@ -159,3 +160,5 @@ Defaults in brackets are what's built; settle together, then log the answer belo
   outside their own quiet hours) are tried first in priority order, the rest after them, so at 3am
   someone is always alerted. In-app alert goes to every contact at once first; "I'm on it" in the
   app = `POST /api/pillows/{id}/ack`. Built in Night Watch (PR #21).
+- Sat 24 Oct: no base / pedestal box (Keanu). The booth ESP32, its power and USB sit on the
+  nightstand, still outside the pillow; nothing else changes. Parts list in `firmware/PARTS.md`.

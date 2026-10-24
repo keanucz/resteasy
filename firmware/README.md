@@ -50,10 +50,10 @@ onboard I2C bus and GPIOs differ (check its header pinout before wiring).
 | Ultrasonic HC-SR04 | trig 5, **echo 18 via 1k/2k divider**, 5V, GND | nightstand, aimed at the floor by the bed | **echo is 5 V: the divider protects the ESP32** |
 | Photoresistor | 34 + 10k divider | nightstand | ADC1 only (Wi-Fi blocks ADC2) |
 | DC motor | 25 → 1k → PN2222 base; emitter GND; collector → motor −; motor + → 5V; 1N4007 across motor, stripe to 5V | pillow pod | breathing pulse, vibrate; tape an off-centre weight on the shaft |
-| LED | 26 → 220Ω → LED → GND | base / bedside | glow, path light; use a transistor for a strip |
+| LED | 26 → 220Ω → LED → GND | bedside | glow, path light; use a transistor for a strip |
 
-Only sensors and the motor go inside the pillow. The ESP32, power and USB stay in the nightstand
-base; no LiPo inside bedding.
+Only sensors and the motor go inside the pillow. The ESP32, power and USB stay on the
+nightstand; no LiPo inside bedding. Every part we have: `PARTS.md`.
 
 ## Tuning (top of `pillow.ino`)
 
