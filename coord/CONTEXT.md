@@ -78,11 +78,13 @@ agents), Factory Droid (trigger you designed, limited access, visible plans/diff
 - Only sensors go in the pillow; compute and power stay in a nightstand base. No LiPo or heater
   inside bedding. 3D printers (4, queued) for a vented sensor pod.
 - Keypad: key 1 hold-to-talk, key 2 "I'm fine" (cancels escalation), key 3 call family.
-- Open: hardware will likely need more than one person; revisit the lane split in
-  `coord/PROTOCOL.md` (raised by Adam, Fri 23 Oct).
+- Lane split for hardware resolved Fri 23 Oct: see the decisions log.
 
 ## Decisions log
 
 - Fri 23 Oct: pillow, agentic (body = sensors/actuators). Persona leaning elderly-at-night;
   team to confirm.
 - Fri 23 Oct: team bus = ntfy push via `coord/bus.py`; code in GitHub.
+- Fri 23 Oct: lanes. Keanu electronics + firmware lead; Szymon backend, then pairs on wiring Sat
+  morning; Adam product plus the non-electronic physical build (pod, base, cables); Adyan stays on
+  agents (critical path).

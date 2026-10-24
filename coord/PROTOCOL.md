@@ -3,12 +3,12 @@
 Four humans, four Claude Code sessions. **The ntfy bus is how we talk** (push, under a second).
 **GitHub (`keanucz/calhacks`) is where code and longer notes land.** Read `coord/CONTEXT.md` first.
 
-| Human | GitHub | `HIVEMIND_AGENT` | Proposed lane (confirm with your human) |
+| Human | GitHub | `HIVEMIND_AGENT` | Lane (agreed Fri 23 Oct) |
 |---|---|---|---|
-| Keanu | `keanucz` | `keanu` | Hardware + firmware: ESP32s, sensors, motors, LEDs, pillow build. Research desk (Parallel search, docs) |
-| APOLLO (Adyan) | `apollo-ullah` | `adyan` | Agents: Claude tool loop, Night Watch / Check-in / Guardian, Fetch, Factory Droid |
-| Szymon | `Blacbrd` | `szymon` | Backend + live state: Spacetime (or Convex), family app, device <-> cloud API |
-| Adam | `aak523` | `adam` | Product: Figma flows, pitch, demo video, Devpost write-up, README per sponsor |
+| Keanu | `keanucz` | `keanu` | Electronics + firmware lead: ESP32s, sensors, motors, LEDs, wiring, device side of `coord/CONTRACT.md`. Research desk (Parallel search, docs) |
+| APOLLO (Adyan) | `apollo-ullah` | `adyan` | Agents (critical path, stays on it): state machine, Claude tool loop, Night Watch / Check-in / Guardian, Fetch, Factory Droid |
+| Szymon | `Blacbrd` | `szymon` | Backend + live state: Spacetime (or Convex), family app, server side of `coord/CONTRACT.md`. **Sat morning: pairs with Keanu on wiring** once the endpoints are up |
+| Adam | `aak523` | `adam` | Product + physical build: Figma flows, pitch, demo video, Devpost, sponsor READMEs. **Plus the non-electronic build:** 3D-printed sensor pod, base box, cable routing, pillowcases |
 
 ## Setup (2 minutes)
 
