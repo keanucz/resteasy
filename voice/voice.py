@@ -43,8 +43,11 @@ STT_WS = "wss://api.cartesia.ai/stt/turns/websocket"
 VERSION = "2026-08-14"
 TTS_MODEL = "sonic-3.6"
 STT_MODEL = "ink-2"
-# Gemma, en-GB, a stable voice Cartesia recommends for agents. Swap after a listen test.
-VOICE_ID = os.environ.get("PILLOW_VOICE_ID", "62ae83ad-4f6a-430b-af41-a9bede9286ca")
+# Skylar, en-US, a stable voice Cartesia recommends for agents (Sonic 3.6 docs, "Voice selection"); a
+# placeholder, we're in SF. Jacqueline (9626c31c-bec5-4cca-baa8-f8ba9e84c8bc) is the en-US fallback.
+# TODO(app): let the owner pick her voice in the family app. `residents.voice_id` already exists (still
+# defaulting to Gemma, en-GB) but nothing reads it yet: pass it here per pillow instead of this constant.
+VOICE_ID = os.environ.get("PILLOW_VOICE_ID", "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4")
 # "laptop": the laptop's speaker + mic. "pillow": the voice unit, via sim/audio_bridge.py.
 AUDIO = os.environ.get("PILLOW_AUDIO", "laptop")
 BRIDGE_HOST, _, BRIDGE_PORT = os.environ.get("PILLOW_AUDIO_BRIDGE", "127.0.0.1:8765").rpartition(":")

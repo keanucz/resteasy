@@ -86,23 +86,28 @@ agents), Factory Droid (trigger you designed, limited access, visible plans/diff
 - Keypad: key 1 hold-to-talk, key 2 "I'm fine" (cancels escalation), key 3 call family.
 - Lane split for hardware resolved Fri 23 Oct: see the decisions log.
 
-## Agents lane: status (Sat 24 Oct, Adam)
+## Agents lane: status (Sat 24 Oct 13:15 PT, Adam)
 
-Built and tested (PR #20 voice, PR #21 Night Watch, both ready for review; merge #20 first):
-- `voice/`: Cartesia Sonic 3.6 speaks, Ink-2 listens with turn detection; Claude Opus 5.5 (low effort,
-  structured output) judges each reply as fine / confused / distress / unclear, keyword judge if the
-  API fails. 3 asks, louder each time, then a warning with 15 s to say "I'm fine".
-- `backend/app/agents/`: Night Watch runs inside POST /state on Supabase. POST /checkin takes the voice
-  laptop's result, POST /ack is the app's "I'm on it". Writes events, commands, incidents,
-  notifications, agent_log, pillow_state.night_state. Demo: `uv run sim/night_watch_demo.py`.
+Merged on master and deployed to Keanu's VPS (pillow.keanuc.net, PR -> master auto-deploys):
+- `voice/` (PR #20): Cartesia Sonic 3.6 speaks, Ink-2 listens with turn detection; Claude Opus 5.5 (low
+  effort, structured output) judges each reply as fine / confused / distress / unclear, keyword judge
+  if the API fails. 3 asks, louder each time, then a warning with 15 s to say "I'm fine".
+- `backend/app/agents/night_watch.py` (PR #21): Night Watch runs inside POST /state. POST /checkin takes
+  the voice laptop's result, POST /ack is the app's "I'm on it". Demo: `uv run sim/night_watch_demo.py`.
+- Guardian, Family Liaison, sleep events, family API, laptop voice client (`voice/checkin_client.py`),
+  Morning Brief droid, Fetch family agent: Adyan's PR #30, detail in his section below.
+- Reminders, the Routine agent (PR #37): see the decisions log (Sat 24 Oct, reminders). Live on the VPS.
 
-Not built yet, in rough order:
-1. Laptop voice client: watch `pillow_state.night_state` for `check_in`, run `voice/checkin.py`,
-   POST the result to `/checkin`. `Say` lines ("The light's on") have no route to that laptop yet.
-2. Guardian (AGENT_FLOW 5): `agent_log.guardian` is always empty until it exists.
-3. A sender for queued `notifications` (Twilio SMS / call, push). Nothing is actually sent today.
-4. Personal night baseline from the `night_trips` view (timeout is a fixed 20 min).
-5. Morning Brief (Factory Droid) and the Fetch.ai family agent.
+Not built or not yet run, in rough order:
+1. A sender for queued `notifications` (Twilio SMS / call, push). The ladder writes rows but nothing
+   reaches a phone yet: the demo's last hop.
+2. A full dry run on the real hardware (pillow node -> Night Watch -> check-in through the Waveshare
+   with live Cartesia -> Liaison -> phone). Each hop is tested alone; the whole chain never has been.
+3. Morning Brief (Factory) and family agent (Fetch.ai) written but never run live: need
+   `FACTORY_API_KEY` + Droid CLI, and `AGENT_SEED` + an Agentverse mailbox. No agent-to-agent hop yet
+   (the family agent only calls the backend).
+4. Personal night baseline from the `night_trips` view (timeout is still a fixed 20 min; open
+   decision 6).
 
 Findings worth keeping:
 - Daytime demo (judging 10:30): set the resident's `quiet_start` = `quiet_end` to watch all day.
@@ -139,16 +144,10 @@ Needs: `ANTHROPIC_API_KEY` in `backend/.env` (Liaison), re-run `supabase/seed.sq
 
 ## Open team decisions (agents)
 
-Defaults in brackets are what's built; settle together, then log the answer below.
-1. Asks before the warning [3], warning cancel window [15 s], silence counted as no answer [8 s].
-2. Mumbling (spoke, never understood): escalate like silence [yes], or faster?
-3. Pillow voice: default [Gemma, en-GB placeholder] and how the owner picks (`residents.voice_id`).
-4. Judge model: Opus 5.5 low effort [yes], or a faster Sonnet / Haiku (less careful on a safety call).
+Defaults in brackets are what's built. 1-4, 6 and 7 settled by Adam on Sat 24 Oct (decisions log);
+still open:
 5. How many "I'm fine, still up" rounds before family hear anything [after the 2nd "fine", an info
    SMS, not an alarm]: never / after 1st / after 2nd / real escalation after N.
-6. Check-in timeout: fixed 20 min [yes] or the personal baseline for the demo.
-7. Guardian rules for the demo [proposed: brightness <= 40 % at night, max alerts per contact per
-   night, block medical words, e.g. "she might have had a stroke"].
 
 ## Decisions log
 
@@ -219,3 +218,12 @@ Defaults in brackets are what's built; settle together, then log the answer belo
   pillow node (GPIO4, `INPUT_PULLUP`), which builds the same contract line the Uno printed, so
   `sim/uno_state.py`, the bridge and the backend are unchanged. One USB cable from a power bank
   outside the pillow powers the node. `firmware/pillow_uno/` kept for reference.
+- Sat 24 Oct: agent open decisions settled (Adam). (1) Check-in timing stays as built: 3 asks, each
+  louder, 8 s silence = no answer, then a warning with 15 s to say "I'm fine". (2) Mumbling (spoke,
+  never understood) escalates like silence. (3) Pillow voice: en-US placeholder, Cartesia "Skylar"
+  (`db6b0ed5-d5d3-463d-ae85-518a07d3c2b4`, Jacqueline as fallback) since we demo in SF; spoken lines in
+  American English. Voice choice in the family app is a TODO (`residents.voice_id` exists, unread).
+  (4) Judge = Opus 5.5 at low effort. (6) Build the personal night baseline from the past week of
+  `night_trips` (rules as in the Fri 23 Oct baseline entry); next feature in the agents lane.
+  (7) Guardian rules as built: brightness <= 40 % at night, max 6 alerts per contact per night,
+  medical words blocked. (5) still open.

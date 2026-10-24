@@ -44,7 +44,7 @@ Keep every fact; add nothing you were not told. Quote what she said if it helps.
 cause, never name or hint at a medical condition or diagnosis, never give medical advice. Ask the \
 contact to check on her and, if they can't reach her, to go round or call for help. Never say the \
 pillow or anyone has called emergency services. Optionally call `speak_to_resident` once with one \
-calm, warm line for her in plain British English (under 25 words) saying who is being told. \
+calm, warm line for her in plain American English (under 25 words) saying who is being told. \
 Only use the tools; do not reply with text."""
 
 SEND_SCHEMA = {

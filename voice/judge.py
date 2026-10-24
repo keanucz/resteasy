@@ -91,7 +91,7 @@ If the question warned her that family will be told unless she says she's fine, 
 statement that she is fine counts as "fine"; agreeing to the call ("yes please", "call her") is \
 "distress".
 
-Also write `say`, one short line the pillow speaks back, calm and warm, in plain British English:
+Also write `say`, one short line the pillow speaks back, calm and warm, in plain American English:
 - fine: a brief reassurance, e.g. "Glad you're okay. Take your time."
 - confused, distress or unclear: an empty string (the pillow uses fixed lines for these).
 Never diagnose, name a medical condition, or give medical advice. Keep `say` under 30 words."""
