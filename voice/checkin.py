@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["anthropic", "httpx>=0.27", "numpy>=1.26", "sounddevice>=0.4", "websockets>=14"]
+# dependencies = ["anthropic>=2.3","httpx>=0.27", "numpy>=1.26", "sounddevice>=0.4", "websockets>=14"]
 # ///
 """The night check-in conversation: ask, listen, retry, warn, then escalate or stand down.
 
@@ -14,9 +14,11 @@ Rules:
 - Distress ("I've fallen", "help") escalates at once, and she is told so.
 - Silence or speech we can't make out: up to `max_tries` asks, each a little louder.
 - Confused ("where am I?"): reorient her each time; the first time also restarts the tries.
-- Before escalating she is warned and has `cancel_s` to say she's fine.
+- Before escalating she is warned and has `cancel_s` to say she's fine; only an explicit "I'm fine"
+  cancels then ("yes" could be agreeing to the call).
 - Clear "I'm fine" at any point stands down.
-- The distress and warning lines are fixed here; a judge may only word the fine and reorient lines.
+- If the check-in itself fails (no network, no mic, a crash), it escalates: never fail silent.
+- The distress, warning and reorient lines are fixed here; a judge may only word the fine line.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ import argparse
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from judge import Judge, Kind, Verdict, keyword_judge
+from judge import Judge, Kind, Verdict, keyword_judge, said_fine
 
 
 @dataclass
@@ -82,37 +84,43 @@ def run_checkin(
         speak(_usable(v.say) or "Glad you're okay. Take your time.")
         return Outcome(False, "She said she was fine.", heard)
 
-    prompt, attempt = "Are you alright?", 0
-    while attempt < max_tries:
-        v = ask(prompt, VOLUMES[min(attempt, len(VOLUMES) - 1)], no_answer_s)
-        attempt += 1
+    def conversation() -> Outcome:
+        nonlocal reoriented
+        prompt, attempt = "Are you alright?", 0
+        while attempt < max_tries:
+            v = ask(prompt, VOLUMES[min(attempt, len(VOLUMES) - 1)], no_answer_s)
+            attempt += 1
+            if v.kind is Kind.DISTRESS:
+                return distress()
+            if v.kind is Kind.FINE:
+                return fine(v)
+            if v.kind is Kind.CONFUSED:
+                if not reoriented:
+                    reoriented, attempt = True, 0
+                prompt = f"{_REORIENT} Are you alright?"
+            elif v.kind is Kind.UNCLEAR:
+                prompt = "Sorry, I didn't quite catch that. Are you alright?"
+            else:
+                prompt = "I just want to check you're okay. Are you alright?"
+
+        v = ask(f"I haven't been able to hear you, so I'm going to let {contact} know to check on you. "
+                "If you're okay, just say I'm fine.", 2.0, cancel_s)
+        if v.kind is Kind.FINE and said_fine(heard[-1]):
+            return fine(v)
         if v.kind is Kind.DISTRESS:
             return distress()
-        if v.kind is Kind.FINE:
-            return fine(v)
-        if v.kind is Kind.CONFUSED:
-            if not reoriented:
-                reoriented, attempt = True, 0
-            prompt = _usable(v.say) or _REORIENT
-            if not prompt.endswith("?"):
-                prompt += " Are you alright?"
-        elif v.kind is Kind.UNCLEAR:
-            prompt = "Sorry, I didn't quite catch that. Are you alright?"
-        else:
-            prompt = "I just want to check you're okay. Are you alright?"
+        speak(f"Okay, I'm letting {contact} know now.", volume=1.3)
+        if Kind.CONFUSED in seen:
+            return Outcome(True, "She answered but seemed confused about where she was.", heard)
+        if Kind.UNCLEAR in seen:
+            return Outcome(True, "She answered but we couldn't understand her.", heard)
+        return Outcome(True, "She didn't answer.", heard)
 
-    v = ask(f"I haven't been able to hear you, so I'm going to let {contact} know to check on you. "
-            "If you're okay, just say I'm fine.", 2.0, cancel_s)
-    if v.kind is Kind.FINE:
-        return fine(v)
-    if v.kind is Kind.DISTRESS:
-        return distress()
-    speak(f"Okay, I'm letting {contact} know now.", volume=1.3)
-    if Kind.CONFUSED in seen:
-        return Outcome(True, "She answered but seemed confused about where she was.", heard)
-    if Kind.UNCLEAR in seen:
-        return Outcome(True, "She answered but we couldn't understand her.", heard)
-    return Outcome(True, "She didn't answer.", heard)
+    try:
+        return conversation()
+    except Exception as e:  # noqa: BLE001 - speaker, mic, network or judge: fail toward escalation
+        log(f"check-in failed: {type(e).__name__}: {e}")
+        return Outcome(True, "The pillow's check-in could not run, so we couldn't ask her.", heard)
 
 
 def main() -> None:
@@ -125,6 +133,7 @@ def main() -> None:
     parser.add_argument("--cancel-s", type=float, default=15.0)
     parser.add_argument("--keywords", action="store_true", help="judge replies by keywords, not Claude")
     args = parser.parse_args()
+    voice._key()  # exits now, not mid check-in, if CARTESIA_API_KEY is missing
 
     if args.keywords:
         judge = keyword_judge
