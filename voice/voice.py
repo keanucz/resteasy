@@ -166,7 +166,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--say", help="just speak this line and exit")
     parser.add_argument("--no-answer-s", type=float, default=8.0, help="silence before counting it as no answer")
-    parser.add_argument("--debug", action="store_true", help="print mic level and Cartesia turn events")    args = parser.parse_args()
+    parser.add_argument("--debug", action="store_true", help="print mic level and Cartesia turn events")
+    args = parser.parse_args()
 
     if args.say:
         speak(args.say)
