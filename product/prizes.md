@@ -13,6 +13,10 @@ Beginner: AirPods 4 · Best Solo: AirPods Pro 3 · Hacker's Choice: Logitech MX 
 
 ## Sponsors: our fit
 
+> **Sat 24 Oct 01:10, Szymon's decision:** the backend is **Supabase** (Postgres + Realtime) with FastAPI,
+> not Spacetime or Convex. So the Spacetime and Convex rows below are **not targeted**. A Postgres
+> stack still fits MLH Tiger Data only if the night history actually runs on Tiger Data.
+
 | Fit | Sponsor | Prize | What they judge |
 |---|---|---|---|
 | ★★★ | **Anthropic** | coming soon | named community; real problem you lived or heard; works, usable Monday; Claude matters and you know where it could go wrong |
