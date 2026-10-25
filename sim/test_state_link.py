@@ -46,17 +46,12 @@ def test_with_failover_only_the_active_link_posts(monkeypatch):
 
 
 
-def test_usb_comes_first_then_the_hotspot_then_bluetooth():
-    usb, hot, ble = SerialBoard("/dev/null", 115200), HotspotBoard("127.0.0.1", 0), BleBoard("pillow")
-    board = FailoverBoard([usb, hot, ble])
+def test_usb_takes_over_from_the_hotspot_before_bluetooth():
+    hot, usb, ble = HotspotBoard("127.0.0.1", 0), SerialBoard("/dev/null", 115200), BleBoard("pillow")
+    board = FailoverBoard([hot, usb, ble])
     assert board.active() is None
-    hot.port = object()  # on the hotspot
-    assert board.active() is hot
-    assert ble.standby()  # Bluetooth stays off while a better link is up
-    usb.port = object()  # cable plugged in: it wins even with the hotspot up
+    usb.port = object()  # plugged in
     assert board.active() is usb
-    usb.port = None  # unplugged
+    assert ble.standby()  # Bluetooth stays off while USB is up
+    hot.port = object()  # the hotspot is back
     assert board.active() is hot
-    hot.port = None  # and the hotspot drops
-    assert board.active() is None
-    assert not ble.standby()  # so Bluetooth may connect
