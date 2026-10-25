@@ -167,3 +167,21 @@ def test_script_run_shares_kinds_with_judge():
     out = script["run_checkin"](speak, listen, judge=lambda q, t: judge.Verdict(judge.Kind.DISTRESS),
                                 contact="Sarah")
     assert out.escalate and "getting Sarah" in said[-1][0]
+
+
+def test_after_alert_an_explicit_im_fine_stops_it():
+    from checkin import ALERT_LINE, ask_after_alert
+
+    speak, listen, said = fake("I'm fine, I just dropped my glasses")
+    assert ask_after_alert(speak, listen, contact="Sarah") is True
+    assert said[0] == (ALERT_LINE.format(contact="Sarah"), 1.6)
+    assert said[-1][0] == "Okay. I'll tell Sarah you're fine."
+
+
+@pytest.mark.parametrize("reply", [None, "...", "yes", "yes please call her", "I'm not fine", "help me"])
+def test_after_alert_anything_but_im_fine_keeps_the_alert(reply):
+    from checkin import ask_after_alert
+
+    speak, listen, said = fake(reply)
+    assert ask_after_alert(speak, listen) is False
+    assert len(said) == 1  # only the question: nothing that sounds like standing down

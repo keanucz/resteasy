@@ -40,6 +40,11 @@ import {
  */
 const CLONE_RECORDING: RecordingOptions = {
   ...RecordingPresets.HIGH_QUALITY,
+  // One voice needs one channel, and Cartesia clones well from 24 kHz: a 60 s wav is ~2.9 MB
+  // instead of ~10.6 MB at the preset's 44.1 kHz stereo, so it uploads fast and fits the 10 MB cap.
+  sampleRate: 24000,
+  numberOfChannels: 1,
+  bitRate: 64000,
   extension: '.wav',
   ios: {
     ...RecordingPresets.HIGH_QUALITY.ios,

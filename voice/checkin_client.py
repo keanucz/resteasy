@@ -21,6 +21,11 @@ With --keys pad (the 3-key macro pad, voice/keypad.py) or --keys stdin (t / f / 
     fine    POST /keys "fine" at once: stops a check-in or an alert (and the music)
     family  POST /keys "family" at once: starts the alert ladder
 The pillow never needs a key to hear her: whenever it asks something, it listens straight away.
+While family are being alerted (`escalating`) it asks every 30 s "If you're okay, just say I'm
+fine"; an explicit "I'm fine" posts the fine key, which stops the alert.
+
+It speaks in the voice the family picked or cloned in the app: GET /api/pillows/{id}/voice at start
+and every 30 s (Skylar until then, and whenever Cartesia refuses the chosen voice).
 
     export CARTESIA_API_KEY=sk_car_...  ANTHROPIC_API_KEY=sk-ant-...  CHECKIN_TOKEN=<same as the server>
     uv run voice/checkin_client.py                                # mum on https://pillow.keanuc.net
@@ -50,6 +55,8 @@ PATH_LIGHT_LINE = "The light's on. Take your time."
 GOODNIGHT_LINE = "You're back in bed. Goodnight."
 ALERTED = {"check_in", "escalating"}
 REMINDER_CHECK_S = 10.0  # the server only marks reminders due while she's awake
+VOICE_CHECK_S = 30.0  # how soon a voice picked or cloned in the app reaches the pillow
+ALERT_ASKS_MAX = 6  # while escalating, "just say I'm fine" every 30 s, for at most 3 minutes
 
 Action = tuple  # ("say", text) | ("checkin",) | ("goodnight",)
 
@@ -139,6 +146,9 @@ def main() -> None:
     watcher = Watcher()
     auth = {"Authorization": f"Bearer {token}"}
     last_reminder_check = 0.0
+    last_voice_check = 0.0
+    alert_ask_at: float | None = None  # when to next ask "just say I'm fine" while escalating
+    alert_asks = 0
 
     def post_result(http, url: str, body: dict) -> object | None:
         """POST a result with retries; the server's own timers cover a result that never arrives."""
@@ -152,6 +162,24 @@ def main() -> None:
                       file=sys.stderr, flush=True)
                 time.sleep(2)
         return None
+
+    def refresh_voice(http) -> None:
+        """Pick up the voice and style the family set in the app; the old one stays on any failure."""
+        try:
+            r = http.get(f"{base}/voice", headers=auth)
+            r.raise_for_status()
+            new = voice.Style.from_api(r.json())
+        except (httpx.HTTPError, ValueError, TypeError) as err:
+            print(f"[client] voice check failed: {err}", file=sys.stderr, flush=True)
+            return
+        if voice.set_style(new):
+            print(f"{time.strftime('%H:%M:%S')}  voice    {new.voice_id} ({new.language}, speed {new.speed}, "
+                  f"volume {new.volume}, {new.emotion})", flush=True)
+
+    if not args.text:
+        with httpx.Client(timeout=10, headers=_headers()) as http:
+            refresh_voice(http)  # before talk.py pre-renders its fixed lines
+        last_voice_check = time.monotonic()
 
     events: queue.Queue[str] = queue.Queue()
     stop_checkin = threading.Event()
@@ -306,6 +334,25 @@ def main() -> None:
                     print(f"{stamp}  reminder {out.outcome} -> {resp}", flush=True)
                 if due:
                     drop_stale_talk()
+            if not args.text and time.monotonic() - last_voice_check >= VOICE_CHECK_S:
+                last_voice_check = time.monotonic()
+                refresh_voice(http)
+            if watcher.state != "escalating":
+                alert_ask_at, alert_asks = None, 0
+            elif alert_ask_at is None:
+                alert_ask_at = time.monotonic() + checkin.ALERT_ASK_EVERY_S  # the check-in just spoke
+            elif time.monotonic() >= alert_ask_at and alert_asks < ALERT_ASKS_MAX:
+                if music is not None:
+                    music.stop()
+                    music.join(timeout=3.0)
+                alert_asks += 1
+                print(f"{time.strftime('%H:%M:%S')}  alert    asking her to say I'm fine ({alert_asks})", flush=True)
+                if checkin.ask_after_alert(speak, listen, contact=args.contact,
+                                           log=lambda m: print(f"          {m}", flush=True)):
+                    post_key("fine")  # the server stops the ladder and tells whoever was alerted
+                    alert_asks = ALERT_ASKS_MAX
+                alert_ask_at = time.monotonic() + checkin.ALERT_ASK_EVERY_S
+                drop_stale_talk()
             wait_for_keys(POLL_S)
 
 

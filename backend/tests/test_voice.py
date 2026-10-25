@@ -369,7 +369,10 @@ def test_a_contact_clones_a_voice_the_owner_picks_and_the_creator_removes(
     assert voice["source"] == "clone" and voice["created_by_name"] == "Test Helper"
     assert voice["description"] is None and voice["created_at"]
     assert cartesia.cloned[0]["content_type"] == "audio/mp4" and cartesia.cloned[0]["bytes"] == 2048
-    assert client.get(VOICE_URL, headers=owner).json()["voices"][-1] == voice
+    # The sample is made just after the reply, so only the listing has its link.
+    listed = client.get(VOICE_URL, headers=owner).json()["voices"][-1]
+    assert voice["sample_url"] is None and listed["sample_url"]
+    assert listed | {"sample_url": None} == voice
 
     assert client.post(PREVIEW_URL, json={"voice_id": voice["id"]}, headers=helper).status_code == 200
     assert client.put(VOICE_URL, json={"voice_id": voice["id"]}, headers=owner).json() == {
@@ -633,11 +636,15 @@ def test_an_accent_copy_joins_her_voices_once_with_its_sample(
 
 
 @pytest.mark.usefixtures("clones_removed")
-def test_a_clone_keeps_the_speakers_accent(client: TestClient, owner_token: str, cartesia: FakeCartesia):
+def test_a_clone_keeps_the_speakers_accent(
+    client: TestClient, owner_token: str, cartesia: FakeCartesia, samples: dict[str, bytes]
+):
     owner = _bearer(owner_token)
     made = client.post(CLONES_URL, files=_clip(), data=_form() | {"accent": "british"}, headers=owner).json()
     assert made["accent"] == "british" and cartesia.cloned[0]["accent"] == "british"
-    assert made["sample_url"]
+    # The reply doesn't wait for the sample; it is made just after (TestClient runs it before returning).
+    assert made["sample_url"] is None
+    assert f"{TEST_RESIDENT_ID}/{made['id']}.mp3" in samples
     bad = client.post(CLONES_URL, files=_clip(), data=_form() | {"accent": "martian"}, headers=owner)
     assert bad.status_code == 422
 

@@ -11,7 +11,7 @@ like the residents router.
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Form, HTTPException, Response, status
+from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, Response, status
 
 from app.core.app_constants import FAMILY_APP_AGENT, SETTINGS_CHANGE_INTENT
 from app.core.dependencies import (
@@ -196,11 +196,14 @@ async def clone_voice(
     upload: CloneUploadDep,
     db: SupabaseDep,
     cartesia: CartesiaDep,
+    background: BackgroundTasks,
     accent: Annotated[str | None, Form()] = None,
 ) -> ResidentVoice:
     """Clone a voice from the multipart `clip` (10 to 60 seconds of one person, at most 10 MB),
     named `name`, with `consent` "true" from the person recorded and, optionally, the speaker's own
-    `accent` (an accent id). It joins her picker with its sample made."""
+    `accent` (an accent id). It joins her picker at once; its sample is made after the reply (a
+    TTS call and a Storage upload the family shouldn't wait for), and GET /samples makes it on
+    demand if Play comes first."""
     resident = login.resident
     accent = accent or None
     if accent and accent not in {a.id for a in await _accents_for(cartesia, resident["language"])}:
@@ -210,7 +213,7 @@ async def clone_voice(
     )
     row = await _keep_voice(db, cartesia, resident, voice["id"], upload.name, login.contact_id, accent=accent)
     clone = ResidentVoice.clone(row)
-    clone.sample_url = await _sample_or_none(db, cartesia, resident, clone.id)
+    background.add_task(_sample_or_none, db, cartesia, resident, clone.id)
     return clone
 
 

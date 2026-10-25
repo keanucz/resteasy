@@ -45,11 +45,15 @@ STT_WS = "wss://api.cartesia.ai/stt/turns/websocket"
 VERSION = "2026-08-14"
 TTS_MODEL = "sonic-3.6"
 STT_MODEL = "ink-2"
-# Skylar, en-US, a stable voice Cartesia recommends for agents (Sonic 3.6 docs, "Voice selection"); a
-# placeholder, we're in SF. Jacqueline (9626c31c-bec5-4cca-baa8-f8ba9e84c8bc) is the en-US fallback.
-# TODO(app): let the owner pick her voice in the family app. `residents.voice_id` already exists (still
-# defaulting to Gemma, en-GB) but nothing reads it yet: pass it here per pillow instead of this constant.
-VOICE_ID = os.environ.get("PILLOW_VOICE_ID", "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4")
+# Skylar, en-US, a stable voice Cartesia recommends for agents (Sonic 3.6 docs, "Voice selection"). Used
+# until the family's choice arrives (checkin_client reads GET /pillows/{id}/voice and calls set_style),
+# and whenever Cartesia refuses that voice (a clone deleted in the app). Jacqueline
+# (9626c31c-bec5-4cca-baa8-f8ba9e84c8bc) is the en-US alternative.
+FALLBACK_VOICE_ID = "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4"
+VOICE_ID = os.environ.get("PILLOW_VOICE_ID", FALLBACK_VOICE_ID)
+DEFAULT_SPEED = 0.85  # slower than Cartesia's default: she's older and may have just woken up
+DEFAULT_EMOTION = "calm"
+EMOTION_LANGUAGE = "en"  # Cartesia's emotions are English only
 # "laptop": the laptop's speaker + mic. "pillow": the voice unit, via sim/audio_bridge.py.
 AUDIO = os.environ.get("PILLOW_AUDIO", "laptop")
 # Where she hears it, if not the same place: PILLOW_SPEAKER=laptop keeps the pillow's mic but plays
@@ -77,8 +81,55 @@ def _key() -> str:
     return key
 
 
-def speak(text: str, *, speed: float = 0.85, emotion: str = "calm", volume: float = 1.0) -> None:
-    """Say `text` through the laptop speaker and block until it finishes.
+@dataclass(frozen=True)
+class Style:
+    """The voice the family chose in the app and how it speaks (GET /api/pillows/{id}/voice)."""
+
+    voice_id: str = VOICE_ID
+    language: str = "en"
+    speed: float = DEFAULT_SPEED
+    volume: float = 1.0
+    emotion: str = DEFAULT_EMOTION
+    pronunciation_dict_id: str | None = None
+
+    @classmethod
+    def from_api(cls, body: dict) -> Style:
+        """The backend's PillowVoice JSON; missing or null fields keep the defaults."""
+        known = {k: v for k, v in body.items() if k in cls.__dataclass_fields__ and v is not None}
+        return cls(**known)
+
+
+_style = Style()
+_style_lock = threading.Lock()
+_on_change: list = []
+_refused: set[str] = set()  # voices Cartesia refused this run: don't ask again for every line
+
+
+def style() -> Style:
+    """The voice in use now."""
+    return _style
+
+
+def set_style(new: Style) -> bool:
+    """Use `new` from now on; True (and every on_style_change callback runs) if anything changed."""
+    global _style
+    with _style_lock:
+        if new == _style:
+            return False
+        _style = new
+        _refused.discard(new.voice_id)  # picked again in the app: give it another try
+    for callback in list(_on_change):
+        callback(new)
+    return True
+
+
+def on_style_change(callback) -> None:
+    """Call `callback(style)` whenever set_style changes the voice, e.g. to re-render fixed lines."""
+    _on_change.append(callback)
+
+
+def speak(text: str, *, speed: float | None = None, emotion: str | None = None, volume: float = 1.0) -> None:
+    """Say `text` through the speaker and block until it finishes.
 
     Slower than default and calm: the listener is likely older and just woken up. `volume` (0.5-2.0)
     is applied here, not by Cartesia: its own control barely changes loudness because speech already
@@ -87,22 +138,58 @@ def speak(text: str, *, speed: float = 0.85, emotion: str = "calm", volume: floa
     play(render(text, speed=speed, emotion=emotion, volume=volume))
 
 
-def render(text: str, *, speed: float = 0.85, emotion: str = "calm", volume: float = 1.0) -> np.ndarray:
-    """`text` as speech samples, ready for `play`: fixed lines can be rendered once at start-up and
-    played instantly later (a Cartesia round trip is about a second)."""
+def _language(language: str) -> str:
+    """The bare language ("en" from "en-US" or "en_GB"), as Sonic takes it."""
+    return language.replace("_", "-").partition("-")[0] or "en"
+
+
+def tts_body(text: str, s: Style, *, speed: float | None = None, emotion: str | None = None) -> dict:
+    """The /tts/bytes request for `text` in style `s`; `speed` and `emotion` override hers."""
+    language = _language(s.language)
+    config: dict = {"speed": s.speed if speed is None else speed}
+    if language == EMOTION_LANGUAGE:
+        config["emotion"] = s.emotion if emotion is None else emotion
     body = {
         "model_id": TTS_MODEL,
         "transcript": text,
-        "voice": {"id": VOICE_ID},
-        "language": "en",
+        "voice": {"id": s.voice_id},
+        "language": language,
         "output_format": {"container": "raw", "encoding": "pcm_s16le", "sample_rate": TTS_RATE},
-        "generation_config": {"speed": speed, "emotion": emotion},
+        "generation_config": config,
     }
+    if s.pronunciation_dict_id:
+        body["pronunciation_dict_id"] = s.pronunciation_dict_id
+    return body
+
+
+def gain_for(volume: float, style_volume: float = 1.0) -> float:
+    """Linear gain for a line at `volume` (the caller's step, e.g. a louder second ask) scaled by the
+    volume the family set: 1.0 -> -12 dB, 2.0 -> full scale, clamped to 0.5-2.0."""
+    v = min(max(volume * style_volume, 0.5), 2.0)
+    return 10 ** ((v - 2.0) * 12 / 20)
+
+
+def render(text: str, *, speed: float | None = None, emotion: str | None = None, volume: float = 1.0) -> np.ndarray:
+    """`text` as speech samples, ready for `play`: fixed lines can be rendered once at start-up and
+    played instantly later (a Cartesia round trip is about a second).
+
+    Spoken in the family's chosen voice. If Cartesia refuses it (a clone deleted in the app, a bad
+    dictionary), the line is spoken in Skylar instead: she must never miss a line over the voice."""
+    s = _style
     headers = {"Authorization": f"Bearer {_key()}", "Cartesia-Version": VERSION}
-    r = httpx.post(f"{API}/tts/bytes", headers=headers, json=body, timeout=30)
+    if s.voice_id in _refused:
+        s = Style(voice_id=FALLBACK_VOICE_ID, speed=s.speed, volume=s.volume, emotion=s.emotion)
+    r = httpx.post(f"{API}/tts/bytes", headers=headers, json=tts_body(text, s, speed=speed, emotion=emotion),
+                   timeout=30)
+    if r.status_code in (400, 404, 422) and s.voice_id != FALLBACK_VOICE_ID:
+        print(f"[voice] Cartesia refused voice {s.voice_id} ({r.status_code}: {r.text[:120]}); "
+              "speaking in Skylar until the app picks another", file=sys.stderr, flush=True)
+        _refused.add(s.voice_id)
+        s = Style(voice_id=FALLBACK_VOICE_ID, speed=s.speed, volume=s.volume, emotion=s.emotion)
+        r = httpx.post(f"{API}/tts/bytes", headers=headers, json=tts_body(text, s, speed=speed, emotion=emotion),
+                       timeout=30)
     r.raise_for_status()
-    gain = 10 ** ((min(max(volume, 0.5), 2.0) - 2.0) * 12 / 20)  # 1.0 -> -12 dB, 2.0 -> 0 dB
-    return (np.frombuffer(r.content, dtype=np.int16) * gain).astype(np.int16)
+    return (np.frombuffer(r.content, dtype=np.int16) * gain_for(volume, s.volume)).astype(np.int16)
 
 
 def tone(freq_hz: float = 660.0, ms: int = 160, volume: float = 0.15) -> np.ndarray:

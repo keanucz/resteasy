@@ -436,15 +436,26 @@ def live_voice(pillow: Any, on_distress: Callable[[str], None], *, keywords: boo
     import voice
 
     fixed = {}
-    for line in FIXED_LINES:
-        try:
-            fixed[line] = voice.render(line)
-        except Exception as e:  # noqa: BLE001 - not pre-rendered just means a second slower
-            print(f"  (could not pre-render {line!r}: {e})", file=sys.stderr)
+
+    def prerender() -> None:
+        for line in FIXED_LINES:
+            try:
+                fixed[line] = voice.render(line)
+            except Exception as e:  # noqa: BLE001 - not pre-rendered just means a second slower
+                print(f"  (could not pre-render {line!r}: {e})", file=sys.stderr)
+
+    def new_voice(_style: Any) -> None:
+        """The family picked another voice: speak live until the fixed lines are rendered in it."""
+        fixed.clear()
+        threading.Thread(target=prerender, name="prerender", daemon=True).start()
+
+    prerender()
+    voice.on_style_change(new_voice)
     beep, got_it = voice.tone(), np.concatenate([voice.tone(660, 90), voice.tone(880, 120)])
 
     def say(text: str) -> None:
-        voice.play(fixed[text]) if text in fixed else voice.speak(text)
+        audio = fixed.get(text)
+        voice.play(audio) if audio is not None else voice.speak(text)
 
     return Voice(
         say=say, beep=lambda: voice.play(beep), got_it=lambda: voice.play(got_it), listen=voice.listen,
