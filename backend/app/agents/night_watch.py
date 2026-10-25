@@ -34,6 +34,25 @@ PATH_LIGHT_OFF = {"brightness_pct": 0, "color": "off", "fade_s": 10}
 FINE_ROUNDS_BEFORE_HEADS_UP = 2
 
 
+@dataclass(frozen=True)
+class Timings:
+    """How long the head reading must hold before the state changes, and how long she can be up
+    before the check-in starts. The defaults are the product's; `DEMO_TIMINGS` is for judging."""
+
+    lay_down_s: float = LAY_DOWN_S
+    bed_return_s: float = BED_RETURN_S
+    bed_exit_s: float = BED_EXIT_S
+    checkin_after_s: float | None = None  # None: the owner's `checkin_timeout_min`
+    recheck_after_fine_s: float | None = None  # after "I'm fine"; None: the same as checkin_after_s
+
+
+# PILLOW_DEMO_TIMINGS=1 on the server: every state shows within seconds of pressing or lifting the
+# head plate, so a five-minute judging slot sees them all. The check-in counts from the lift. After
+# "I'm fine" it waits a minute, so a rehearsal can't run into the second-fine family heads-up.
+DEMO_TIMINGS = Timings(lay_down_s=3, bed_return_s=3, bed_exit_s=5, checkin_after_s=15,
+                       recheck_after_fine_s=60)
+
+
 class State(StrEnum):
     AWAKE = "awake"  # daytime, or not in bed yet: nothing to watch
     IN_BED = "in_bed"
@@ -108,8 +127,9 @@ Action = Event | Command | Say | StartCheckin | CancelCheckin | Alert
 class NightWatch:
     """The state machine for one resident's pillow."""
 
-    def __init__(self, config: NightWatchConfig | None = None) -> None:
+    def __init__(self, config: NightWatchConfig | None = None, timings: Timings | None = None) -> None:
         self.cfg = config or NightWatchConfig()
+        self.timings = timings or Timings()
         self.state = State.AWAKE
         self._head_on = False  # debounced
         self._head_raw: bool | None = None
@@ -141,7 +161,7 @@ class NightWatch:
             return
         self.state = State.UP
         self._left_at = since
-        self._checkin_due = since + self.cfg.checkin_timeout_min * 60 if state is State.UP else -math.inf
+        self._checkin_due = since + self._checkin_wait_s() if state is State.UP else -math.inf
 
     def observe(self, s: dict) -> list[Action]:
         """Take one state message from her pillow (coord/CONTRACT.md 1) and return what to do.
@@ -159,11 +179,12 @@ class NightWatch:
             if head != self._head_raw:
                 self._head_raw, self._head_since = head, ts
             held = ts - self._head_since
-            lay_down_s = LAY_DOWN_S if self.state in (State.AWAKE, State.IN_BED) else BED_RETURN_S
+            t = self.timings
+            lay_down_s = t.lay_down_s if self.state in (State.AWAKE, State.IN_BED) else t.bed_return_s
             if head and not self._head_on and held >= lay_down_s:
                 self._head_on = True
                 out += self._head_arrived(ts)
-            elif not head and self._head_on and held >= BED_EXIT_S:
+            elif not head and self._head_on and held >= t.bed_exit_s:
                 self._head_on = False
                 out += self._head_left(ts, left_at=self._head_since)
         fine = bool((s.get("keys") or {}).get("fine"))
@@ -211,6 +232,12 @@ class NightWatch:
 
     # ---------- transitions ----------
 
+    def _checkin_wait_s(self) -> float:
+        """How long she may be up before the check-in starts."""
+        if self.timings.checkin_after_s is not None:
+            return self.timings.checkin_after_s
+        return self.cfg.checkin_timeout_min * 60
+
     def _head_arrived(self, ts: float) -> list[Action]:
         if self.state is State.AWAKE:
             if not self._is_night(ts):
@@ -237,7 +264,7 @@ class NightWatch:
             return [Event(ts, "got_up", {})]
         self.state = State.UP
         self._left_at = left_at
-        self._checkin_due = left_at + self.cfg.checkin_timeout_min * 60
+        self._checkin_due = left_at + self._checkin_wait_s()
         return [Event(ts, "bed_exit", {"left_at": left_at}),
                 Command(self.cfg.pillow_id, "set_light", dict(self.cfg.path_light)),
                 Say("The light's on. Take your time.")]
@@ -277,7 +304,8 @@ class NightWatch:
     def _said_fine(self, ts: float) -> list[Action]:
         self.state = State.UP
         self._fine_rounds += 1
-        self._checkin_due = ts + self.cfg.checkin_timeout_min * 60
+        recheck_s = self.timings.recheck_after_fine_s
+        self._checkin_due = ts + (recheck_s if recheck_s is not None else self._checkin_wait_s())
         if self._fine_rounds != FINE_ROUNDS_BEFORE_HEADS_UP:
             return []
         away = round((ts - self._left_at) / 60)

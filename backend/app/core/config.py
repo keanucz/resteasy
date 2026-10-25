@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     twilio_from_number: str = ""
     # Pillows whose alerts reach real phones; test pillows' rows are never sent
     notify_pillow_ids: list[str] = DEFAULT_NOTIFY_PILLOW_IDS
+    # Seconds-long Night Watch and sleep timings for the judged demo (night_watch.DEMO_TIMINGS);
+    # off = the product's real timings
+    pillow_demo_timings: bool = False
 
     @property
     def supabase_configured(self) -> bool:

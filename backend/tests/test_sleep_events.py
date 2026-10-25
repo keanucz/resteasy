@@ -1,7 +1,15 @@
 """The sleep-quality and key events of coord/CONTRACT.md section 2 that Night Watch doesn't derive:
 restless, asleep, key_talk, key_family."""
 
-from app.agents.sleep_events import ASLEEP_S, HEAD_OFF_GRACE_S, RESTLESS_S, SleepTracker
+from app.agents.sleep_events import (
+    ASLEEP_S,
+    DEMO_ASLEEP_S,
+    DEMO_HEAD_OFF_GRACE_S,
+    DEMO_RESTLESS_MOTION,
+    HEAD_OFF_GRACE_S,
+    RESTLESS_S,
+    SleepTracker,
+)
 
 T0 = 1_792_815_000.0
 
@@ -100,3 +108,32 @@ def test_a_longer_absence_ends_the_sleep_session():
     ts, _ = feed(tr, ts, HEAD_OFF_GRACE_S + 1, head_on=False)
     _, ev = feed(tr, ts, ASLEEP_S + 1, motion=0.03)
     assert types(ev) == ["asleep"]
+
+
+# ---------- demo timings (PILLOW_DEMO_TIMINGS=1) ----------
+
+
+def test_demo_restless_when_she_moves_and_settled_when_she_stops():
+    tr = SleepTracker(demo=True)
+    ts, ev = feed(tr, T0, 1, motion=DEMO_RESTLESS_MOTION + 0.1)
+    assert "restless" not in types(ev)  # one bump of the bedside unit isn't enough
+    ts, ev = feed(tr, ts, 1, motion=DEMO_RESTLESS_MOTION + 0.1)
+    assert types(ev) == ["restless"]
+    ts, ev = feed(tr, ts, 5, motion=0.5)
+    assert types(ev) == []  # still restless, said once
+    ts, ev = feed(tr, ts, 2, motion=0.02)
+    assert types(ev) == ["settled"]
+
+
+def test_demo_asleep_after_a_few_quiet_seconds():
+    tr = SleepTracker(demo=True)
+    _, ev = feed(tr, T0, DEMO_ASLEEP_S + 1, motion=0.02)
+    assert types(ev) == ["asleep"]
+
+
+def test_demo_leaving_the_bed_while_restless_closes_the_spell():
+    tr = SleepTracker(demo=True)
+    ts, ev = feed(tr, T0, 2, motion=0.6)
+    assert types(ev) == ["restless"]
+    _, ev = feed(tr, ts, DEMO_HEAD_OFF_GRACE_S + 1, head_on=False)
+    assert types(ev) == ["settled"]  # so lying down again shows asleep, not the old restless

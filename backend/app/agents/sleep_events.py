@@ -22,11 +22,23 @@ ASLEEP_S = 15 * 60  # ... continuously for this long, head on the pillow = aslee
 HEAD_OFF_GRACE_S = 3 * 60
 EDGE_KEYS = ("talk", "family")  # key_fine is Night Watch's (it cancels alerts)
 
+# PILLOW_DEMO_TIMINGS=1 on the server (with Night Watch's DEMO_TIMINGS): restless the moment she
+# moves, settled the moment she stops, so judges see both in seconds. Two reports in a row (one
+# second) either way, so a single bump of the bedside unit doesn't flip it.
+DEMO_RESTLESS_MOTION = 0.15
+DEMO_MOTION_REPORTS = 2
+DEMO_ASLEEP_S = 3
+DEMO_HEAD_OFF_GRACE_S = 5  # Night Watch's demo bed exit: off this long ends the bed session
+
 
 class SleepTracker:
     """Derives restless / asleep / key events from one pillow's state stream."""
 
-    def __init__(self) -> None:
+    def __init__(self, demo: bool = False) -> None:
+        self._demo = demo
+        self._asleep_s = DEMO_ASLEEP_S if demo else ASLEEP_S
+        self._grace_s = DEMO_HEAD_OFF_GRACE_S if demo else HEAD_OFF_GRACE_S
+        self._streak = 0  # demo: reports in a row on the other side of DEMO_RESTLESS_MOTION
         self._last_ts = -math.inf
         self._window: deque[tuple[float, float]] = deque()  # (ts, motion) over the last RESTLESS_S
         self._quiet_since: float | None = None  # first ts of the current run of motion < ASLEEP_MOTION
@@ -47,8 +59,8 @@ class SleepTracker:
         if not head:
             if self._off_since is None:
                 self._off_since = ts
-            elif ts - self._off_since >= HEAD_OFF_GRACE_S:
-                self._leave_bed()  # really up, not just rolled over
+            elif ts - self._off_since >= self._grace_s:
+                out += self._leave_bed(ts)  # really up, not just rolled over
             return out
         self._off_since = None
         return out + self._motion(ts, float(motion))
@@ -64,15 +76,44 @@ class SleepTracker:
             self._keys_held[key] = held
         return out
 
-    def _leave_bed(self) -> None:
+    def _leave_bed(self, ts: float) -> list[Event]:
+        # In the demo a restless spell left open would still show "restless" when she lies down again
+        out = [Event(ts, "settled", {"left_bed": True})] if self._demo and self._restless else []
         self._window.clear()
         self._quiet_since = None
         self._asleep = False
         self._restless = False
+        self._streak = 0
+        return out
 
     def _motion(self, ts: float, motion: float) -> list[Event]:
+        out = self._demo_restless(ts, motion) if self._demo else self._restless_window(ts, motion)
+        # asleep: continuously quiet for the asleep time
+        if motion < ASLEEP_MOTION:
+            if self._quiet_since is None:
+                self._quiet_since = ts
+            if not self._asleep and ts - self._quiet_since >= self._asleep_s:
+                self._asleep = True
+                quiet = {"quiet_s": self._asleep_s} if self._demo else {"quiet_min": ASLEEP_S // 60}
+                out.append(Event(ts, "asleep", quiet))
+        else:
+            self._quiet_since = None
+        return out
+
+    def _demo_restless(self, ts: float, motion: float) -> list[Event]:
+        moving = motion >= DEMO_RESTLESS_MOTION
+        self._streak = self._streak + 1 if moving != self._restless else 0
+        if self._streak < DEMO_MOTION_REPORTS:
+            return []
+        self._streak = 0
+        self._restless = moving
+        if moving:
+            return [Event(ts, "restless", {"motion": round(motion, 3)})]
+        return [Event(ts, "settled", {"motion": round(motion, 3)})]
+
+    def _restless_window(self, ts: float, motion: float) -> list[Event]:
+        """Restless: the average motion over a full RESTLESS_S window."""
         out = []
-        # restless: average over a full RESTLESS_S window
         self._window.append((ts, motion))
         while self._window and self._window[0][0] < ts - RESTLESS_S:
             self._window.popleft()
@@ -85,13 +126,4 @@ class SleepTracker:
             elif avg <= RESTLESS_MOTION and self._restless:
                 self._restless = False
                 out.append(Event(ts, "settled", {"motion_avg": round(avg, 3)}))
-        # asleep: continuously quiet for ASLEEP_S
-        if motion < ASLEEP_MOTION:
-            if self._quiet_since is None:
-                self._quiet_since = ts
-            if not self._asleep and ts - self._quiet_since >= ASLEEP_S:
-                self._asleep = True
-                out.append(Event(ts, "asleep", {"quiet_min": ASLEEP_S // 60}))
-        else:
-            self._quiet_since = None
         return out

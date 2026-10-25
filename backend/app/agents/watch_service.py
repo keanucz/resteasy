@@ -32,6 +32,7 @@ from app.agents.guardian import Guardian, GuardianConfig
 from app.agents.liaison import Liaison, Situation
 from app.agents.night_summary import last_night_window
 from app.agents.night_watch import (
+    DEMO_TIMINGS,
     Action,
     Alert,
     Command,
@@ -41,6 +42,7 @@ from app.agents.night_watch import (
     State,
 )
 from app.agents.sleep_events import SleepTracker
+from app.core.config import get_settings
 from app.crud.commands import queue_command
 from app.crud.night_log import (
     add_event,
@@ -187,7 +189,9 @@ class WatchService:
             async with self._create_lock:
                 w = self._watches.get(pillow.id)
                 if w is None:
-                    w = _Watch(NightWatch())
+                    demo = get_settings().pillow_demo_timings
+                    w = _Watch(NightWatch(timings=DEMO_TIMINGS if demo else None),
+                               sleep=SleepTracker(demo=demo))
                     await self._load_settings(db, pillow, w, ts)
                     saved = await get_state(db, pillow.id)
                     if saved and saved.night_state != State.AWAKE:

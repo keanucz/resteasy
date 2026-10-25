@@ -9,6 +9,7 @@ import pytest
 
 from app.agents.night_watch import (
     BED_RETURN_S,
+    DEMO_TIMINGS,
     Alert,
     CancelCheckin,
     Command,
@@ -241,3 +242,48 @@ def test_reports_from_the_past_are_ignored():
     ts, _ = feed(nw, NIGHT, 10, True)
     assert nw.observe({"ts": NIGHT - 100, "head_on": False, "keys": {"fine": True}}) == []
     assert nw.tick(NIGHT - 100) == []
+
+
+# ---------- demo timings (PILLOW_DEMO_TIMINGS=1) ----------
+
+
+def play(nw, start, head_by_second):
+    """Feed one report a second, head on or off as listed; returns [(second, action)]."""
+    out = []
+    for second, head in enumerate(head_by_second):
+        out += [(second, a) for a in nw.observe({"ts": start + second, "head_on": head, "keys": {}})]
+    return out
+
+
+def second_of(log, kind):
+    return next(second for second, a in log if isinstance(a, Event) and a.type == kind)
+
+
+def test_demo_timings_show_every_state_within_seconds():
+    nw = NightWatch(timings=DEMO_TIMINGS)
+    # on 3 s = in bed; lifted at 10: up 5 s later, check-in 15 s after the lift; back on 3 s = back in bed
+    log = play(nw, NIGHT, [True] * 10 + [False] * 20 + [True] * 5)
+    assert second_of(log, "lay_down") == 3
+    assert second_of(log, "bed_exit") == 15
+    assert second_of(log, "no_return") == 25
+    assert any(isinstance(a, StartCheckin) for s, a in log if s == 25)
+    assert second_of(log, "bed_return") == 33
+    assert nw.state is State.IN_BED
+
+
+def test_demo_asks_again_a_minute_after_she_says_fine():
+    nw = NightWatch(timings=DEMO_TIMINGS)
+    play(nw, NIGHT, [True] * 4 + [False] * 20)  # check-in started at 19
+    assert nw.state is State.CHECK_IN
+    nw.checkin_done(NIGHT + 24, escalate=False, reason="")
+    assert nw.state is State.UP
+    assert nw.tick(NIGHT + 24 + 59) == []  # not 15 s: a rehearsal mustn't reach the family heads-up
+    assert any(isinstance(a, StartCheckin) for a in nw.tick(NIGHT + 24 + 60))
+
+
+def test_default_timings_are_the_products():
+    nw = NightWatch()
+    log = play(nw, NIGHT, [True] * 6 + [False] * 12)
+    assert second_of(log, "lay_down") == 5
+    assert second_of(log, "bed_exit") == 16  # 10 s after the lift at 6
+    assert nw.state is State.UP  # the check-in waits the owner's minutes, not seconds
