@@ -102,7 +102,8 @@ def test_judge_wording_used_for_fine_but_not_distress():
         if "fallen" in text:
             return Verdict(Kind.DISTRESS, "a made-up distress line")
         return Verdict(Kind.FINE, "Lovely, take your time.")
-    speak, listen, said = fake("I'm good")
+    # long enough to go to the judge (a short "I'm good" stands down without it)
+    speak, listen, said = fake("I'm good, I just needed some water and a little walk")
     run_checkin(speak, listen, judge=judge)
     assert said[-1][0] == "Lovely, take your time."
     speak, listen, said = fake("I've fallen")
@@ -243,3 +244,48 @@ def test_help_in_passing_chatter_does_not(text):
     from judge import asked_for_help
 
     assert not asked_for_help(text)
+
+
+@pytest.mark.parametrize("reply", ["I'm fine.", "Yes, I'm fine.", "Yes.", "I'm okay, just the loo"])
+def test_a_plain_im_fine_skips_the_judge(reply):
+    def judge(_q, _t):
+        raise AssertionError("the judge should not be asked")
+
+    speak, listen, said = fake(reply)
+    out = run_checkin(speak, listen, judge=judge)
+    assert not out.escalate
+
+
+@pytest.mark.parametrize("reply", ["I'm fine but I fell", "I'm not fine", "I'm fine, where am I?",
+                                   "I'm okay I think but my chest hurts a bit"])
+def test_anything_hedged_or_alarming_still_goes_to_the_judge(reply):
+    from judge import plainly_fine
+
+    assert not plainly_fine(reply)
+
+
+def test_the_outcome_is_reported_before_the_closing_line():
+    events = []
+    speak, listen, said = fake("I'm fine")
+
+    def speak_logged(text, volume=1.0):
+        events.append(("say", text))
+        speak(text, volume=volume)
+
+    out = run_checkin(speak_logged, listen, report=lambda o: events.append(("report", o.escalate)))
+    assert not out.escalate
+    assert events.index(("report", False)) < len(events) - 1  # reported, then the last line spoken
+    assert events[-1][0] == "say"
+
+
+def test_distress_is_reported_before_she_is_told_help_is_coming():
+    events = []
+    speak, listen, said = fake("I've fallen, I can't get up")
+
+    def speak_logged(text, volume=1.0):
+        events.append(("say", text))
+        speak(text, volume=volume)
+
+    out = run_checkin(speak_logged, listen, report=lambda o: events.append(("report", o.escalate)))
+    assert out.escalate and out.distress
+    assert events[-2] == ("report", True) and "Help is coming" in events[-1][1]
