@@ -149,6 +149,7 @@ class NightWatch:
         self._alerted: list[str] = []  # contacts told so far, to tell them when she's okay
         self._reason = ""  # why we escalated, repeated in every alert
         self._distress = False  # escalated on something she said, not a no-return
+        self._on_trip = False  # escalated from a check-in on a trip out of bed (vs a daytime reply)
         self._acked = False  # a family member acknowledged this escalation
 
     # ---------- inputs ----------
@@ -216,7 +217,9 @@ class NightWatch:
         distress = escalate and distress
         out: list[Action] = [Event(ts, "checkin_result",
                                    {"escalate": escalate, "reason": reason, "distress": distress})]
-        return out + (self._escalate(ts, reason, distress=distress) if escalate else self._said_fine(ts))
+        if not escalate:
+            return out + self._said_fine(ts)
+        return out + self._escalate(ts, reason, distress=distress, on_trip=True)
 
     def distress_heard(self, ts: float, reason: str) -> list[Action]:
         """She said something alarming outside a check-in (answering a reminder, say): escalate now,
@@ -321,8 +324,12 @@ class NightWatch:
                 Alert(contact, "sms", f"Heads-up, no action needed: {self.cfg.resident} has been up "
                                       f"{away} min but says she's fine.")]
 
-    def _escalate(self, ts: float, reason: str, distress: bool = False) -> list[Action]:
+    def _escalate(
+        self, ts: float, reason: str, distress: bool = False, on_trip: bool = False
+    ) -> list[Action]:
+        """`on_trip`: from a check-in, so she got up at `_left_at` (a distress call can say when)."""
         self.state = State.ESCALATING
+        self._on_trip = on_trip
         self._acked = False
         self._distress = distress
         # Least intrusive first: an in-app alert to every contact at once, then SMS and a call to
@@ -347,7 +354,10 @@ class NightWatch:
             return [Event(ts, "ladder_exhausted", {})]
         step = self._ladder.pop(0)
         self._next_step_at = ts + self.cfg.step_wait_min * 60
-        if self._distress:
+        if self._distress and self._on_trip:
+            left = datetime.fromtimestamp(self._left_at, ZoneInfo(self.cfg.timezone)).strftime("%H:%M")
+            message = f"{self.cfg.resident} asked for help. She got up at {left}. {self._reason}"
+        elif self._distress:
             message = f"{self.cfg.resident} may need help. {self._reason}"
         else:
             left = datetime.fromtimestamp(self._left_at, ZoneInfo(self.cfg.timezone)).strftime("%H:%M")

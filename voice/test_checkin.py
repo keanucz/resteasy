@@ -185,3 +185,26 @@ def test_after_alert_anything_but_im_fine_keeps_the_alert(reply):
     speak, listen, said = fake(reply)
     assert ask_after_alert(speak, listen) is False
     assert len(said) == 1  # only the question: nothing that sounds like standing down
+
+
+@pytest.mark.parametrize("reply,calls_now", [
+    ("I'm hurt, please help", True),
+    ("I've fallen and I can't get up", True),
+    ("help me", True),
+    ("please call Sarah for me", True),
+    ("I didn't bleed properly", False),  # venue chatter Claude read as distress: gentle ladder
+    ("I'm scared", False),
+    ("I feel dizzy", False),
+])
+def test_only_an_explicit_call_for_help_phones_family_at_once(reply, calls_now):
+    speak, listen, said = fake(reply)
+    out = run_checkin(speak, listen, judge=lambda _q, _t: Verdict(Kind.DISTRESS))
+    assert out.escalate and out.distress is calls_now
+    assert out.reason == f'She said: "{reply}"'  # what the call tells family
+
+
+@pytest.mark.parametrize("text", ["I don't need help", "no help needed, I'm fine", "I'm not hurt"])
+def test_saying_no_help_is_not_asking_for_it(text):
+    from judge import asked_for_help
+
+    assert not asked_for_help(text)

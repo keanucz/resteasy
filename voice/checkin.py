@@ -27,7 +27,7 @@ import argparse
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from judge import Judge, Kind, Verdict, keyword_judge, said_fine
+from judge import Judge, Kind, Verdict, asked_for_help, keyword_judge, said_fine
 
 
 @dataclass
@@ -35,7 +35,7 @@ class Outcome:
     escalate: bool
     reason: str  # one plain sentence for the family message, never a diagnosis
     heard: list[str] = field(default_factory=list)
-    distress: bool = False  # she sounded in trouble: the server calls family at once
+    distress: bool = False  # she asked for help in so many words: the server calls family at once
 
 
 Speak = Callable[..., None]  # speak(text, volume=...)
@@ -91,7 +91,7 @@ def run_checkin(
 
     def distress() -> Outcome:
         speak(f"Okay. I'm getting {contact} for you now. Help is coming.", volume=1.3)
-        return Outcome(True, f'She said: "{heard[-1]}"', heard, distress=True)
+        return Outcome(True, f'She said: "{heard[-1]}"', heard, distress=asked_for_help(heard[-1]))
 
     def fine(v: Verdict) -> Outcome:
         speak(_usable(v.say) or "Glad you're okay. Take your time.")

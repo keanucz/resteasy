@@ -67,6 +67,21 @@ def keyword_judge(_question: str, text: str) -> Verdict:
     return Verdict(classify(text, True))
 
 
+# An explicit call for help: only these phone family at once. A reply Claude merely reads as distress
+# (a TV, chatter across the room: "I didn't bleed properly") still escalates, up the gentle ladder.
+_ASKED_FOR_HELP = re.compile(
+    r"\b(help|hurt|hurts|injured|fallen|i fell|fell down|can'?t get up|cannot get up|can'?t move|"
+    r"cannot move|bleeding|ambulance|chest pain|can'?t breathe|cannot breathe|"
+    r"call (?:someone|somebody|an ambulance|my \w+|\w+ for me))\b")
+_NO_HELP = re.compile(r"\b(?:don'?t|do not|no|not)\s+(?:need\s+)?(?:any\s+)?(?:help|hurt)\b")
+
+
+def asked_for_help(text: str) -> bool:
+    """She asked for help in so many words ("I'm hurt, please help", "I've fallen"): call at once."""
+    t = text.lower().replace("’", "'")
+    return bool(_ASKED_FOR_HELP.search(t)) and not _NO_HELP.search(t)
+
+
 def said_fine(text: str) -> bool:
     """An explicit "I'm fine" (not just "yes"), as needed to cancel an alert she was warned about."""
     return bool(_SAID_FINE.search(text.lower().replace("’", "'"))) and classify(text, True) is Kind.FINE

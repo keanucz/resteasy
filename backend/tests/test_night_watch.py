@@ -195,6 +195,8 @@ def test_distress_in_a_checkin_phones_everyone_at_once_then_texts():
         ("app", "Sarah"), ("app", "Tom"), ("call", "Sarah")]  # Tom takes no calls
     step = next(a for a in acts if isinstance(a, Event) and a.type == "escalation_step")
     assert step.data["kind"] == "distress"
+    call = next(a for a in acts if isinstance(a, Alert) and a.channel == "call")
+    assert "asked for help. She got up at 23:00." in call.message and "Help, I have fallen" in call.message
     later = nw.observe({"ts": ts + 2 * 60 + 1, "head_on": False, "keys": {"fine": False}})
     assert [(a.channel, a.contact) for a in later if isinstance(a, Alert)] == [("sms", "Sarah")]
 
