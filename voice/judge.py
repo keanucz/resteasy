@@ -91,8 +91,10 @@ def keyword_judge(_question: str, text: str) -> Verdict:
 _ASKED_FOR_HELP = re.compile(
     r"\b(hurt|hurts|injured|fallen|i fell|fell down|can'?t get up|cannot get up|can'?t move|"
     r"cannot move|bleeding|ambulance|chest pain|can'?t breathe|cannot breathe|"
+    r"dizzy|faint|fainted|fainting|throw(?:ing)? up|vomit\w*|(?:feel|feeling) (?:really |very )?(?:sick|unwell|ill)|"
     r"call (?:someone|somebody|an ambulance|my \w+|\w+ for me))\b")
-_NO_HELP = re.compile(r"\b(?:don'?t|do not|no|not)\s+(?:need\s+)?(?:any\s+)?(?:help|hurt)\b")
+_NO_HELP = re.compile(r"\b(?:don'?t|do not|no|not)\s+(?:need\s+|feeling\s+|feel\s+)?(?:any\s+)?"
+                      r"(?:help|hurt|dizzy|faint|sick|unwell|ill)\b")
 # The word "help" alone is chatter as often as a plea ("agentic help", "that helps"): it counts only
 # when asked of the pillow ("help me", "please help", "I need help", "pillow, help") or when it is
 # most of a short reply ("Help!"). Asking for help with a task ("help me think") is not a plea.

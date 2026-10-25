@@ -363,12 +363,13 @@ class NightWatch:
         self._distress = distress
         # Least intrusive first: an in-app alert to every contact at once, then SMS and a call to
         # each contact in turn, skipping the channels a contact turned off. Distress (she asked for
-        # help, or said she's fallen) is critical: the first step also phones every contact who takes
-        # calls, all at once, and texts follow one by one.
+        # help, or said she's fallen or feels dizzy or faint) is critical: the first step also phones
+        # and texts every contact who takes calls / texts, all at once.
         first = [("app", c) for c in self.cfg.contacts if self._allows(c, "app")]
         if distress if urgent is None else urgent:
             first += [("call", c) for c in self.cfg.contacts if self._allows(c, "call")]
-            ladder = [first] + [[("sms", c)] for c in self.cfg.contacts if self._allows(c, "sms")]
+            first += [("sms", c) for c in self.cfg.contacts if self._allows(c, "sms")]
+            ladder = [first]
         else:
             ladder = [first]
             for contact in self.cfg.contacts:

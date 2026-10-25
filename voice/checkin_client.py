@@ -143,6 +143,7 @@ def main() -> None:
         judge_fn, reminder_judge = judge.claude_judge, judge.claude_reminder_judge
 
     base = f"{args.server.rstrip('/')}/api/pillows/{args.pillow_id}"
+    demo = os.environ.get("PILLOW_DEMO_TIMINGS") == "1"  # judging: one ask, short waits, fast alert
     watcher = Watcher()
     auth = {"Authorization": f"Bearer {token}"}
     last_reminder_check = 0.0
@@ -302,7 +303,8 @@ def main() -> None:
 
                     out = checkin.run_checkin(speak, listen, judge=judge_fn, contact=args.contact,
                                               log=lambda m: print(f"          {m}", flush=True),
-                                              should_stop=stop_checkin.is_set, report=report)
+                                              should_stop=stop_checkin.is_set, report=report,
+                                              **(checkin.DEMO_PACE if demo else {}))
                     drop_stale_talk()
                     if out.reason == checkin.STOPPED_REASON:
                         print(f"{stamp}  check-in stopped: she pressed I'm fine (the server knows)", flush=True)

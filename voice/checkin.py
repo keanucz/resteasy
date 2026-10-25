@@ -56,6 +56,9 @@ STOPPED_REASON = "She pressed I'm fine."
 FIRST_ASK = "Are you alright?"
 FINE_LINE = "Glad you're okay. Take your time."
 FIXED_LINES = ((FIRST_ASK, VOLUMES[0]), (FINE_LINE, 1.0))  # rendered once by the client: no wait
+# PILLOW_DEMO_TIMINGS=1 on the base laptop (as on the server): one ask, then the warning, so a silent
+# check-in reaches family in about 20 s on camera instead of about a minute.
+DEMO_PACE = {"max_tries": 1, "no_answer_s": 6.0, "cancel_s": 8.0}
 
 
 MAX_TRIES = 2  # "Are you alright?" twice, then the warning; the server then waits before asking again
