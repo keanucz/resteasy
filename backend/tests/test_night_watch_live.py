@@ -62,7 +62,7 @@ def _escalate(client: TestClient) -> None:
     _report(client, 0, True)
     _report(client, 6, True)  # head on 5 s: lay_down
     _report(client, 60, False)
-    _report(client, 91, False)  # head off 30 s: bed_exit
+    _report(client, 91, False)  # head off over 10 s: bed_exit
     _report(client, 60 + 20 * 60, False)  # 20 min since she left: check-in
     assert client.get(STATE_URL).json()["night_state"] == "check_in"
     checkin_url = f"/api/pillows/{TEST_PILLOW_ID}/checkin"

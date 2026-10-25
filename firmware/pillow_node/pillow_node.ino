@@ -4,7 +4,7 @@
 // (firmware/libraries/PillowRadio) to the voice unit at the bedside, which prints it on its USB as
 // "UNO <line>" for sim/audio_bridge.py --server (the name stayed from the Uno days; the laptop side,
 // sim/uno_state.py, is unchanged). The node never decides what a reading means: lay_down (5 s),
-// bed_exit (30 s) and the sleep rules live on the server.
+// bed_exit (10 s) and the sleep rules live on the server.
 //
 // Sensors (3.3 V only: the S3 is not 5 V tolerant; ADC1 = GPIO1-10 for analog; avoid GPIO0/3/45/46
 // (strapping), 19/20 (USB), 48 (RGB LED), 18/17 (kept free for a UART)):

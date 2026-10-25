@@ -74,7 +74,7 @@ def test_good_night_lights_the_path_and_never_checks_in():
 def test_no_return_checks_in_after_20_min_then_escalates_up_the_ladder():
     nw, log = run(scenario("no_return"))
     exit_min = first(log, lambda a: isinstance(a, Event) and a.type == "bed_exit")
-    assert exit_min == pytest.approx(60.5, abs=0.02)  # head off at 60, confirmed after 30 s
+    assert exit_min == pytest.approx(60 + 10 / 60, abs=0.02)  # head off at 60, confirmed after 10 s
     assert first(log, lambda a: isinstance(a, StartCheckin)) == pytest.approx(80, abs=0.02)  # from head-off
     alerts = [(m, a.channel) for m, a in log if isinstance(a, Alert)]
     assert alerts == [(pytest.approx(80, abs=0.02), "app"), (pytest.approx(82, abs=0.02), "sms"),
@@ -134,7 +134,7 @@ def test_daytime_is_not_watched_unless_quiet_hours_are_off():
 
 
 def test_a_brief_head_lift_is_not_a_bed_exit():
-    phases = [(0, sim.ASLEEP), (10, sim.OUT_OF_BED), (10.33, sim.ASLEEP), (20, sim.ASLEEP)]  # 20 s off
+    phases = [(0, sim.ASLEEP), (10, sim.OUT_OF_BED), (10.1, sim.ASLEEP), (20, sim.ASLEEP)]  # 6 s off
     _, log = run(phases)
     assert "bed_exit" not in events(log)
 

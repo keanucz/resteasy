@@ -11,7 +11,7 @@
 // Output: one JSON object per line at 9600 baud (UNO_BAUD in voice_unit.ino), every 500 ms and at
 // once when the contact changes. Only the fields this board has; the rest are null as the contract
 // asks. Under 200 chars (the voice unit drops longer lines). The Uno does NOT decide what a reading
-// means: lay_down (5 s), bed_exit (30 s) and the sleep rules are derived on the server
+// means: lay_down (5 s), bed_exit (10 s) and the sleep rules are derived on the server
 // (backend/app/agents/night_watch.py, sleep_events.py). Only a short electrical debounce lives here.
 //
 //   {"head_on":1,"motion":null,"room_motion":null,"light":null,"temp_c":null,"humidity":null,"fine":0,"talk":0,"family":0}

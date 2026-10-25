@@ -15,7 +15,7 @@ pillow state ─> event deriver ─> Night Watch state machine ─> Claude tool 
 
 | Need | Source | Note |
 |---|---|---|
-| head on / off | DS18B20 warmth + DHT11 humidity in the pillow | slow (seconds to minutes); fine for the 30 s `bed_exit` rule |
+| head on / off | DS18B20 warmth + DHT11 humidity in the pillow | slow (seconds to minutes); fine for the 10 s `bed_exit` rule |
 | someone by the bed | HC-SR04 ultrasonic aimed at the floor → `room_motion` | replaces the PIR the contract assumed |
 | restlessness | MPU6050 → `motion` | |
 | "I'm fine" | hit sensor tap → `keys.fine` | the only key on Mum's pillow |

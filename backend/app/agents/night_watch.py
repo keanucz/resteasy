@@ -24,7 +24,7 @@ LAY_DOWN_S = 5  # head on this long = lying down (coord/CONTRACT.md 2)
 # Head on this long = back in bed while she's up. Longer than LAY_DOWN_S: a brief reading from the
 # slow warmth/humidity sensor must not end an incident mid-escalation.
 BED_RETURN_S = 45
-BED_EXIT_S = 30  # head off this long = out of bed
+BED_EXIT_S = 10  # head off this long = out of bed (10 s so the demo reacts quickly; was 30)
 CHECKIN_MAX_S = 180  # a check-in that hasn't reported back by now is treated as failed
 
 PATH_LIGHT_ON = {"brightness_pct": 20, "color": "warm", "fade_s": 3}

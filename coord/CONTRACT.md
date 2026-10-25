@@ -41,7 +41,7 @@ is logged as `key_talk`. The `keys` object above stays for a keypad wired to the
 | Event | Rule (defaults; thresholds live in config, not in the LLM) |
 |---|---|
 | `lay_down` | `head_on` false → true for ≥ 5 s |
-| `bed_exit` | `head_on` true → false for ≥ 30 s, between 22:00 and 07:00 |
+| `bed_exit` | `head_on` true → false for ≥ 10 s, inside the quiet hours (default 22:00–07:00; equal = all day) |
 | `bed_return` | `head_on` true again after a `bed_exit` |
 | `no_return` | `bed_exit` and no `bed_return` within `checkin_timeout_min` (20) |
 | `restless` | `head_on` and `motion` > 0.35 averaged over 10 min |

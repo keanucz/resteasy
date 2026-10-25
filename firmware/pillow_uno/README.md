@@ -6,7 +6,7 @@ which prints the same line itself. Kept for reference and for the bench bridge (
 The head sensor is a pressure plate: two cardboard sheets faced with aluminium foil, foam or cloth
 between them. A head pressing them together closes the circuit. The Uno reads it and prints one
 JSON line per 500 ms; it never decides what a reading means (that is the server's job, per
-`coord/CONTRACT.md`: `lay_down` after 5 s, `bed_exit` after 30 s, sleep rules in
+`coord/CONTRACT.md`: `lay_down` after 5 s, `bed_exit` after 10 s, sleep rules in
 `backend/app/agents/sleep_events.py`).
 
 ## Wiring
