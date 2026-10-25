@@ -10,7 +10,8 @@
 // (strapping), 19/20 (USB), 48 (RGB LED), 18/17 (kept free for a UART)):
 //   head switch plate: two foil-faced cardboard sheets, a head pressing them together closes the
 //     circuit. One sheet -> PLATE_PIN (INPUT_PULLUP, pressed reads LOW), the other -> GND.
-//   (room light, temp/humidity, motion: not wired yet, reported as null)
+//   DHT11 module: DATA -> GPIO7, VCC -> 3V3, GND -> shared ground; sampled every 2 s.
+//   (room light and motion: not wired yet, reported as null)
 // Buzzer: the kit's passive buzzer, BUZZER_PIN -> 100 ohm -> buzzer +, buzzer - -> GND. It plays
 //   the server's `buzz` command ("BUZZ chime 1", from the voice unit over ESP-NOW: firmware/libraries/
 //   PillowBuzz). Our hellos tell the voice unit a buzzer is here, so it doesn't play the same sound
@@ -35,10 +36,21 @@
 #include <PillowBuzz.h>
 #include <PillowRadio.h>
 #include "driver/gpio.h"
+#include <DHT.h>
+
+#ifndef PILLOW_USB_DEBUG
+#define PILLOW_USB_DEBUG 0 // standalone: no application USB serial reads or writes
+#endif
+#if PILLOW_USB_DEBUG
+#define USB_LOG(...) __VA_ARGS__
+#else
+#define USB_LOG(...) do {} while (0)
+#endif
 
 #define PLATE_PIN 4   // <- one foil sheet; the other sheet -> GND
 #define BUZZER_PIN 5  // -> 100 ohm -> passive buzzer; -1 = none wired
 #define LED_PIN 6     // -> 220 ohm -> debug LED -> GND; -1 = none wired
+#define DHT_PIN 7
 const uint8_t HELLO_HAS_BUZZER = 2;  // bit in our hellos' app byte (firmware/libraries/PillowRadio)
 
 const uint32_t REPORT_MS = 500;        // the contract's ~2 reports per second
@@ -94,7 +106,7 @@ void startPendingBuzz() {
   buzzPending = false;
   portEXIT_CRITICAL(&buzzMux);
   if (!pending) return;
-  Serial.printf("buzz: %s x%d\n", pattern.notes == buzz::CHIME.notes ? "chime" : "alert", repeat);
+  USB_LOG(Serial.printf("buzz: %s x%d\n", pattern.notes == buzz::CHIME.notes ? "chime" : "alert", repeat));
   buzzer.start(pattern, repeat);
 }
 
@@ -116,7 +128,7 @@ int talkKey(const String &line) {
 void printStats() {
   char line[200];
   radio::formatStats(line, sizeof(line));
-  Serial.println(line);
+  USB_LOG(Serial.println(line));
 }
 
 void forward(const String &line) {
@@ -129,12 +141,12 @@ void forward(const String &line) {
     return;
   }
   String out = "UNO " + line;
-  Serial.println(out);
+  USB_LOG(Serial.println(out));
   if (radio::sendText(radio::PKT_LINE, out.c_str())) blinkUntil = millis() + BLINK_MS;
   static int lastTalk = 0;
   int talk = talkKey(line);
   if (talk == 1 && lastTalk == 0) {
-    Serial.println("KEY talk");
+    USB_LOG(Serial.println("KEY talk"));
     radio::sendReliableText(radio::PKT_EVENT, "talk");  // acked and resent: never lost
   }
   if (talk >= 0) lastTalk = talk;
@@ -145,6 +157,27 @@ void forward(const String &line) {
 bool headOn = false;  // debounced plate contact
 bool plateRaw = false;
 uint32_t plateSince = 0;
+
+// DHT11's start pulse waits 20 ms. Keep that wait out of the pressure/LED loop.
+// Only this worker owns the DHT instance. Snapshot both readings together.
+DHT dht(DHT_PIN, DHT11);
+portMUX_TYPE dhtMux = portMUX_INITIALIZER_UNLOCKED;
+float temperatureC = NAN, humidityPct = NAN;
+void dhtTask(void *) {
+  for (;;) {
+    vTaskDelay(pdMS_TO_TICKS(2000)); // includes sensor power-up settling
+    float h = dht.readHumidity();
+    float t = dht.readTemperature(); // uses the same cached, checksum-checked sample
+    if (!isfinite(t) || !isfinite(h) || h < 0 || h > 100) {
+      t = NAN;
+      h = NAN; // never present a failed/stale reading as current
+    }
+    portENTER_CRITICAL(&dhtMux);
+    temperatureC = t;
+    humidityPct = h;
+    portEXIT_CRITICAL(&dhtMux);
+  }
+}
 
 void showLed() {
 #if LED_PIN >= 0
@@ -172,13 +205,20 @@ String stateLine() {
   s.reserve(STATE_LINE_MAX);
   s += "{\"head_on\":";
   s += headOn ? "1" : "0";
-  s += ",\"motion\":null,\"room_motion\":null,\"light\":null,\"temp_c\":null,\"humidity\":null";
+  portENTER_CRITICAL(&dhtMux);
+  float t = temperatureC, h = humidityPct;
+  portEXIT_CRITICAL(&dhtMux);
+  s += ",\"motion\":null,\"room_motion\":null,\"light\":null,\"temp_c\":";
+  s += isfinite(t) ? String(t, 1) : String("null");
+  s += ",\"humidity\":";
+  s += isfinite(h) ? String(h, 1) : String("null");
   s += ",\"fine\":0,\"talk\":0,\"family\":0}";
   return s;
 }
 
 // A JSON line typed on USB: a bench test without the sensors
 void readUsb(String &line, bool &garbled) {
+#if PILLOW_USB_DEBUG
   while (Serial.available()) {
     char ch = Serial.read();
     if (ch == '\r') continue;
@@ -192,10 +232,15 @@ void readUsb(String &line, bool &garbled) {
     line = "";
     garbled = false;
   }
+#endif
 }
 
 void setup() {
-  Serial.begin(115200);
+  USB_LOG(Serial.begin(115200));
+#if !PILLOW_USB_DEBUG
+  radio::logHook = [](const char *) {}; // suppress radio task USB logging too
+#endif
+  dht.begin();
   pinMode(PLATE_PIN, INPUT_PULLUP);
 #if LED_PIN >= 0
   pinMode(LED_PIN, OUTPUT);
@@ -205,8 +250,10 @@ void setup() {
   radio::helloApp = HELLO_HAS_BUZZER;
 #endif
   bool ok = radio::begin(LINK_ESPNOW, false, onRadio);
-  Serial.printf("pillow_node: esp-now %s on channel %d, mac %s, plate gpio %d, buzzer gpio %d, led gpio %d\n",
-                ok ? "started" : "FAILED", RADIO_CHANNEL, WiFi.macAddress().c_str(), PLATE_PIN, BUZZER_PIN, LED_PIN);
+  USB_LOG(Serial.printf("pillow_node: esp-now %s on channel %d, mac %s, plate gpio %d, buzzer gpio %d, led gpio %d\n",
+                ok ? "started" : "FAILED", RADIO_CHANNEL, WiFi.macAddress().c_str(), PLATE_PIN, BUZZER_PIN, LED_PIN));
+  if (xTaskCreatePinnedToCore(dhtTask, "dht11", 3072, nullptr, 1, nullptr, 1) != pdPASS)
+    USB_LOG(Serial.println("dht11: worker could not start; readings remain null"));
 }
 
 void loop() {
@@ -216,14 +263,14 @@ void loop() {
   uint32_t now = millis();
 
   bool changed = readPlate(now);
+  startPendingBuzz();
+  buzzer.update();
+  showLed(); // update local output before telemetry
   if (changed || now - lastReport >= REPORT_MS) {
     lastReport = now;
     forward(stateLine());  // on change at once: don't make the server wait for the next tick
   }
   readUsb(usbLine, usbGarbled);
-  startPendingBuzz();
-  buzzer.update();
-  showLed();
   showLink();
   if (now - lastStats >= STATS_MS) {
     lastStats = now;

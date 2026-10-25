@@ -127,12 +127,13 @@ jobs:
           path: |
             ~/.arduino15
             ~/Arduino/libraries
-          key: arduino-esp32-3.3.12-avr-1.8.7-gfx-1.6.4-patched
+          key: arduino-esp32-3.3.12-avr-1.8.7-gfx-1.6.4-dht-1.4.6-patched
       - name: Cores and libraries
         run: |
           arduino-cli core update-index
           arduino-cli core install esp32:esp32@3.3.12 arduino:avr@1.8.7
           arduino-cli lib install "GFX Library for Arduino@1.6.4"
+          arduino-cli lib install "DHT sensor library@1.4.6" "Adafruit Unified Sensor@1.1.15"
           firmware/patch_gfx.sh
       # The real radio keys stay gitignored; CI builds with the example ones and keeps no binary
       - run: cp firmware/libraries/PillowRadio/secrets.example.h firmware/libraries/PillowRadio/secrets.h
