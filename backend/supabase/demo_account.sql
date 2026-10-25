@@ -1,4 +1,5 @@
--- A dummy household for Szymon's own app login (szymon@example.com), so the app has a full
+-- A dummy household for Szymon's own app login (szymon@example.com here: put the real login's email
+-- in before running it), so the app has a full
 -- fortnight to show without touching Margaret's pillow (`mum`), which the real hardware posts to.
 --
 -- Resident "Dad" (Arthur Bennett) on pillow `demo-dad`, owned by Szymon's login, with his sister
