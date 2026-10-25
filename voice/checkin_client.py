@@ -210,6 +210,8 @@ def main() -> None:
         elif event == keypad.TALK_CANCEL:
             talk_session.cancel()
         elif event == keypad.TALK_GO:
+            if music is not None:
+                music.join(timeout=3.0)  # stopped at TALK_ARM; "I'm listening" waits for the last segment
             threading.Thread(target=post_key, args=("talk",), daemon=True).start()
             print(f"{time.strftime('%H:%M:%S')}  talk     listening", flush=True)
             talk_session.go()
@@ -269,6 +271,7 @@ def main() -> None:
                     print(f"{stamp}  check-in starting", flush=True)
                     if music is not None:
                         music.stop()  # the check-in owns the speaker and the mic now
+                        music.join(timeout=3.0)  # and starts in silence: the segment in flight drains first
                     judge.warm_up_in_background()
                     stop_checkin.clear()
                     out = checkin.run_checkin(speak, listen, judge=judge_fn, contact=args.contact,
@@ -291,6 +294,7 @@ def main() -> None:
                     due = []
                 if due and music is not None:
                     music.stop()
+                    music.join(timeout=3.0)  # the reminder speaks into silence
                 for item in due:
                     stamp = time.strftime("%H:%M:%S")
                     print(f"{stamp}  reminder {item['text']!r}", flush=True)
