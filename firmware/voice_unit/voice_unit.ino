@@ -13,6 +13,15 @@
 //   LINK_WIFI (2)          the relay's hidden 2.4 GHz access point + UDP. Experiment: it is a
 //                          hotspot, never at the venue
 //
+// With LINK_ESPNOW to the pillow node, this unit can go in the pillow too and reach the laptop
+// without USB, over either or both of:
+//   PILLOW_HOTSPOT=1  the laptop's hidden hotspot (HOTSPOT_SSID in PillowRadio's secrets.h) on the
+//                     radio's channel, then TCP to sim/audio_bridge.py --hotspot: the USB serial
+//                     lines below, both ways. Preferred whenever it's up.
+//   PILLOW_BLE=1      Bluetooth LE to the laptop, as LINK_BLE: the fallback when the hotspot is down.
+// Lines for the laptop (talk, UNO, IMU) go out on USB and on one of these: the hotspot if it's up,
+// else Bluetooth. Audio goes wherever the mic was asked for.
+//
 // The radio links carry the same audio and commands: firmware/libraries/PillowRadio.
 //
 // Bluetooth LE: peripheral "pillow-voice", one GATT service. Audio is 16 kHz G.711 mu-law
@@ -22,12 +31,19 @@
 //   CTRL  write   text: "MIC ON", "MIC OFF", "VOL <0-100>", "GAIN <0-7>" (mic gain, 6 dB steps),
 //                 "BUZZ <chime|alert> <1-3>" (below)
 //   EVENT notify  "talk": a squeeze/tap of the pillow (IMU jump), "I want to say something";
-//                 or "UNO <line>", a line from the Uno
+//                 or "UNO <line>", a line from the Uno; or "IMU <json>" (below)
 //
 // USB serial (fallback, when the board is plugged into the laptop): the same as text lines.
-//   board -> laptop:  MIC <base64 of 100 ms 16 kHz mono s16le>,  KEY talk,  UNO <line>,  boot log
+//   board -> laptop:  MIC <base64 of 100 ms 16 kHz mono s16le>,  KEY talk,  UNO <line>,  IMU <json>,
+//                     boot log
 //   laptop -> board:  SPK <base64 s16le>,  MIC ON|OFF,  VOL n,  GAIN n,  BUZZ <pattern> <repeat>,
 //                     LIGHT <0-100> <warm|amber|off> <fade_s>
+//
+// IMU: every 500 ms, "IMU {"ax":..,"ay":..,"az":.. (g), "gx":..,"gy":..,"gz":.. (deg/s),
+// "motion":0.12}". motion is the contract's restlessness (coord/CONTRACT.md 1): the share of the last
+// 10 s the pillow was moving, 0..1, null while the speaker has shaken the board the whole time. The
+// pillow node has no IMU, so sim/audio_bridge.py puts this into the node's state when its motion is
+// null.
 //
 // BUZZ: the server's `buzz` command (coord/CONTRACT.md 3; sounds in firmware/libraries/PillowBuzz),
 // made here, not streamed. With PILLOW_LINK=1 and a pillow node that says (in its hellos) it has a
@@ -44,6 +60,10 @@
 // Build: arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc --libraries firmware/libraries firmware/voice_unit
 //   needs the "GFX Library for Arduino" library (Arduino_GFX), as firmware/kid_pillow does
 //   radio: add --build-property compiler.cpp.extra_flags=-DPILLOW_LINK=1
+//   in the pillow: --build-property "compiler.cpp.extra_flags=-DPILLOW_LINK=1 -DPILLOW_HOTSPOT=1 -DPILLOW_BLE=1"
+//     and --build-property build.partitions=huge_app --build-property upload.maximum_size=3145728
+//     (Bluetooth + Wi-Fi don't fit the default 1.25 MB app partition), and the fqbn
+//     esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi (with Bluetooth too, internal RAM runs out)
 // Codec driver es8311.* is Espressif's (Apache-2.0), as shipped in Waveshare's 15_ES8311 example.
 
 #include <Wire.h>
@@ -51,6 +71,7 @@
 #include "driver/gpio.h"
 #include "mbedtls/base64.h"
 #include "freertos/stream_buffer.h"
+#include "esp_heap_caps.h"
 #include "es8311.h"
 #include <PillowBuzz.h>
 #include <Arduino_GFX_Library.h>
@@ -58,12 +79,24 @@
 #ifndef PILLOW_LINK
 #define PILLOW_LINK 0
 #endif
-#if PILLOW_LINK == 0
+#ifndef PILLOW_HOTSPOT
+#define PILLOW_HOTSPOT 0
+#endif
+#ifndef PILLOW_BLE
+#define PILLOW_BLE 0
+#endif
+#if (PILLOW_HOTSPOT || PILLOW_BLE) && PILLOW_LINK != 1
+#error "PILLOW_HOTSPOT and PILLOW_BLE go with PILLOW_LINK=1 (ESP-NOW to the pillow node)"
+#endif
+#define HAS_BLE (PILLOW_LINK == 0 || PILLOW_BLE)
+#define HAS_RADIO (PILLOW_LINK != 0)
+#if HAS_BLE
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLE2902.h>
-#else
-#include <PillowRadio.h>  // radio only: Bluetooth and ESP-NOW together are unreliable
+#endif
+#if HAS_RADIO
+#include <PillowRadio.h>  // with Bluetooth too (PILLOW_BLE), they share the radio: expect a lossier link
 #endif
 
 // Board pins (Waveshare pin_config.h + schematic)
@@ -101,6 +134,10 @@ const uint8_t HELLO_HAS_BUZZER = 2;          // bit in the pillow node's hellos 
 const size_t BUZZ_CMD_MAX = 24;
 const uint16_t LIGHT_WARM = 0xFDAC, LIGHT_AMBER = 0xFBC0, LIGHT_BLACK = 0x0000;  // RGB565
 const uint32_t LIGHT_STEP_MS = 20;
+const uint32_t IMU_SAMPLE_MS = 20, IMU_REPORT_MS = 500;
+const int MOTION_BUCKETS = 20;               // x IMU_REPORT_MS = the contract's 10 s
+const float MOVE_G = 0.03, MOVE_DPS = 15;    // off its resting tilt, or turning: the pillow is moving
+const float REST_ALPHA = 0.02;               // resting tilt: ~1 s average at IMU_SAMPLE_MS
 
 I2SClass i2s;
 es8311_handle_t codec;
@@ -108,7 +145,9 @@ StreamBufferHandle_t speaker;
 SemaphoreHandle_t speakerLock;  // a stream buffer takes one writer at a time: speech links + buzz
 QueueHandle_t buzzQueue;        // "BUZZ ..." commands for buzzTask
 volatile bool pillowBuzzer = false;  // the paired pillow node has a buzzer
-volatile bool micSerial = false, micLink = false;  // mic asked for over USB / the wireless link
+// Where a command came from; the mic streams to each source that asked for it
+enum Source : uint8_t { FROM_USB, FROM_RADIO, FROM_BLE, FROM_HOTSPOT, SOURCES };
+volatile bool micOn[SOURCES] = {};
 volatile uint32_t lastPlayMs = 0;
 bool imuOk = false;
 
@@ -121,12 +160,18 @@ volatile uint16_t lightColour = LIGHT_WARM;
 volatile uint32_t lightFadeMs = 0;
 volatile bool lightChanged = false;
 
-#if PILLOW_LINK == 0
 volatile bool bleConnected = false;
+#if HAS_BLE
 BLEServer *server;
 BLECharacteristic *micChar, *eventChar;
-bool linkUp() { return bleConnected; }
+#endif
+#if PILLOW_HOTSPOT
+volatile bool hotspotConnected = false;
+#else
+const bool hotspotConnected = false;
+#endif
 
+#if !HAS_RADIO
 // ---------- G.711 mu-law ----------
 uint8_t ulawEncode(int16_t sample) {
   int sign = sample < 0 ? 0x80 : 0;
@@ -144,8 +189,15 @@ int16_t ulawDecode(uint8_t u) {
 #else
 using radio::ulawDecode;
 using radio::ulawEncode;
-bool linkUp() { return radio::paired; }
 #endif
+
+bool radioUp() {
+#if HAS_RADIO
+  return radio::paired;
+#else
+  return false;
+#endif
+}
 
 // ---------- codec ----------
 bool codecInit() {
@@ -190,16 +242,21 @@ void speakerTask(void *) {
   }
 }
 
-void sendMicLink(const int16_t *mono) {
-  static uint8_t ulaw[FRAME_SAMPLES];
-  for (size_t i = 0; i < FRAME_SAMPLES; i++) ulaw[i] = ulawEncode(mono[i]);
-#if PILLOW_LINK == 0
+// One USB / hotspot line (with its \r\n) to the hotspot's TCP queue; below
+void hotspotSend(const void *line, size_t len);
+
+void sendMicBle(const uint8_t *ulaw) {
+#if HAS_BLE
   size_t chunk = min(BLE_CHUNK_MAX, (size_t)server->getPeerMTU(server->getConnId()) - 3);
   for (size_t i = 0; i < FRAME_SAMPLES; i += chunk) {
-    micChar->setValue(ulaw + i, min(chunk, FRAME_SAMPLES - i));
+    micChar->setValue((uint8_t *)ulaw + i, min(chunk, FRAME_SAMPLES - i));
     micChar->notify();
   }
-#else
+#endif
+}
+
+void sendMicRadio(const uint8_t *ulaw) {
+#if HAS_RADIO
   for (size_t i = 0; i < FRAME_SAMPLES; i += radio::AUDIO_CHUNK)
     radio::send(radio::PKT_MIC, ulaw + i, min(radio::AUDIO_CHUNK, FRAME_SAMPLES - i));
 #endif
@@ -207,34 +264,41 @@ void sendMicLink(const int16_t *mono) {
 
 // USB lines go out in one write each: the mic task, loop() and the radio task all print, and one
 // write is atomic (HWCDC's tx lock), so lines never interleave. println() is two writes.
-void sendMicSerial(const int16_t *mono) {
+// The same "MIC <base64>" line goes to the hotspot.
+void sendMicLine(const int16_t *mono, bool usb, bool hotspot) {
   static unsigned char line[4 + ((FRAME_SAMPLES * 2 + 2) / 3) * 4 + 3] = "MIC ";
   size_t len = 0;
   if (mbedtls_base64_encode(line + 4, sizeof(line) - 6, &len, (const unsigned char *)mono, FRAME_SAMPLES * 2)) return;
   memcpy(line + 4 + len, "\r\n", 2);
-  Serial.write(line, 4 + len + 2);
+  if (usb) Serial.write(line, 4 + len + 2);
+  if (hotspot) hotspotSend(line, 4 + len + 2);
 }
 
 // Mic: read 100 ms stereo frames, keep the ADC slot, send it wherever the mic was asked for.
 void micTask(void *) {
   static int16_t stereo[FRAME_SAMPLES * 2], mono[FRAME_SAMPLES];
+  static uint8_t ulaw[FRAME_SAMPLES];
   for (;;) {
     size_t got = i2s.readBytes((char *)stereo, sizeof(stereo));
-    bool toLink = micLink && linkUp();
-    if (got < sizeof(stereo) || !(micSerial || toLink)) continue;
+    bool usb = micOn[FROM_USB], toRadio = micOn[FROM_RADIO] && radioUp();
+    bool toBle = micOn[FROM_BLE] && bleConnected, toHotspot = micOn[FROM_HOTSPOT] && hotspotConnected;
+    if (got < sizeof(stereo) || !(usb || toRadio || toBle || toHotspot)) continue;
     for (size_t i = 0; i < FRAME_SAMPLES; i++) mono[i] = stereo[2 * i + MIC_SLOT];
-    if (toLink) sendMicLink(mono);
-    if (micSerial) sendMicSerial(mono);
+    if (toRadio || toBle) {
+      for (size_t i = 0; i < FRAME_SAMPLES; i++) ulaw[i] = ulawEncode(mono[i]);
+      if (toRadio) sendMicRadio(ulaw);
+      if (toBle) sendMicBle(ulaw);
+    }
+    if (usb || toHotspot) sendMicLine(mono, usb, toHotspot);
   }
 }
 
-// ---------- commands (both links) ----------
-void handleCommand(const String &cmd, bool fromLink) {
-  volatile bool &mic = fromLink ? micLink : micSerial;
+// ---------- commands (every link) ----------
+void handleCommand(const String &cmd, Source from) {
   if (cmd == "MIC ON") {
-    mic = true;
+    micOn[from] = true;
   } else if (cmd == "MIC OFF") {
-    mic = false;
+    micOn[from] = false;
   } else if (cmd.startsWith("VOL ")) {
     es8311_voice_volume_set(codec, constrain(cmd.substring(4).toInt(), 0, 100), NULL);
   } else if (cmd.startsWith("GAIN ")) {
@@ -333,7 +397,7 @@ void buzzTask(void *) {
       Serial.printf("buzz: bad command '%s'\r\n", text);
       continue;
     }
-#if PILLOW_LINK != 0
+#if HAS_RADIO
     if (radio::paired && pillowBuzzer) {
       char out[BUZZ_CMD_MAX];
       snprintf(out, sizeof(out), "BUZZ %s %d", pattern.bell ? "chime" : "alert", repeat);
@@ -349,13 +413,30 @@ void buzzTask(void *) {
   }
 }
 
-// A short text message over the wireless link: "talk", or "UNO <line>"
-void sendLinkText(const char *text, bool isTalk) {
-  if (!linkUp()) return;
-#if PILLOW_LINK == 0
+// A USB line ("KEY talk", "UNO <line>", "IMU <json>", no \r\n) for the laptop, besides USB: on the
+// hotspot if it's up, else Bluetooth (EVENT; "KEY talk" is "talk" there). Never blocks: the radio
+// task calls it.
+void toLaptop(const char *line) {
+#if PILLOW_HOTSPOT
+  if (hotspotConnected) {
+    char out[256];
+    int n = snprintf(out, sizeof(out), "%s\r\n", line);
+    if (n > 0 && n < (int)sizeof(out)) hotspotSend(out, n);
+    return;
+  }
+#endif
+#if HAS_BLE
+  if (!bleConnected) return;
+  const char *text = strcmp(line, "KEY talk") == 0 ? "talk" : line;
   eventChar->setValue((uint8_t *)text, min(strlen(text), BLE_CHUNK_MAX));
   eventChar->notify();
-#else
+#endif
+}
+
+// A short text message to the other board, if paired: "talk", or "UNO <line>"
+void toRadio(const char *text, bool isTalk) {
+#if HAS_RADIO
+  if (!radio::paired) return;
   if (isTalk) radio::sendReliableText(radio::PKT_EVENT, text);  // acked and resent: never lost
   else radio::sendText(radio::PKT_LINE, text);  // a sensor snapshot: the next one is 500 ms away
 #endif
@@ -363,11 +444,17 @@ void sendLinkText(const char *text, bool isTalk) {
 
 void talkEvent() {
   Serial.print("KEY talk\r\n");
-  sendLinkText("talk", true);
+  toLaptop("KEY talk");
+  toRadio("talk", true);
 }
 
-#if PILLOW_LINK == 0
+#if HAS_BLE
 // ---------- BLE ----------
+void bleAdvertise(bool on) {
+  if (on) BLEDevice::startAdvertising();
+  else BLEDevice::stopAdvertising();
+}
+
 class ServerEvents : public BLEServerCallbacks {
   void onConnect(BLEServer *s, ble_gap_conn_desc *desc) override {
     bleConnected = true;
@@ -378,9 +465,9 @@ class ServerEvents : public BLEServerCallbacks {
   }
   void onDisconnect(BLEServer *) override {
     bleConnected = false;
-    micLink = false;
-    Serial.println("ble: disconnected, advertising");
-    BLEDevice::startAdvertising();
+    micOn[FROM_BLE] = false;
+    Serial.println("ble: disconnected");
+    bleAdvertise(!hotspotConnected);
   }
 };
 
@@ -396,7 +483,7 @@ class SpeakerWrites : public BLECharacteristicCallbacks {
 
 class ControlWrites : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic *c) override {
-    handleCommand(String((const char *)c->getData(), c->getLength()), true);
+    handleCommand(String((const char *)c->getData(), c->getLength()), FROM_BLE);
   }
 };
 
@@ -421,40 +508,164 @@ void bleInit() {
   bool ok = adv->start();
   Serial.printf("ble: advertising %s, address %s\n", ok ? "started" : "FAILED", BLEDevice::getAddress().toString().c_str());
 }
-
-void linkInit() { bleInit(); }
 #else
+void bleAdvertise(bool) {}
+#endif
+
+#if HAS_RADIO
 // ---------- radio (ESP-NOW or the relay's access point) ----------
 // On the radio task.
 void onRadio(char type, const uint8_t *data, size_t len) {
   if (type == radio::PKT_HELLO) {
-    micLink = data[0] & 1;  // the relay's hellos carry the mic state: survives our reboot
+    micOn[FROM_RADIO] = data[0] & 1;  // the relay's hellos carry the mic state: survives our reboot
     pillowBuzzer = data[0] & HELLO_HAS_BUZZER;  // the pillow node's carry "I have a buzzer"
   } else if (type == radio::PKT_SPK) {
     static int16_t pcm[radio::MAX_PACKET];
     for (size_t i = 0; i < len; i++) pcm[i] = ulawDecode(data[i]);
     speakerWrite(pcm, len * 2, pdMS_TO_TICKS(50));
   } else if (type == radio::PKT_CMD) {
-    handleCommand(String((const char *)data, len), true);
+    handleCommand(String((const char *)data, len), FROM_RADIO);
   } else if (type == radio::PKT_LINE) {
-    static uint8_t line[radio::MAX_PACKET + 2];  // the pillow node's "UNO <line>"
+    static char line[radio::MAX_PACKET + 3];  // the pillow node's "UNO <line>"
     memcpy(line, data, len);
-    memcpy(line + len, "\r\n", 2);
+    memcpy(line + len, "\r\n", 3);
     Serial.write(line, len + 2);
+    line[len] = 0;
+    toLaptop(line);
   } else if (type == radio::PKT_EVENT && len == 4 && memcmp(data, "talk", 4) == 0) {
-    Serial.print("KEY talk\r\n");  // the pillow's talk key (not talkEvent(): never send from this task)
+    // the pillow's talk key (not talkEvent(): never send on the radio from this task)
+    Serial.print("KEY talk\r\n");
+    toLaptop("KEY talk");
   }
 }
 
 void logLine(const char *line) { Serial.printf("%s\r\n", line); }
 
-void linkInit() {
+void radioInit() {
   radio::logHook = logLine;
   bool ok = radio::begin(PILLOW_LINK, false, onRadio);
   Serial.printf("radio: %s %s, channel %d, mac %s\n", PILLOW_LINK == LINK_WIFI ? "joining hidden access point" : "esp-now",
                 ok ? "started" : "FAILED", RADIO_CHANNEL, WiFi.macAddress().c_str());
 }
 #endif
+
+void handleTextLine(const String &line, Source from);
+
+// Big stream buffers go in PSRAM when the board has it (build with PSRAM=opi): Wi-Fi plus Bluedroid
+// need most of the internal RAM, and with these 80 KB there too the BLE controller fails to start.
+StreamBufferHandle_t streamInPsram(size_t size, size_t trigger) {
+  uint8_t *store = (uint8_t *)heap_caps_malloc(size + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  StaticStreamBuffer_t *meta = (StaticStreamBuffer_t *)heap_caps_malloc(sizeof(StaticStreamBuffer_t), MALLOC_CAP_INTERNAL);
+  if (!store || !meta) {
+    free(store);
+    free(meta);
+    return xStreamBufferCreate(size, trigger);
+  }
+  return xStreamBufferCreateStatic(size, trigger, store, meta);
+}
+
+// ---------- the laptop's hotspot ----------
+#if PILLOW_HOTSPOT
+// Joins the laptop's hidden access point and dials sim/audio_bridge.py --hotspot over TCP; the lines
+// are the USB ones, both ways. ESP-NOW shares the radio, so the access point must be on the pillow
+// node's channel (RADIO_CHANNEL). Writers queue whole lines on hotspotTx; hotspotTask alone touches
+// the socket, so a slow laptop never blocks the radio task or the mic.
+const uint16_t HOTSPOT_PORT = 47801;
+const size_t HOTSPOT_TX_BUFFER = 16384;      // ~0.35 s of mic lines
+const uint32_t HOTSPOT_RETRY_MS = 2000, HOTSPOT_CONNECT_MS = 1000;
+const uint32_t HOTSPOT_HEARTBEAT_MS = 1000;  // "HB" after this long with nothing sent: the bridge drops a link silent for 5 s
+WiFiClient hotspot;
+StreamBufferHandle_t hotspotTx;
+SemaphoreHandle_t hotspotTxLock;
+
+// A whole line or nothing: half a line would garble the next one.
+void hotspotSend(const void *line, size_t len) {
+  if (!hotspotConnected || xSemaphoreTake(hotspotTxLock, pdMS_TO_TICKS(5)) != pdTRUE) return;
+  if (xStreamBufferSpacesAvailable(hotspotTx) >= len) xStreamBufferSend(hotspotTx, line, len, 0);
+  xSemaphoreGive(hotspotTxLock);
+}
+
+bool hotspotDial() {
+  static uint32_t lastTry = 0;
+  if (WiFi.status() != WL_CONNECTED || millis() - lastTry < HOTSPOT_RETRY_MS) return false;
+  lastTry = millis();
+  hotspot.stop();
+  if (!hotspot.connect(HOTSPOT_HOST, HOTSPOT_PORT, HOTSPOT_CONNECT_MS)) return false;
+  hotspot.setNoDelay(true);
+  xSemaphoreTake(hotspotTxLock, portMAX_DELAY);
+  xStreamBufferReset(hotspotTx);
+  hotspotConnected = true;
+  xSemaphoreGive(hotspotTxLock);
+  bleAdvertise(false);  // advertising takes radio time from Wi-Fi: only needed while the hotspot is down
+  Serial.printf("hotspot: connected to the bridge at %s:%u\r\n", HOTSPOT_HOST, HOTSPOT_PORT);
+  return true;
+}
+
+void hotspotTask(void *) {
+  static uint8_t buf[1460];
+  static String line;
+  uint32_t lastSent = 0;
+  for (;;) {
+    if (!hotspot.connected()) {
+      if (hotspotConnected) {
+        hotspotConnected = false;
+        micOn[FROM_HOTSPOT] = false;
+        Serial.print("hotspot: bridge connection lost\r\n");
+        bleAdvertise(true);
+      }
+      if (!hotspotDial()) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        continue;
+      }
+      line = "";
+    }
+    int avail = hotspot.available();
+    if (avail > 0) {
+      int n = hotspot.read(buf, min((size_t)avail, sizeof(buf)));
+      for (int i = 0; i < n; i++) {
+        char ch = buf[i];
+        if (ch == '\r') continue;
+        if (ch != '\n') { if (line.length() < 6000) line += ch; continue; }
+        handleTextLine(line, FROM_HOTSPOT);
+        line = "";
+      }
+    }
+    size_t n = xStreamBufferReceive(hotspotTx, buf, sizeof(buf), pdMS_TO_TICKS(avail > 0 ? 0 : 5));
+    if (!n && millis() - lastSent >= HOTSPOT_HEARTBEAT_MS) n = sprintf((char *)buf, "HB\r\n");
+    if (!n) continue;
+    if (hotspot.write(buf, n) != n) hotspot.stop();
+    lastSent = millis();
+  }
+}
+
+void hotspotInit() {
+  hotspotTx = streamInPsram(HOTSPOT_TX_BUFFER, 1);
+  hotspotTxLock = xSemaphoreCreateMutex();
+  WiFi.setAutoReconnect(true);
+  WiFi.begin(HOTSPOT_SSID, HOTSPOT_PASS, RADIO_CHANNEL);  // hidden: needs the channel, never scans others
+#if !HAS_BLE
+  WiFi.setSleep(false);  // with Bluetooth on, coexistence needs modem sleep: leave it
+#endif
+  Serial.printf("hotspot: joining on channel %d, bridge %s:%u\r\n", RADIO_CHANNEL, HOTSPOT_HOST, HOTSPOT_PORT);
+  xTaskCreatePinnedToCore(hotspotTask, "hotspot", 6144, NULL, 3, NULL, 0);
+}
+#else
+void hotspotSend(const void *, size_t) {}
+#endif
+
+void linkInit() {
+  // Wi-Fi first: with Bluedroid up first the Wi-Fi driver can't get its internal RAM and
+  // esp-now fails (mac 00:00:00:00:00:00). BLE coexists fine when it starts second.
+#if HAS_RADIO
+  radioInit();
+#endif
+#if PILLOW_HOTSPOT
+  hotspotInit();
+#endif
+#if HAS_BLE
+  bleInit();
+#endif
+}
 
 // ---------- Uno passthrough ----------
 void readUno() {
@@ -472,14 +683,15 @@ void readUno() {
     if (!garbled && line.length()) {
       String out = "UNO " + line;
       Serial.print(out + "\r\n");
-      sendLinkText(out.c_str(), false);
+      toLaptop(out.c_str());
+      toRadio(out.c_str(), false);
     }
     line = "";
     garbled = false;
   }
 }
 
-// ---------- IMU tap (QMI8658, raw registers) ----------
+// ---------- IMU: taps and motion (QMI8658, raw registers) ----------
 void qmiWrite(uint8_t reg, uint8_t val) {
   Wire.beginTransmission(QMI8658_ADDR);
   Wire.write(reg);
@@ -494,21 +706,57 @@ void imuInit() {
   imuOk = present && Wire.read() == 0x05;
   qmiWrite(0x02, 0x40);  // CTRL1: register address auto-increment
   qmiWrite(0x03, 0x15);  // CTRL2: accel ±4 g, ~250 Hz
-  qmiWrite(0x08, 0x01);  // CTRL7: accelerometer on
+  qmiWrite(0x04, 0x45);  // CTRL3: gyro ±512 dps (64 LSB per deg/s), ~250 Hz
+  qmiWrite(0x08, 0x03);  // CTRL7: accelerometer + gyro on
 }
 
 float median3(float a, float b, float c) { return fmaxf(fminf(a, b), fminf(fmaxf(a, b), c)); }
 
-void checkTap() {
+// Restlessness for the contract's motion: per IMU_REPORT_MS bucket, how many samples moved out of
+// how many counted. Samples while the speaker plays aren't counted: the cone shakes the board.
+struct MotionWindow {
+  uint16_t moved[MOTION_BUCKETS] = {}, counted[MOTION_BUCKETS] = {};
+  int now = 0;
+  void add(bool moving) {
+    counted[now]++;
+    if (moving) moved[now]++;
+  }
+  float share() const {  // < 0: nothing counted in the window
+    uint32_t m = 0, c = 0;
+    for (int i = 0; i < MOTION_BUCKETS; i++) m += moved[i], c += counted[i];
+    return c ? (float)m / c : -1;
+  }
+  void next() {
+    now = (now + 1) % MOTION_BUCKETS;
+    moved[now] = counted[now] = 0;
+  }
+};
+MotionWindow motion;
+float imuA[3], imuG[3];  // the last sample: g, deg/s
+
+void reportImu() {
+  if (!imuOk) return;
+  float share = motion.share();
+  char line[160], value[8] = "null";
+  if (share >= 0) snprintf(value, sizeof(value), "%.2f", share);
+  snprintf(line, sizeof(line), "IMU {\"ax\":%.3f,\"ay\":%.3f,\"az\":%.3f,\"gx\":%.1f,\"gy\":%.1f,\"gz\":%.1f,\"motion\":%s}",
+           imuA[0], imuA[1], imuA[2], imuG[0], imuG[1], imuG[2], value);
+  motion.next();
+  Serial.printf("%s\r\n", line);
+  toLaptop(line);
+}
+
+void readImu() {
   static float hist[3][3], lx, ly, lz;  // last 3 raw samples per axis, last filtered sample
+  static float rest[3];                 // the resting tilt: a slow average of the accel
   static int warmup = 4;
   static uint32_t quietUntil = 0;
   if (!imuOk) return;
   Wire.beginTransmission(QMI8658_ADDR);
-  Wire.write(0x35);  // AX_L
-  if (Wire.endTransmission(false) != 0 || Wire.requestFrom(QMI8658_ADDR, 6) != 6) return;
-  int16_t raw[3];
-  for (int i = 0; i < 3; i++) raw[i] = Wire.read() | (Wire.read() << 8);
+  Wire.write(0x35);  // AX_L, then AY, AZ, GX, GY, GZ
+  if (Wire.endTransmission(false) != 0 || Wire.requestFrom(QMI8658_ADDR, 12) != 12) return;
+  int16_t raw[6];
+  for (int i = 0; i < 6; i++) raw[i] = Wire.read() | (Wire.read() << 8);
   // Median of the last 3 samples: a single glitched read (the IMU isn't synced, so a read can
   // straddle an update) used to look like a 0.5-0.7 g tap every few seconds. A squeeze lasts longer.
   float f[3];
@@ -521,8 +769,17 @@ void checkTap() {
   float ax = f[0], ay = f[1], az = f[2];
   float change = fabs(ax - lx) + fabs(ay - ly) + fabs(az - lz);
   lx = ax; ly = ay; lz = az;
+  float tilt = 0, turn = 0;
+  for (int i = 0; i < 3; i++) {
+    imuA[i] = f[i];
+    imuG[i] = raw[3 + i] / 64.0;
+    rest[i] = warmup > 0 ? f[i] : rest[i] + REST_ALPHA * (f[i] - rest[i]);
+    tilt += fabs(f[i] - rest[i]);
+    turn = fmaxf(turn, fabs(imuG[i]));
+  }
   // Ignore taps while the speaker plays and just after: the cone and the amp's off-click shake the board.
   bool playing = millis() - lastPlayMs < PA_OFF_AFTER_MS + 600;
+  if (warmup == 0 && !playing) motion.add(tilt > MOVE_G || turn > MOVE_DPS);
   if (warmup == 0 && !playing && change > TAP_G && millis() > quietUntil) {
     Serial.printf("tap: %.2f g jump (a = %.2f %.2f %.2f)\n", change, ax, ay, az);
     talkEvent();
@@ -531,17 +788,18 @@ void checkTap() {
   if (warmup > 0) warmup--;
 }
 
-// ---------- serial link ----------
-void handleSerialLine(const String &line) {
+// ---------- serial link (and the hotspot's, the same lines) ----------
+void handleTextLine(const String &line, Source from) {
   if (!line.startsWith("SPK ")) {
-    handleCommand(line, false);
+    handleCommand(line, from);
     return;
   }
-  static unsigned char pcm[4096];
+  static unsigned char pcm[2][4096];  // one per reader: loop() (USB) and hotspotTask
+  unsigned char *buf = pcm[from == FROM_HOTSPOT];
   size_t len = 0;
-  if (mbedtls_base64_decode(pcm, sizeof(pcm), &len, (const unsigned char *)line.c_str() + 4,
+  if (mbedtls_base64_decode(buf, sizeof(pcm[0]), &len, (const unsigned char *)line.c_str() + 4,
                             line.length() - 4) == 0)
-    speakerWrite(pcm, len & ~1u, pdMS_TO_TICKS(200));
+    speakerWrite(buf, len & ~1u, pdMS_TO_TICKS(200));
 }
 
 void readSerial() {
@@ -550,13 +808,14 @@ void readSerial() {
     char ch = Serial.read();
     if (ch == '\r') continue;
     if (ch != '\n') { if (line.length() < 6000) line += ch; continue; }
-    handleSerialLine(line);
+    handleTextLine(line, FROM_USB);
     line = "";
   }
 }
 
 void setup() {
   Serial.setRxBufferSize(16384);  // SPK lines arrive in bursts
+  Serial.setTxTimeoutMs(0);  // with the USB plugged in but the port closed, each write would block 100 ms
   Serial.begin(115200);
   pinMode(PA_EN, OUTPUT);
   digitalWrite(PA_EN, LOW);
@@ -570,16 +829,17 @@ void setup() {
   i2s.setPins(I2S_BCK, I2S_WS, I2S_DOUT, I2S_DIN, I2S_MCK);
   bool i2sOk = i2s.begin(I2S_MODE_STD, RATE, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO, I2S_STD_SLOT_BOTH);
   bool codecOk = i2sOk && codecInit();
-  speaker = xStreamBufferCreate(SPK_BUFFER, 2);
+  speaker = streamInPsram(SPK_BUFFER, 2);
   speakerLock = xSemaphoreCreateMutex();
   buzzQueue = xQueueCreate(4, BUZZ_CMD_MAX);
   Serial1.setRxBufferSize(1024);  // ~1 s at 9600 baud: loop() can wait ~0.4 s on a "talk" ack
   Serial1.begin(UNO_BAUD, SERIAL_8N1, UNO_RX, UNO_TX);
   gpio_pullup_en((gpio_num_t)UNO_RX);  // idle high when no Uno is wired: no garbage lines
   linkInit();
-  Serial.printf("voice_unit: i2s %s, es8311 %s, imu %s, screen %s, link %d, uno rx gpio %d @ %u\n",
+  Serial.printf("voice_unit: i2s %s, es8311 %s, imu %s, screen %s, link %d, hotspot %d, ble %d, uno rx gpio %d @ %u, heap %u\n",
                 i2sOk ? "ok" : "FAILED", codecOk ? "ok" : "FAILED", imuOk ? "ok" : "missing",
-                screenOk ? "ok" : "FAILED", PILLOW_LINK, UNO_RX, (unsigned)UNO_BAUD);
+                screenOk ? "ok" : "FAILED", PILLOW_LINK, PILLOW_HOTSPOT, HAS_BLE, UNO_RX, (unsigned)UNO_BAUD,
+                (unsigned)ESP.getFreeHeap());
   xTaskCreatePinnedToCore(speakerTask, "spk", 4096, NULL, 5, NULL, 1);
   xTaskCreatePinnedToCore(micTask, "mic", 8192, NULL, 4, NULL, 1);
   xTaskCreatePinnedToCore(buzzTask, "buzz", 4096, NULL, 3, NULL, 1);
@@ -588,10 +848,14 @@ void setup() {
 void loop() {
   readSerial();
   readUno();
-  static uint32_t lastImu = 0;
-  if (millis() - lastImu >= 20) {
+  static uint32_t lastImu = 0, lastReport = 0;
+  if (millis() - lastImu >= IMU_SAMPLE_MS) {
     lastImu = millis();
-    checkTap();
+    readImu();
+  }
+  if (millis() - lastReport >= IMU_REPORT_MS) {
+    lastReport = millis();
+    reportImu();
   }
   updateLight();
   delay(1);

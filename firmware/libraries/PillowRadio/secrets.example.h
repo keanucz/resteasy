@@ -18,3 +18,8 @@ const uint8_t RADIO_LMK[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0
 // PILLOW_LINK 2 (experiment) only: the relay's hidden access point. WPA2 password, 8+ characters.
 #define RADIO_AP_SSID "change-me"
 #define RADIO_AP_PASS "change-me-too"
+
+// voice_unit PILLOW_HOTSPOT=1 only: the laptop's hidden hotspot (on RADIO_CHANNEL) and its address there.
+#define HOTSPOT_SSID "change-me"
+#define HOTSPOT_PASS "change-me-too"
+#define HOTSPOT_HOST "10.42.0.1"

@@ -25,7 +25,7 @@
 ## Connectivity: USB serial bridge (default)
 
 The venue SSID is almost all 5/6 GHz; the single 2.4 GHz AP is too weak for the ESP32's antenna
-(scan from the board does not see it: reason 201, no AP found). Hotspots are banned. So by default
+(scan from the board does not see it: reason 201, no AP found). The boards never join it. So by default
 `secrets.h` defines `SERIAL_BRIDGE`, and each board talks to its laptop over USB:
 
 ```bash
@@ -73,6 +73,44 @@ on the "COM" socket (the CH343 bridge, shows as "USB Single Serial") build **wit
 arduino-cli compile --fqbn esp32:esp32:esp32s3 --libraries firmware/libraries --build-path firmware/pillow_node/build firmware/pillow_node
 arduino-cli upload  --fqbn esp32:esp32:esp32s3 -p /dev/cu.usbmodemXXXX --input-dir firmware/pillow_node/build firmware/pillow_node
 ```
+
+### Voice unit off the laptop's USB: hotspot, Bluetooth fallback
+
+With both boards in the pillow, the voice unit reaches the laptop by itself. `PILLOW_HOTSPOT=1`
+joins the laptop's hidden access point and dials `audio_bridge.py --hotspot` over TCP (port 47801;
+the USB lines, both ways). `PILLOW_BLE=1` keeps Bluetooth up as the fallback. ESP-NOW to the node
+stays on. All three share one radio, so the access point must be on `RADIO_CHANNEL` (1). The
+laptop's Wi-Fi card does AP + client on a single channel only, so pin its venue connection to a
+2.4 GHz channel-1 access point first. `HOTSPOT_SSID` / `HOTSPOT_PASS` / `HOTSPOT_HOST` go in the
+gitignored `secrets.h`; share them privately, never on the bus.
+
+```bash
+F="compiler.cpp.extra_flags=-DPILLOW_LINK=1 -DPILLOW_HOTSPOT=1 -DPILLOW_BLE=1"
+arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi --libraries firmware/libraries \
+  --build-property "$F" --build-property build.partitions=huge_app \
+  --build-property upload.maximum_size=3145728 firmware/voice_unit   # Wi-Fi + BT: 1.28 MB, over the default 1.25 MB
+uv run sim/audio_bridge.py --hotspot 10.42.0.1:47801 --server https://pillow.keanuc.net
+```
+
+`PSRAM=opi` is required with Bluetooth: Wi-Fi plus Bluedroid need most of the internal RAM, so the
+speaker and hotspot buffers (80 KB) go in the board's 8 MB PSRAM. Without it the BLE controller
+fails to start (`BLE_INIT: Malloc failed`) and the board reboots in a loop.
+
+The bridge uses the hotspot while the board is dialled in, and Bluetooth only while it isn't: it
+doesn't connect Bluetooth while the hotspot is up, and the board stops advertising. Both matter.
+With Bluetooth on, ESP-IDF forces Wi-Fi modem sleep, and a held Bluetooth connection cut the
+hotspot's mic audio to ~12k of 16k samples/s with 1.2 s gaps. Standing by, it measured 15.8k with
+gaps under 0.4 s. After a hotspot drop, Bluetooth takes a few seconds to scan and connect. A link that
+stays silent for 5 s counts as dropped: the board sends at least an `HB` heartbeat every second.
+The node's `UNO` lines kept arriving twice a second in every mode.
+
+USB writes never block (`Serial.setTxTimeoutMs(0)`). With the board on a laptop's USB but nobody
+reading the port, each line used to stall the sender for 100 ms, which dropped radio lines.
+
+The voice unit's QMI8658 also measures restlessness. `IMU {"ax":..,"gx":..,"motion":0.12}` gives
+the share of 50 Hz samples over the last 10 s whose acceleration left its resting tilt by more than
+0.03 g, or whose rotation exceeded 15 deg/s. Samples taken while the speaker plays don't count. The
+bridge copies it into the state's `motion` while the node's own is null (CONTRACT.md 1).
 
 ### Bench: the node on the laptop's USB, no voice unit
 

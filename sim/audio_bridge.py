@@ -4,8 +4,9 @@
 # ///
 """Audio bridge: the voice unit in the pillow (firmware/voice_unit) becomes a local speaker + mic.
 
-The Waveshare ESP32-S3 streams its mic and plays speech over Bluetooth LE (default) or, plugged in,
-USB serial; firmware/voice_unit/voice_unit.ino has both protocols. This script holds that link and
+The Waveshare ESP32-S3 streams its mic and plays speech over Bluetooth LE (default), plugged in,
+USB serial, or over the laptop's Wi-Fi hotspot (TCP, the USB lines) with Bluetooth as the fallback;
+firmware/voice_unit/voice_unit.ino has all three. This script holds that link and
 offers it to any program on the laptop over a localhost socket, one request per connection:
 
   PLAY\\n + raw audio, then close the write side   play 16 kHz mono s16le; the bridge answers DONE\\n
@@ -23,11 +24,16 @@ off by itself when those stop (the bridge died), instead of streaming forever.
   uv run sim/audio_bridge.py                          # Bluetooth: finds "pillow-voice"
   uv run sim/audio_bridge.py --serial /dev/ttyACM0    # USB serial instead, or the ESP-NOW relay
                                                       # (firmware/espnow_relay) on that port
+  uv run sim/audio_bridge.py --hotspot 10.42.0.1:47801   # the hotspot (voice_unit PILLOW_HOTSPOT=1),
+                                                      # Bluetooth while it's down
   uv run sim/audio_bridge.py --server https://pillow.keanuc.net --pillow-id mum
                                                       # also forward the pillow's lines ("UNO {...}",
                                                       # firmware/pillow_node) as pillow state, and
                                                       # pass `buzz` and `set_light` commands on to
                                                       # the voice unit (its screen is the light)
+
+The voice unit's IMU lines ("IMU {...}", firmware/voice_unit) fill the state's motion while the
+pillow node's is null.
 """
 
 import argparse
@@ -48,7 +54,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from uno_state import uno_line_to_state  # noqa: E402
+from uno_state import imu_line_motion, uno_line_to_state  # noqa: E402
 
 RATE = 16_000
 CHUNK = RATE // 10 * 2  # 100 ms of s16le, sent to the board at a time
@@ -62,6 +68,8 @@ MIC_UUID = "6e9d0002-5a1c-4c5e-9b7e-70696c6c6f77"
 SPK_UUID = "6e9d0003-5a1c-4c5e-9b7e-70696c6c6f77"
 CTRL_UUID = "6e9d0004-5a1c-4c5e-9b7e-70696c6c6f77"
 EVENT_UUID = "6e9d0005-5a1c-4c5e-9b7e-70696c6c6f77"
+HOTSPOT_SILENCE_S = 5  # the board sends a line (at least "HB") every second: 5 s of silence = dead link
+IMU_FRESH_S = 3  # an IMU motion this old no longer fills the state's motion
 MIC_KEEPALIVE_S = 2  # the relay gives up on the mic after 6 s without MIC ON
 COMMAND_POLL_S = 0.5  # coord/CONTRACT.md 3
 BUZZ_PATTERNS = ("chime", "alert")
@@ -126,6 +134,8 @@ class Board:
                     pass
 
     def _mic(self, pcm: bytes) -> None:
+        if self.mic_gate is not None and not self.mic_gate():
+            return
         with self.lists_lock:
             for q in self.listeners:
                 q.put(pcm)
@@ -149,9 +159,17 @@ class Board:
                 q.put(b"talk\n")
 
     poster: "StatePoster | None" = None  # set by main() with --server
+    mic_gate = None  # FailoverBoard: a callable saying whether this link's mic audio counts
 
     def _line(self, line: str) -> None:
-        """Any other text line from the board: the Uno's state ("UNO {...}") goes to the server."""
+        """Any other text line from the board: the Uno's state ("UNO {...}") goes to the server, the
+        voice unit's IMU ("IMU {...}", twice a second) feeds it."""
+        if line == "HB":  # the hotspot link's heartbeat
+            return
+        if line.startswith("IMU "):
+            if self.poster is not None:
+                self.poster.imu(line)
+            return
         if self.poster is not None and line.startswith("UNO ") and self.poster.post(line):
             return
         print(f"board: {line}", flush=True)
@@ -187,15 +205,15 @@ class SerialBoard(Board):
                 print(f"audio_bridge: voice unit on {self.path}", flush=True)
                 if self.listeners:
                     self.command("MIC ON")  # the board forgets after a reset
-                self._read()
+                self._read(self.port)
             except (serial.SerialException, OSError) as err:
                 print(f"audio_bridge: {self.path}: {err}; retrying", file=sys.stderr, flush=True)
             self.port = None
             time.sleep(2)
 
-    def _read(self) -> None:
+    def _read(self, port) -> None:
         while True:
-            line = self.port.readline().decode(errors="replace").strip()
+            line = port.readline().decode(errors="replace").strip()
             if line.startswith("MIC "):
                 try:
                     self._mic(base64.b64decode(line[4:], validate=True))
@@ -207,6 +225,70 @@ class SerialBoard(Board):
                 self._line(line)
 
 
+class _SocketPort:
+    """A connected socket with the two calls SerialBoard uses on its port."""
+
+    def __init__(self, conn: socket.socket) -> None:
+        self.conn = conn
+        self.reader = conn.makefile("rb")
+
+    def readline(self) -> bytes:
+        line = self.reader.readline()
+        if not line:
+            raise OSError("hotspot: the voice unit hung up")
+        return line
+
+    def write(self, data: bytes) -> None:
+        self.conn.sendall(data)
+
+
+class HotspotBoard(SerialBoard):
+    """The laptop's hotspot: the voice unit dials this TCP port and speaks the USB serial lines.
+    One connection at a time; a newer one (the board rebooted) replaces the old."""
+
+    def __init__(self, host: str, port: int) -> None:
+        super().__init__(f"{host}:{port}", 0)
+        self.addr = (host, port)
+        self.conn: socket.socket | None = None
+
+    def connected(self) -> bool:
+        return self.port is not None
+
+    def run(self) -> None:
+        while True:
+            try:
+                with socket.create_server(self.addr) as server:
+                    print(f"audio_bridge: waiting for the voice unit on {self.path}", flush=True)
+                    while True:
+                        conn, peer = server.accept()
+                        if self.conn is not None:
+                            with contextlib.suppress(OSError):
+                                self.conn.shutdown(socket.SHUT_RDWR)  # wakes the old reader
+                        threading.Thread(target=self._serve, args=(conn, peer), daemon=True).start()
+            except OSError as err:  # no hotspot yet: the address isn't there to bind
+                print(f"audio_bridge: hotspot {self.path}: {err}; retrying", file=sys.stderr, flush=True)
+                time.sleep(2)
+
+    def _serve(self, conn: socket.socket, peer: tuple) -> None:
+        with conn:
+            conn.settimeout(HOTSPOT_SILENCE_S)
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            port = _SocketPort(conn)
+            with self.write_lock:
+                self.conn, self.port = conn, port
+            print(f"audio_bridge: voice unit on the hotspot from {peer[0]}", flush=True)
+            try:
+                if self.listeners:
+                    self.command("MIC ON")  # the board forgets after a reset
+                self._read(port)
+            except OSError as err:
+                print(f"audio_bridge: hotspot link dropped ({err})", file=sys.stderr, flush=True)
+            finally:
+                with self.write_lock:
+                    if self.conn is conn:
+                        self.conn = self.port = None
+
+
 class BleBoard(Board):
     """Bluetooth LE: one GATT service, audio as 16 kHz mu-law. Runs its own asyncio loop in a thread;
     command() and speak() hand work to it from the socket threads."""
@@ -216,6 +298,12 @@ class BleBoard(Board):
         self.name = name
         self.loop: asyncio.AbstractEventLoop | None = None
         self.client = None
+        # True while a better link is up (FailoverBoard sets it): stay off the air, since a held
+        # Bluetooth connection shares the board's radio with Wi-Fi and chops the hotspot's audio
+        self.standby = lambda: False
+
+    def connected(self) -> bool:
+        return self.client is not None and self.client.is_connected
 
     def _call(self, make_coro) -> None:
         client, loop = self.client, self.loop
@@ -255,6 +343,9 @@ class BleBoard(Board):
 
         self.loop = asyncio.get_running_loop()
         while True:
+            if self.standby():
+                await asyncio.sleep(1)
+                continue
             try:
                 device = await BleakScanner.find_device_by_name(self.name, timeout=BLE_SCAN_S)
                 if device is None:
@@ -270,12 +361,72 @@ class BleBoard(Board):
                     print(f"audio_bridge: voice unit on bluetooth {device.address} (mtu {client.mtu_size})", flush=True)
                     if self.listeners:
                         await client.write_gatt_char(CTRL_UUID, b"MIC ON", response=True)
-                    await gone.wait()
+                    while not gone.is_set() and not self.standby():
+                        with contextlib.suppress(asyncio.TimeoutError):
+                            await asyncio.wait_for(gone.wait(), 1)
+                    self.client = None
+                if self.standby():
+                    print("audio_bridge: a better link is up; bluetooth on standby", flush=True)
+                    continue
                 print("audio_bridge: bluetooth link dropped; reconnecting", file=sys.stderr, flush=True)
             except (BleakError, OSError, asyncio.TimeoutError) as err:
                 print(f"audio_bridge: bluetooth: {err}; retrying", file=sys.stderr, flush=True)
             self.client = None
             await asyncio.sleep(2)
+
+
+class FailoverBoard(Board):
+    """Several links to one voice unit, best first (the hotspot, then Bluetooth). Clients and commands
+    use the first one that's connected; mic audio counts only from that one. Each MIC ON (repeated
+    every 2 s while anyone listens) also turns the mic off on the others, so a switch heals itself.
+    Bluetooth only connects while every better link is down (see BleBoard.standby)."""
+
+    def __init__(self, links: list) -> None:
+        super().__init__()
+        self.links = links
+        for link in links:  # one set of clients, whichever link carries them
+            link.listeners, link.watchers, link.lists_lock = self.listeners, self.watchers, self.lists_lock
+            link.mic_gate = lambda link=link: self.active() is link
+        for i, link in enumerate(links[1:], 1):
+            if hasattr(link, "standby"):
+                link.standby = lambda better=links[:i]: any(b.connected() for b in better)
+
+    @property
+    def poster(self) -> "StatePoster | None":
+        return self.links[0].poster
+
+    @poster.setter
+    def poster(self, value: "StatePoster | None") -> None:
+        for link in self.links:
+            link.poster = value
+
+    def active(self) -> "Board | None":
+        return next((link for link in self.links if link.connected()), None)
+
+    def _link(self) -> Board:
+        link = self.active()
+        if link is None:
+            raise OSError("voice unit not connected")
+        return link
+
+    def command(self, cmd: str) -> None:
+        link = self._link()
+        link.command(cmd)
+        if cmd == "MIC ON":
+            for other in self.links:
+                if other is not link and other.connected():
+                    with contextlib.suppress(OSError):
+                        other.command("MIC OFF")
+
+    def speak(self, pcm: bytes) -> None:
+        self._link().speak(pcm)
+
+    def run(self) -> None:
+        threads = [threading.Thread(target=link.run, daemon=True) for link in self.links]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
 
 
 class StatePoster:
@@ -288,12 +439,21 @@ class StatePoster:
         self.pillow_id = pillow_id
         self.latest: queue.Queue = queue.Queue(maxsize=1)
         self.failures = 0
+        self.imu_motion: float | None = None
+        self.imu_at = 0.0
         threading.Thread(target=self._run, daemon=True).start()
+
+    def imu(self, line: str) -> None:
+        motion = imu_line_motion(line)
+        if motion is not None:
+            self.imu_motion, self.imu_at = motion, time.monotonic()
 
     def post(self, line: str) -> bool:
         state = uno_line_to_state(line, pillow_id=self.pillow_id, ts=round(time.time(), 2))
         if state is None:
             return False
+        if state["motion"] is None and time.monotonic() - self.imu_at < IMU_FRESH_S:
+            state["motion"] = self.imu_motion  # the pillow node has no IMU: the voice unit's
         with contextlib.suppress(queue.Empty):
             self.latest.get_nowait()  # drop an unsent older one
         self.latest.put(state)
@@ -464,13 +624,23 @@ def main() -> None:
     parser.add_argument("--ble-name", default=BLE_NAME, help="the voice unit's Bluetooth name")
     parser.add_argument("--serial", metavar="PORT", help="use USB serial (e.g. /dev/ttyACM0) instead of Bluetooth")
     parser.add_argument("--baud", type=int, default=115200)
+    parser.add_argument("--hotspot", metavar="HOST:PORT", help="take the voice unit over the laptop's "
+                        "hotspot (e.g. 10.42.0.1:47801), with Bluetooth as the fallback")
     parser.add_argument("--listen", default="127.0.0.1:8765", help="host:port for local clients")
     parser.add_argument("--server", help="also POST the pillow's lines as state to this server and pass "
                         "its buzz commands to the voice unit")
     parser.add_argument("--pillow-id", default="mum", help="pillow id for state posts and commands")
     args = parser.parse_args()
     host, _, port = args.listen.rpartition(":")
-    board = SerialBoard(args.serial, args.baud) if args.serial else BleBoard(args.ble_name)
+    if args.serial and args.hotspot:
+        parser.error("--serial and --hotspot are different links: pick one")
+    if args.hotspot:
+        hotspot_host, _, hotspot_port = args.hotspot.rpartition(":")
+        board = FailoverBoard([HotspotBoard(hotspot_host, int(hotspot_port)), BleBoard(args.ble_name)])
+    elif args.serial:
+        board = SerialBoard(args.serial, args.baud)
+    else:
+        board = BleBoard(args.ble_name)
     if args.server:
         board.poster = StatePoster(args.server, args.pillow_id)
         print(f"audio_bridge: Uno lines -> {board.poster.url}", flush=True)
