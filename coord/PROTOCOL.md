@@ -1,7 +1,7 @@
 # How our four Claudes work together
 
 Four humans, four Claude Code sessions. **The ntfy bus is how we talk** (push, under a second).
-**GitHub (`keanucz/calhacks`) is where code and longer notes land.** Read `coord/CONTEXT.md` first.
+**GitHub (`keanucz/resteasy`, public; the old `keanucz/calhacks` is archived) is where code and longer notes land.** Read `coord/CONTEXT.md` first.
 
 | Human | GitHub | `HIVEMIND_AGENT` | Lane (agreed Fri 23 Oct) |
 |---|---|---|---|
