@@ -1,0 +1,6 @@
+tunnel: 5a23a49f-52a1-426d-a08c-03c21a1a9be6
+credentials-file: /etc/cloudflared/tunnel.json
+ingress:
+  - hostname: pillow.keanuc.net
+    service: http://backend:8000
+  - service: http_status:404
