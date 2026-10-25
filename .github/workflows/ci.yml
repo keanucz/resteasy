@@ -139,9 +139,26 @@ jobs:
           arduino-cli compile --fqbn "${{ matrix.fqbn }}" --libraries firmware/libraries
           ${{ matrix.props }} --build-path "$RUNNER_TEMP/build" firmware/${{ matrix.sketch }}
 
+  # The repo is public: a commit must carry a GitHub noreply address (or Keanu's own domain), never
+  # a personal or university email. Set yours with: git config user.email <id>+<login>@users.noreply.github.com
+  emails:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Every commit email is a noreply address
+        env:
+          RANGE: ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
+        run: |
+          bad=$(git log --format='%h %ae%n%h %ce' "$RANGE" | sort -u \
+            | grep -vE ' ([^@ ]+@users\.noreply\.github\.com|noreply@github\.com|[^@ ]+@keanuc\.net)$' || true)
+          [ -z "$bad" ] || { echo "Commits with a non-noreply email (rewrite with git rebase --exec 'git commit --amend --no-edit --reset-author'):"; echo "$bad" | cut -d' ' -f1 | sort -u; exit 1; }
+
   ci-ok:
     name: ci ok
-    needs: [changes, frontend, python, schema, firmware]
+    needs: [changes, frontend, python, schema, firmware, emails]
     if: always()
     runs-on: ubuntu-latest
     steps:
