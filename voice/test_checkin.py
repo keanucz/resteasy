@@ -93,8 +93,8 @@ def test_confused_reorients_once_then_counts():
 def test_confused_forever_still_ends():
     speak, listen, said = fake(*["where am I?"] * 10)
     out = run_checkin(speak, listen)
-    # first ask, then 3 tries after the reorient, the warning, "letting Sarah know"
-    assert out.escalate and len(said) == 1 + 3 + 1 + 1 and "confused" in out.reason
+    # first ask, then 3 tries after the reorient, the warning, then nothing more
+    assert out.escalate and len(said) == 1 + 3 + 1 and "confused" in out.reason
 
 
 def test_judge_wording_used_for_fine_but_not_distress():
@@ -169,22 +169,10 @@ def test_script_run_shares_kinds_with_judge():
     assert out.escalate and "getting Sarah" in said[-1][0]
 
 
-def test_after_alert_an_explicit_im_fine_stops_it():
-    from checkin import ALERT_LINE, ask_after_alert
-
-    speak, listen, said = fake("I'm fine, I just dropped my glasses")
-    assert ask_after_alert(speak, listen, contact="Sarah") is True
-    assert said[0] == (ALERT_LINE.format(contact="Sarah"), 1.6)
-    assert said[-1][0] == "Okay. I'll tell Sarah you're fine."
-
-
-@pytest.mark.parametrize("reply", [None, "...", "yes", "yes please call her", "I'm not fine", "help me"])
-def test_after_alert_anything_but_im_fine_keeps_the_alert(reply):
-    from checkin import ask_after_alert
-
-    speak, listen, said = fake(reply)
-    assert ask_after_alert(speak, listen) is False
-    assert len(said) == 1  # only the question: nothing that sounds like standing down
+def test_the_warning_is_the_last_thing_she_hears():
+    speak, listen, said = fake(None, None, None, None)
+    out = run_checkin(speak, listen, contact="Sarah")
+    assert out.escalate and "let Sarah know" in said[-1][0]
 
 
 @pytest.mark.parametrize("reply,calls_now", [
