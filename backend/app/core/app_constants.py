@@ -117,7 +117,7 @@ ALERT_TEST_MESSAGES = {
 ALERT_DEBUG_NOT_TEST = "Only test accounts can start or stop alerts from the app"
 # The debug alert runs as if she had said this to the pillow: a real distress alert, the call agent
 # hearing her words like on any night
-ALERT_DEBUG_REASON = "She said: \"I think I'm really dizzy, I think I need some help.\""
+ALERT_DEBUG_REASON = "She said: \"I'm feeling dizzy.\""
 # A one-off reminder due this minute, agreed already, so the pillow says it within a reminder tick
 DEMO_REMINDER = {
     "label": "take your evening tablets",

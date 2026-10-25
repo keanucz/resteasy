@@ -24,6 +24,7 @@ from app.core.app_constants import (
     ALERT_TEST_NOT_CONFIGURED,
     ALERT_TEST_TOO_SOON,
     CONSENT_AGREED,
+    DEMO_PILLOW_ID,
     DEMO_REMINDER,
     KEEP_ONE_CHANNEL,
     LAST_ON_CALL,
@@ -41,6 +42,7 @@ from app.core.dependencies import (
 )
 from app.crud.accounts import get_alert_contact, list_contact_resident_ids, update_contact
 from app.crud.pillow_state import get_state
+from app.crud.pillows import get_pillow
 from app.crud.reminders import create_reminder
 from app.crud.residents import list_contacts_in_order
 from app.notify.sender import NotificationSender
@@ -116,10 +118,12 @@ async def update_alerts(
 
 @router.post("/me/alerts/test")
 async def send_test_alert(
-    user_id: UserIdDep, test: AlertTest, db: SupabaseDep, notifier: NotifierDep
+    user_id: UserIdDep, test: AlertTest, db: SupabaseDep, notifier: NotifierDep, night_watch: NightWatchDep
 ) -> AlertTestResult:
     """Send one test text or call to the person's own number now, whatever the switches say: it
-    checks the number and the providers work. At most one per channel every ALERT_TEST_GAP_S."""
+    checks the number and the providers work. At most one per channel every ALERT_TEST_GAP_S.
+    A test account's test call is a real alert instead (the demo): the Line agent rings about her
+    saying ALERT_DEBUG_REASON on the demo pillow, exactly as on a real night."""
     contact = await _own_contact(db, user_id)
     if notifier.twilio is None and (test.channel == "call" or notifier.imessage is None):
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=ALERT_TEST_NOT_CONFIGURED)
@@ -129,6 +133,14 @@ async def send_test_alert(
     if now - _last_test.get(key, -ALERT_TEST_GAP_S) < ALERT_TEST_GAP_S:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, detail=ALERT_TEST_TOO_SOON)
     _last_test[key] = now
+    demo = test.channel == "call" and contact.get("is_test")
+    pillow = await get_pillow(db, DEMO_PILLOW_ID) if demo else None
+    if pillow is not None and pillow.resident_id:
+        await require_role(db, user_id, str(pillow.resident_id), owner=False)
+        night_state = await _real_alert(db, pillow, night_watch)
+        started = night_state == "escalating"
+        error = None if started else f"the pillow says {night_state}"
+        return AlertTestResult(sent=started, via="call", error=error)
     result = await notifier.send_test(test.channel, contact["phone"], ALERT_TEST_MESSAGES[test.channel])
     if not result.sent:
         log.warning("Test %s for contact %s failed: %s", test.channel, contact["id"], result.error)
@@ -152,8 +164,16 @@ async def start_debug_alert(
     is phoned at once (in the voice she hears), texts follow, and "I'm on it" and her "I'm fine" work
     on it like on any alert."""
     await _debug_caller(db, user_id, pillow)
-    night_state = await night_watch.report_distress(db, pillow, ALERT_DEBUG_REASON)
-    return NightStatus(night_state=night_state)
+    return NightStatus(night_state=await _real_alert(db, pillow, night_watch))
+
+
+async def _real_alert(db: SupabaseDep, pillow: Pillow, night_watch: NightWatchDep) -> str:
+    """Start a real distress alert as if she had said ALERT_DEBUG_REASON to the pillow, ending one
+    still running first (as her "I'm fine" would), so every press rings again. The new night state."""
+    state = await get_state(db, pillow.id)
+    if state and state.night_state == "escalating":
+        await night_watch.press_key(db, pillow, "fine")
+    return await night_watch.report_distress(db, pillow, ALERT_DEBUG_REASON)
 
 
 @router.post("/pillows/{pillow_id}/alert-debug/stop")
