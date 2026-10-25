@@ -5,7 +5,7 @@ from typing import Any
 from postgrest.exceptions import APIError
 from supabase import AsyncClient
 
-from app.core.app_constants import OWNER_ROLE
+from app.core.app_constants import NEW_PILLOW_QUIET_HOURS, OWNER_ROLE
 from app.crud.crud_constants import (
     CONTACTS_TABLE,
     JOIN_PRIORITY_TRIES,
@@ -108,7 +108,8 @@ async def create_household(
     owner and first contact (its own contact row if it has none). False, with nothing left behind,
     when that pillow is already registered."""
     names = {"full_name": resident_name, "preferred_name": resident_name}
-    resident = (await db.table(RESIDENTS_TABLE).insert(names).execute()).data[0]
+    row = {**names, **NEW_PILLOW_QUIET_HOURS}
+    resident = (await db.table(RESIDENTS_TABLE).insert(row).execute()).data[0]
     try:
         await db.table(PILLOWS_TABLE).insert({"id": pillow_id, "resident_id": resident["id"]}).execute()
     except APIError as err:

@@ -126,6 +126,16 @@ def test_connect_creates_the_pillow_for_the_named_person(client: TestClient, db:
                 "owner",
                 "Halina",
             )
+            # Watched all day until the app narrows it (quiet_start == quiet_end)
+            link = db.table(PILLOWS_TABLE).select("resident_id").eq("id", real_pillow_id).execute().data[0]
+            hours = (
+                db.table(RESIDENTS_TABLE)
+                .select("quiet_start, quiet_end")
+                .eq("id", link["resident_id"])
+                .execute()
+                .data[0]
+            )
+            assert hours["quiet_start"] == hours["quiet_end"]
 
             # The owner may send it again (a retry, or a changed name); anyone else is turned away
             again = client.post("/api/me/pillows", json={"name": "Babcia"}, headers=auth).json()

@@ -43,6 +43,9 @@ DEMO_PILLOW_ID = "mum"
 # The id the real boards' bridge posts as (sim/audio_bridge.py --pillow-id). "Connect pillow" on a
 # login that looks after nobody creates it, for the person the login names (POST /api/me/pillows)
 REAL_PILLOW_ID = "pillow-1"
+# Quiet hours for a newly connected pillow: start == end means Night Watch watches all day, so a
+# bed exit counts whenever it happens (the demo is judged mid-morning). The app can narrow them
+NEW_PILLOW_QUIET_HOURS = {"quiet_start": "00:00", "quiet_end": "00:00"}
 # Longest name the app may give the person a pillow is for
 RESIDENT_NAME_MAX = 60
 # Detail returned with a 409 when another login has already set the real pillow up
