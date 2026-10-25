@@ -84,20 +84,10 @@ def test_sms_to_a_contact_without_consent_is_blocked():
 # ---------- alert volume ----------
 
 
-def test_too_many_alerts_to_one_contact_in_a_night_are_blocked():
-    g = guardian(max_alerts_per_contact=3)
-    for i in range(3):
+def test_there_is_no_nightly_cap_on_alerts_to_one_contact():
+    g = guardian()
+    for i in range(20):
         assert g.check(Alert("Sarah", "sms", f"msg {i}"), NIGHT + i * 600).allowed
-    v = g.check(Alert("Sarah", "sms", "msg 4"), NIGHT + 1800)
-    assert not v.allowed and "3" in v.reason
-    assert g.check(Alert("Tom", "sms", "msg"), NIGHT + 1800).allowed  # per contact, not global
-
-
-def test_alert_count_resets_the_next_night():
-    g = guardian(max_alerts_per_contact=1)
-    assert g.check(Alert("Sarah", "sms", "a"), NIGHT).allowed
-    assert not g.check(Alert("Sarah", "sms", "b"), NIGHT + 60).allowed
-    assert g.check(Alert("Sarah", "sms", "c"), NIGHT + 24 * 3600).allowed
 
 
 def test_a_repeat_of_the_same_alert_inside_the_step_wait_is_blocked():

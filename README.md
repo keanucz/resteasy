@@ -180,7 +180,7 @@ escalation ladder are ordinary code in a state machine (`backend/app/agents/nigh
 the same night always produces the same alerts. Claude is used for two jobs: working out what she
 said, and writing each alert so it reads well as a push notification, a text or a phone call.
 Everything the system is about to say or send goes through a rules check we call the Guardian
-first. It limits alerts during quiet hours, caps how many alerts one person can get in a night,
+first. It limits alerts during quiet hours, stops the same alert repeating within a couple of minutes,
 and blocks medical claims and raw audio.
 
 ### Night Watch

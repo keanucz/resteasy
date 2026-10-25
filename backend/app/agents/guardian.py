@@ -9,7 +9,7 @@ which the family app shows live.
 Rules (defaults, all in config):
 - device commands: only the contract's commands and argument ranges; brightness <= 40 % at night.
 - words: no diagnosis or medical claim in anything spoken or sent ("may have had a stroke").
-- alerts: at most N per contact per night; no repeat on one channel inside the step wait; SMS only
+- alerts: no repeat on one channel inside the step wait; SMS only
   to contacts who opted in.
 """
 
@@ -82,7 +82,6 @@ class GuardianConfig:
     timezone: str = "America/Los_Angeles"
     quiet_hours: tuple[time, time] | None = (time(22), time(7))  # when the brightness cap applies
     night_brightness_max: int = NIGHT_BRIGHTNESS_MAX
-    max_alerts_per_contact: int = 6  # per night, all channels together
     step_wait_min: float = 2  # no repeat to one contact on one channel inside this
     sms_consent: dict[str, bool] = field(default_factory=dict)  # contact -> opted in (missing = yes)
 
@@ -163,11 +162,8 @@ class Guardian:
     def _alert(self, a: Alert, ts: float) -> Verdict:
         if a.channel == "sms" and not self.cfg.sms_consent.get(a.contact, True):
             return Verdict(False, f"{a.contact} has not given SMS consent")
-        night = self._night_key(ts)
-        n = self._sent.get((night, a.contact), 0)
-        if n >= self.cfg.max_alerts_per_contact:
-            cap = self.cfg.max_alerts_per_contact
-            return Verdict(False, f"{a.contact} already had {n} alerts tonight (max {cap})")
+        # No per-night cap on alerts: an alert that matters must always reach family (a cap of 6 was
+        # used up by all-clear texts and silently dropped real calls).
         last = self._last.get((a.contact, a.channel))
         wait = self.cfg.step_wait_min * 60
         if last is not None and ts - last < wait:
