@@ -102,7 +102,12 @@ def contact_token(db: Client) -> Iterator[str]:
     with _throwaway_login(db) as (user_id, token):
         contact = db.table(CONTACTS_TABLE).insert({"full_name": "Test Helper", "user_id": user_id}).execute()
         contact_id = contact.data[0]["id"]
-        link = {"resident_id": TEST_RESIDENT_ID, "contact_id": contact_id, "priority": TEST_HELPER_PRIORITY}
+        link = {
+            "resident_id": TEST_RESIDENT_ID,
+            "contact_id": contact_id,
+            "priority": TEST_HELPER_PRIORITY,
+            "role": "contact",  # not the owner (the column defaults to owner for the demo)
+        }
         try:
             db.table(RESIDENT_CONTACTS_TABLE).insert(link).execute()
             yield token

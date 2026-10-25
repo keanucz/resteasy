@@ -201,31 +201,25 @@ def voices(monkeypatch, current, clones):
     monkeypatch.setattr(line_module, "get_pillow", get_pillow)
     monkeypatch.setattr(line_module, "get_resident", get_resident)
     monkeypatch.setattr(line_module, "get_voice_clone", get_voice_clone)
-    return lambda contact: asyncio.run(call_voice(object(), "mum", contact))
+    return lambda: asyncio.run(call_voice(object(), "mum"))
 
 
 def test_calls_use_the_pillows_current_voice(monkeypatch):
     voice = voices(monkeypatch, CLONE, {CLONE: {"voice_id": CLONE, "created_by": "c-sarah"}})
-    assert voice("c-tom") == CLONE
+    assert voice() == CLONE
 
 
-def test_nobody_is_called_in_their_own_voice(monkeypatch):
-    voice = voices(monkeypatch, CLONE, {CLONE: {"voice_id": CLONE, "created_by": "c-sarah"}})
-    assert voice("c-sarah") == DEFAULT_VOICE_ID
-
-
-def test_nor_in_an_accent_copy_of_it(monkeypatch):
+def test_an_accent_copy_is_used_as_chosen(monkeypatch):
     clones = {CLONE: {"voice_id": CLONE, "created_by": "c-sarah"},
               "accent": {"voice_id": "accent", "created_by": "c-tom", "base_voice_id": CLONE}}
-    voice = voices(monkeypatch, "accent", clones)
-    assert [voice(c) for c in ("c-sarah", "c-tom", "c-ann")] == [DEFAULT_VOICE_ID, DEFAULT_VOICE_ID, "accent"]
+    assert voices(monkeypatch, "accent", clones)() == "accent"
 
 
 def test_unknown_voice_or_lookup_failure_uses_the_default(monkeypatch):
-    assert voices(monkeypatch, "not-hers", {})("c-sarah") == DEFAULT_VOICE_ID
+    assert voices(monkeypatch, "not-hers", {})() == DEFAULT_VOICE_ID
 
     async def broken(db, pillow_id):
         raise RuntimeError("db down")
 
     monkeypatch.setattr(line_module, "get_pillow", broken)
-    assert asyncio.run(call_voice(object(), "mum", "c-sarah")) == DEFAULT_VOICE_ID
+    assert asyncio.run(call_voice(object(), "mum")) == DEFAULT_VOICE_ID

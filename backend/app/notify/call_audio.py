@@ -12,6 +12,7 @@ from supabase import AsyncClient
 
 from app.core.voice_constants import DEFAULT_VOICE_ID, SAMPLE_EXTENSION
 from app.crud.voice_samples import delete_sample, store_sample
+from app.notify.line import call_voice
 from app.notify.notify_constants import (
     CALL_AUDIO_BUDGET_S,
     CALL_AUDIO_FOLDER,
@@ -31,14 +32,17 @@ class CallAudio:
         self.cartesia = cartesia
         self.db = db
 
-    async def make(self, text: str) -> tuple[str, str] | None:
-        """The script spoken: (its path in the bucket, its public link), or None if it couldn't be
-        made in time. Never raises."""
+    async def make(self, text: str, pillow_id: str | None = None) -> tuple[str, str] | None:
+        """The script spoken in `pillow_id`'s current voice: (its path in the bucket, its public
+        link), or None if it couldn't be made in time. Never raises."""
         path = f"{CALL_AUDIO_FOLDER}/{uuid4().hex}{SAMPLE_EXTENSION}"
+        voice = DEFAULT_VOICE_ID
+        if self.db is not None and pillow_id:
+            voice = await call_voice(self.db, pillow_id)
         try:
             async with asyncio.timeout(CALL_AUDIO_BUDGET_S):
                 speech = Speech(speed=CALL_AUDIO_SPEED)
-                mp3 = await self.cartesia.speak(DEFAULT_VOICE_ID, text, CALL_AUDIO_LANGUAGE, speech)
+                mp3 = await self.cartesia.speak(voice, text, CALL_AUDIO_LANGUAGE, speech)
                 return path, await store_sample(self.db, path, mp3)
         except Exception as err:  # Cartesia, Storage or the budget: Twilio's voice reads it instead
             log.warning("Call audio not made (%s); Twilio's voice reads the script", type(err).__name__)

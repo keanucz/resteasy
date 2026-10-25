@@ -4,8 +4,8 @@ are on their way, tells the pillow, which stops alerting the others.
 
 The agent itself (prompt, tools, model) is set up by scripts/setup_line.py. Cartesia sets the voice
 per agent, so a call in another voice uses a copy of that agent, made here the first time it's
-needed. The call speaks in the voice she hears at night, except that nobody is called in a clone
-of their own voice: then it is the pillow's default voice.
+needed. The call speaks in the voice she hears at night, so a voice chosen in the app (a family
+clone too, even of the person being called) is heard on the next call.
 """
 
 import asyncio
@@ -37,21 +37,16 @@ from app.notify.transports import DeliveryError, _reason
 log = logging.getLogger(__name__)
 
 
-async def call_voice(db: AsyncClient, pillow_id: str, contact_id: str | None) -> str:
-    """The voice to call `contact_id` in: the pillow's current voice, unless it is a clone that
-    contact made (directly or as the base of an accent copy), or anything goes wrong."""
+async def call_voice(db: AsyncClient, pillow_id: str | None) -> str:
+    """The voice to call in: the pillow's current voice, or the default one when it isn't a stock
+    voice or one of hers, or anything goes wrong."""
     try:
-        pillow = await get_pillow(db, pillow_id)
+        pillow = await get_pillow(db, pillow_id) if pillow_id else None
         resident = await get_resident(db, str(pillow.resident_id)) if pillow and pillow.resident_id else None
         voice = (resident or {}).get("voice_id") or DEFAULT_VOICE_ID
         if voice in VOICE_IDS:
             return voice
-        clone = await get_voice_clone(db, resident["id"], voice)
-        makers = {clone and clone.get("created_by")}
-        if clone and clone.get("base_voice_id"):
-            base = await get_voice_clone(db, resident["id"], clone["base_voice_id"])
-            makers.add(base and base.get("created_by"))
-        return voice if clone and str(contact_id) not in {str(m) for m in makers if m} else DEFAULT_VOICE_ID
+        return voice if await get_voice_clone(db, resident["id"], voice) else DEFAULT_VOICE_ID
     except Exception as err:  # the call matters more than the voice
         log.warning("Call voice lookup failed (%s); using the default voice", type(err).__name__)
         return DEFAULT_VOICE_ID
@@ -90,7 +85,7 @@ class CartesiaLine:
         contact = row.get("contacts") or {}
         voice = DEFAULT_VOICE_ID
         if self.db is not None:
-            voice = await call_voice(self.db, incident.get("pillow_id"), row.get("contact_id"))
+            voice = await call_voice(self.db, incident.get("pillow_id"))
         variables = {
             "contact_name": (contact.get("full_name") or "there").split()[0],
             "alert": row.get("message") or incident.get("summary") or "",

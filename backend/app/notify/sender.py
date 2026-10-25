@@ -148,7 +148,8 @@ class NotificationSender:
                 failed = str(err)
         if self.twilio is None:
             return Delivery(False, error=failed or "no Twilio configured for calls")
-        audio = await self.audio.make(text) if self.audio is not None else None
+        pillow_id = (row.get("incidents") or {}).get("pillow_id")
+        audio = await self.audio.make(text, pillow_id) if self.audio is not None else None
         try:
             return Delivery(True, "call", await self.twilio.call(phone, text, audio and audio[1]), failed)
         except DeliveryError as err:
