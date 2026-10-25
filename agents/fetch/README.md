@@ -25,6 +25,8 @@ Claude (`claude-opus-5-5`) for language, and plain code for every decision that 
 | "How was Mum's night?" | last night from the pillow (in bed, asleep, trips, check-ins, alerts, anything unusual), as a card |
 | "Send Mum a goodnight" | a form card; the pillow plays your words when she next lies down |
 | "I'm in Denver Thu to Sun, make sure Mum's covered" | a **plan**: your away nights, a goodnight for each night, maybe a setting, shown as one Confirm / Cancel card |
+| "What's Mum got this week?" | her reminders day by day, with how each went and whether she has agreed to it |
+| "Move her tablets to 9", "skip her walk on Saturday", "drop the call reminder" | a plan that changes, pauses, skips a day of or deletes that reminder; a new time or wording is asked of her again |
 | "Give her 25 minutes before it checks on her" | the same: a plan you confirm. The pillow's Guardian keeps it between 10 and 30 minutes |
 | "Who's on call tonight?" | the family roster, in alert order |
 | "What exactly did the pillow do last night?" | the agent log, step by step, with the Guardian's allowed or blocked verdicts |

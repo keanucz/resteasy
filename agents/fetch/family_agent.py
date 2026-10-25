@@ -12,6 +12,8 @@ Thu-Sun") and answers the pillow's coordinator for them each evening (coordinato
     "Send Mum a goodnight"                       -> a form card, then POST /goodnight
     "I'm away Thu-Sun, make sure Mum's covered"  -> a plan (away dates, goodnights, a reminder)
                                                     shown as a Confirm / Cancel card
+    "What's Mum got this week?"                  -> GET /reminders/calendar
+    "Move her tablets to 9", "skip Saturday"     -> a plan that changes or deletes the reminder
 
 Goals become plans: Claude calls several tools at once, but every tool that changes something is
 only queued. The person sees the whole plan and confirms it; only then does plain code carry the
@@ -80,7 +82,11 @@ chat = Protocol(spec=chat_protocol_spec)
 roster = roster_protocol()
 
 # Tools that change something: queued into a plan the person confirms, never run by Claude directly
-WRITE_TOOLS = {"set_settings", "send_goodnight", "add_reminder", "set_away", "clear_away"}
+WRITE_TOOLS = {"set_settings", "send_goodnight", "add_reminder", "change_reminder", "delete_reminder",
+               "set_away", "clear_away"}
+REMINDER_EDITS = {"change_reminder", "delete_reminder"}  # name an existing reminder by id
+REMINDER_KEYS = ("id", "label", "kind", "time_of_day", "days", "on_date", "skip_dates", "confirm", "active",
+                 "consent", "created_by_name")
 YES = re.compile(r"^\s*(yes|yep|yeah|confirm(ed)?|ok(ay)?|go ahead|do it|sounds good)\b", re.I)
 NO = re.compile(r"^\s*(no|nope|cancel|stop|don'?t)\b", re.I)
 
@@ -89,13 +95,17 @@ You are {name}'s agent for the bedside pillow that watches over {resident}, an o
 alone (pillow id {pillow}). You talk only to {name}, in a chat. Today is {today} ({tz}).
 
 Read tools answer at once: use them for every factual question, never answer from memory about the \
-night. Change tools (set_settings, send_goodnight, add_reminder, set_away, clear_away) do NOT run when \
-you call them: they are queued into a plan that {name} sees as a Confirm / Cancel card. When {name} \
+night. Change tools (QUEUED in their descriptions) do NOT run when you call them: they are queued \
+into a plan that {name} sees as a Confirm / Cancel card. When {name} \
 gives you a goal ("I'm away Thu-Sun, make sure Mum's covered", "keep a closer eye this week"), work out \
 every step it needs and call all the change tools in one go, then describe the plan in 1-3 sentences \
 and say nothing changes until they confirm. Ask a short question instead only if a step really needs \
 words or a time only they can give (e.g. the goodnight text). If they want to send a goodnight but \
 haven't given the words, call show_goodnight_form.
+
+Reminders: get_reminders lists them with their ids; get_calendar shows what plays on which day and how \
+each went. To change, pause, skip a day of or delete one, call get_reminders first for its id. A new \
+wording or time is asked of {resident} again before it plays.
 
 Being away: set_away marks nights when {name} can't be called first (from_date = first night, \
 until_date = last night, both YYYY-MM-DD). Each evening the pillow's coordinator asks this agent, and on \
@@ -147,6 +157,25 @@ TOOLS: list[dict[str, Any]] = [
                   "description": "ISO weekdays 1=Mon..7=Sun; null = every day"},
          "on_date": {"type": ["string", "null"], "description": "YYYY-MM-DD for a one-off, else null"},
          "confirm": {"type": "boolean", "description": "ask her to confirm she did it (meds)"}})},
+    {"name": "get_reminders", "description": "Every reminder the pillow says to her, with its id, time, "
+     "days (ISO 1=Mon..7=Sun) or one-off on_date, skipped dates, whether it is paused (active false) and "
+     "whether she has agreed to it (consent pending/agreed/declined).", "strict": True,
+     "input_schema": _strict()},
+    {"name": "get_calendar", "description": "Each time a reminder plays from start to end (YYYY-MM-DD, "
+     "inclusive, her time, at most 62 days), with how it went (status null = not due yet).", "strict": True,
+     "input_schema": _strict({"start": {"type": "string"}, "end": {"type": "string"}})},
+    {"name": "change_reminder", "description": "QUEUED for approval. Change a reminder by its id from "
+     "get_reminders. Null = unchanged. days makes it weekly; skip_dates ADDS dates it stays quiet on; "
+     "active false pauses it, true resumes it.", "strict": True,
+     "input_schema": _strict({
+         "reminder_id": {"type": "integer"}, "label": {"type": ["string", "null"]},
+         "time_of_day": {"type": ["string", "null"], "description": "HH:MM, her time"},
+         "days": {"type": ["array", "null"], "items": {"type": "integer"}},
+         "on_date": {"type": ["string", "null"], "description": "YYYY-MM-DD, makes it a one-off"},
+         "skip_dates": {"type": ["array", "null"], "items": {"type": "string"}},
+         "confirm": {"type": ["boolean", "null"]}, "active": {"type": ["boolean", "null"]}})},
+    {"name": "delete_reminder", "description": "QUEUED for approval. Delete a reminder by its id from "
+     "get_reminders.", "strict": True, "input_schema": _strict({"reminder_id": {"type": "integer"}})},
     {"name": "set_away", "description": f"QUEUED for approval. Nights {CONTACT_NAME} can't be called first.",
      "strict": True, "input_schema": _strict({
          "from_date": {"type": "string"}, "until_date": {"type": "string"},
@@ -165,6 +194,15 @@ def _day(iso: str) -> str:
         return iso
 
 
+def _when(args: dict[str, Any]) -> str:
+    days = args.get("days")
+    if args.get("on_date"):
+        return f"on {_day(args['on_date'])}"
+    if not days or len(days) == 7:
+        return "every day"
+    return "on " + ", ".join(DAY_NAMES[d - 1] for d in sorted(days) if 1 <= d <= 7)
+
+
 def describe(name: str, args: dict[str, Any]) -> tuple[str, str]:
     """One plan step as a (label, value) row of the review card. Plain code, not Claude's words."""
     if name == "set_settings":
@@ -177,15 +215,27 @@ def describe(name: str, args: dict[str, Any]) -> tuple[str, str]:
     if name == "send_goodnight":
         return f"Goodnight from {args.get('from_name')}", f"\"{args.get('message')}\""
     if name == "add_reminder":
-        days = args.get("days")
-        if args.get("on_date"):
-            when = f"on {_day(args['on_date'])}"
-        elif not days or len(days) == 7:
-            when = "every day"
-        else:
-            when = "on " + ", ".join(DAY_NAMES[d - 1] for d in sorted(days) if 1 <= d <= 7)
-        label = f"{args.get('label')} at {args.get('time_of_day')} {when}"
+        label = f"{args.get('label')} at {args.get('time_of_day')} {_when(args)}"
         return "Reminder for her", f"{label} (she is asked to agree first)"
+    if name == "change_reminder":
+        parts = []
+        if args.get("label"):
+            parts.append(f"say \"{args['label']}\"")
+        if args.get("time_of_day"):
+            parts.append(f"at {args['time_of_day']}")
+        if args.get("days") or args.get("on_date"):
+            parts.append(_when(args))
+        if args.get("skip_dates"):
+            parts.append("quiet on " + ", ".join(_day(d) for d in sorted(args["skip_dates"])))
+        if args.get("confirm") is not None:
+            parts.append("asks her to confirm" if args["confirm"] else "doesn't ask her to confirm")
+        if args.get("active") is not None:
+            parts.append("resumed" if args["active"] else "paused")
+        again = any(args.get(k) for k in ("label", "time_of_day", "days", "on_date"))
+        value = (", ".join(parts) or "no change") + (" (she is asked to agree again)" if again else "")
+        return f"Reminder \"{args.get('current_label')}\"", value
+    if name == "delete_reminder":
+        return f"Reminder \"{args.get('current_label')}\"", "deleted"
     if name == "set_away":
         return f"{CONTACT_NAME} away", (f"{_day(args['from_date'])} to {_day(args['until_date'])} "
                                        f"({args.get('note') or 'away'}): others called first those nights")
@@ -203,9 +253,27 @@ def away_on(storage: Any, night: str) -> dict[str, str] | None:
     return next((a for a in _away(storage) if a["from"] <= night <= a["until"]), None)
 
 
+def _rejected(r: httpx.Response) -> dict[str, str] | None:
+    """A 422 as a step result: the Guardian's reason (a string), or details the API didn't accept."""
+    if r.status_code != 422:
+        return None
+    detail = r.json().get("detail")
+    if isinstance(detail, str):
+        return {"blocked": detail}
+    return {"error": "the pillow didn't accept the details"}
+
+
+async def find_reminder(http: httpx.AsyncClient, reminder_id: int) -> dict[str, Any] | None:
+    r = await http.get(f"{SERVER}/api/pillows/{PILLOW_ID}/reminders")
+    r.raise_for_status()
+    return next((x for x in r.json() if x["id"] == reminder_id), None)
+
+
 async def call_tool(http: httpx.AsyncClient, storage: Any, name: str, args: dict[str, Any]) -> Any:
     base = f"{SERVER}/api/pillows/{PILLOW_ID}"
     auth = {"Authorization": f"Bearer {TOKEN}"}
+    as_contact = {"contact_id": CONTACT_ID}  # agents act on reminders as the family member they speak for
+    gone = {"error": "that reminder no longer exists"}
     if name == "get_status":
         r = await http.get(f"{base}/state")
         r.raise_for_status()
@@ -235,8 +303,8 @@ async def call_tool(http: httpx.AsyncClient, storage: Any, name: str, args: dict
         return {"away": _away(storage)}
     if name == "send_goodnight":
         r = await http.post(f"{base}/goodnight", json=args)
-        if r.status_code == 422:
-            return {"blocked": r.json().get("detail")}
+        if rejected := _rejected(r):
+            return rejected
         r.raise_for_status()
         return {"queued": r.json()}
     if name == "set_settings":
@@ -246,14 +314,48 @@ async def call_tool(http: httpx.AsyncClient, storage: Any, name: str, args: dict
         r = await http.patch(f"{base}/settings", json=patch, headers=auth)
         r.raise_for_status()
         return r.json()
-    if name == "add_reminder":
-        # Agents write reminders as the family member they speak for (created_by = CONTACT_ID)
-        body = {k: v for k, v in args.items() if v is not None}
-        r = await http.post(f"{base}/reminders", params={"contact_id": CONTACT_ID}, json=body, headers=auth)
+    if name == "get_reminders":
+        r = await http.get(f"{base}/reminders")
+        r.raise_for_status()
+        return [{k: x.get(k) for k in REMINDER_KEYS} for x in r.json()]
+    if name == "get_calendar":
+        r = await http.get(f"{base}/reminders/calendar", params={**as_contact, **args}, headers=auth)
         if r.status_code == 422:
-            return {"blocked": r.json().get("detail")}
+            return {"error": r.json().get("detail")}
+        r.raise_for_status()
+        return [{k: e.get(k) for k in ("date", "due_at", "label", "consent", "status")} for e in r.json()]
+    if name == "add_reminder":
+        body = {k: v for k, v in args.items() if v is not None}
+        r = await http.post(f"{base}/reminders", params=as_contact, json=body, headers=auth)
+        if rejected := _rejected(r):
+            return rejected
         r.raise_for_status()
         return {"created": r.json()}
+    if name == "change_reminder":
+        rid = args["reminder_id"]
+        body = {k: v for k, v in args.items() if v is not None and k not in ("reminder_id", "current_label")}
+        if args.get("days") and not args.get("on_date"):
+            body["on_date"] = None  # weekly days make a one-off recurring again
+        if args.get("skip_dates"):
+            current = await find_reminder(http, rid)
+            if current is None:
+                return gone
+            body["skip_dates"] = sorted({*current["skip_dates"], *args["skip_dates"]})
+        if not body:
+            return {"error": "nothing to change"}
+        r = await http.patch(f"{base}/reminders/{rid}", params=as_contact, json=body, headers=auth)
+        if r.status_code == 404:
+            return gone
+        if rejected := _rejected(r):
+            return rejected
+        r.raise_for_status()
+        return {"changed": r.json()}
+    if name == "delete_reminder":
+        r = await http.delete(f"{base}/reminders/{args['reminder_id']}", params=as_contact, headers=auth)
+        if r.status_code == 404:
+            return gone
+        r.raise_for_status()
+        return {"deleted": args["reminder_id"]}
     if name == "set_away":
         for key in ("from_date", "until_date"):
             date.fromisoformat(args[key])  # a bad date raises, and Claude is told
@@ -301,6 +403,11 @@ async def answer(storage: Any, history: list[dict[str, Any]], text: str) -> Turn
             for call in calls:
                 args = dict(call.input)
                 try:
+                    if call.name in REMINDER_EDITS:
+                        current = await find_reminder(http, args["reminder_id"])
+                        if current is None:
+                            raise LookupError(f"no reminder {args['reminder_id']}: see get_reminders")
+                        args["current_label"] = current["label"]  # for the review card, from plain code
                     if call.name in WRITE_TOOLS:
                         turn.steps.append({"tool": call.name, "args": args})
                         label, value = describe(call.name, args)
@@ -327,6 +434,8 @@ def outcome(name: str, args: dict[str, Any], result: Any) -> str:
     label, value = describe(name, args)
     if isinstance(result, dict) and result.get("blocked"):
         return f"{label}: not done, the pillow's safety rules blocked it ({result['blocked']})"
+    if isinstance(result, dict) and result.get("error"):
+        return f"{label}: not done, {result['error']}"
     if name == "set_settings" and isinstance(result, dict) and result.get("guardian") == "blocked":
         return f"{label}: adjusted by the safety rules to {result.get('applied')} ({result.get('reason')})"
     return f"{label}: {value}"
