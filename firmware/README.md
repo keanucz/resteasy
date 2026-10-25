@@ -59,6 +59,9 @@ analog only on ADC1 (GPIO1-10); keep off GPIO0/3/45/46 (strapping), 19/20 (USB),
 The node builds the contract line itself ({"head_on":1,"motion":null,...,"talk":0}) every 500 ms
 and on change; `sim/uno_state.py`, the bridge and the backend are unchanged from the Uno days.
 
+The voice unit's screen library (GFX Library for Arduino 1.6.4) doesn't compile on esp32 core
+3.3.10+ as shipped: run `firmware/patch_gfx.sh` once after installing it (CI does the same).
+
 ```bash
 L="--libraries firmware/libraries --build-property compiler.cpp.extra_flags=-DPILLOW_LINK=1"
 arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc $L firmware/voice_unit   # bedside

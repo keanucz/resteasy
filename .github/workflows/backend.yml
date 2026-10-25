@@ -2,8 +2,8 @@
 name: backend
 
 on:
+  # Every PR, so "test" can be a required check on master even for PRs that don't touch the backend
   pull_request:
-    paths: ["backend/**", "deploy/**", "agents/fetch/**", ".github/workflows/backend.yml"]
   push:
     branches: [master]
     paths: ["backend/**", "deploy/**", "agents/fetch/**", ".github/workflows/backend.yml"]

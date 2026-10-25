@@ -1,8 +1,0 @@
-{
-  "name": "pillow-imessage",
-  "private": true,
-  "type": "module",
-  "description": "Sends the pillow's family alerts as iMessages through Photon's Spectrum Cloud",
-  "scripts": { "start": "node index.mjs" },
-  "dependencies": { "spectrum-ts": "12.14.0" }
-}

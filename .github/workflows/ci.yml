@@ -1,0 +1,153 @@
+# Every lane's checks on every PR and every push to master. Each job runs only when its folder (or
+# this file) changed; "ci ok" sums them up, so it is the one check branch protection requires.
+# The backend (and the server deploy) is backend.yml.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# paths-filter lists a PR's files through the API, which needs pull-requests: read
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+      python: ${{ steps.filter.outputs.python }}
+      schema: ${{ steps.filter.outputs.schema }}
+      firmware: ${{ steps.filter.outputs.firmware }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            ci: &ci
+              - ".github/workflows/ci.yml"
+            frontend:
+              - *ci
+              - "frontend/**"
+            python:
+              - *ci
+              - "voice/**"
+              - "sim/**"
+              - "droid/**"
+              - "coord/*.py"
+              - "agents/**"
+            schema:
+              - *ci
+              - "backend/supabase/**"
+            firmware:
+              - *ci
+              - "firmware/**"
+
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run lint
+
+  python:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.11"
+      # The scripts are uv single-file scripts; their tests need these of the scripts' dependencies
+      - name: voice
+        run: uv run -q --python 3.12 --with pytest --with httpx --with numpy --with anthropic --with websockets pytest -q voice
+      - name: sim
+        run: uv run -q --python 3.12 --with pytest --with bleak --with numpy --with pyserial --with httpx pytest -q sim
+      - name: droid
+        run: uv run -q --python 3.12 --with pytest --with httpx --with anthropic pytest -q droid
+      - name: coord and agents compile
+        run: python3 -m py_compile coord/*.py && python3 -m compileall -q agents
+
+  schema:
+    needs: changes
+    if: needs.changes.outputs.schema == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.11"
+      # Every migration plus the seed, applied in order to a throwaway Postgres (backend/README.md)
+      - run: uvx --python 3.12 --with pgserver python backend/supabase/check_schema.py
+
+  firmware:
+    needs: changes
+    if: needs.changes.outputs.firmware == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sketch: voice_unit
+            fqbn: esp32:esp32:esp32s3:CDCOnBoot=cdc,PSRAM=opi,PartitionScheme=huge_app
+            props: >-
+              --build-property "compiler.cpp.extra_flags=-DPILLOW_LINK=1 -DPILLOW_HOTSPOT=1 -DPILLOW_BLE=1"
+              --build-property upload.maximum_size=3145728
+          - sketch: pillow_node
+            fqbn: esp32:esp32:esp32s3:CDCOnBoot=cdc
+          - sketch: espnow_relay
+            fqbn: esp32:esp32:esp32s3:CDCOnBoot=cdc
+          - sketch: pillow_uno
+            fqbn: arduino:avr:uno
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.arduino15
+            ~/Arduino/libraries
+          key: arduino-esp32-3.3.12-avr-1.8.7-gfx-1.6.4-patched
+      - name: Cores and libraries
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.3.12 arduino:avr@1.8.7
+          arduino-cli lib install "GFX Library for Arduino@1.6.4"
+          firmware/patch_gfx.sh
+      # The real radio keys stay gitignored; CI builds with the example ones and keeps no binary
+      - run: cp firmware/libraries/PillowRadio/secrets.example.h firmware/libraries/PillowRadio/secrets.h
+      - name: Compile ${{ matrix.sketch }}
+        run: >-
+          arduino-cli compile --fqbn "${{ matrix.fqbn }}" --libraries firmware/libraries
+          ${{ matrix.props }} --build-path "$RUNNER_TEMP/build" firmware/${{ matrix.sketch }}
+
+  ci-ok:
+    name: ci ok
+    needs: [changes, frontend, python, schema, firmware]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every lane that ran passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: echo "$NEEDS" | jq -e 'all(.[]; .result == "success" or .result == "skipped")'
