@@ -10,7 +10,7 @@ Thu-Sun") and answers the pillow's coordinator for them each evening (coordinato
 
     "How was Mum's night?"                       -> GET /night, shown as a card
     "Send Mum a goodnight"                       -> a form card, then POST /goodnight
-    "I'm away Thu-Sun, make sure Mum's covered"  -> a plan (away dates, goodnights, settings)
+    "I'm away Thu-Sun, make sure Mum's covered"  -> a plan (away dates, goodnights, a reminder)
                                                     shown as a Confirm / Cancel card
 
 Goals become plans: Claude calls several tools at once, but every tool that changes something is
@@ -80,7 +80,7 @@ chat = Protocol(spec=chat_protocol_spec)
 roster = roster_protocol()
 
 # Tools that change something: queued into a plan the person confirms, never run by Claude directly
-WRITE_TOOLS = {"set_settings", "send_goodnight", "set_away", "clear_away"}
+WRITE_TOOLS = {"set_settings", "send_goodnight", "add_reminder", "set_away", "clear_away"}
 YES = re.compile(r"^\s*(yes|yep|yeah|confirm(ed)?|ok(ay)?|go ahead|do it|sounds good)\b", re.I)
 NO = re.compile(r"^\s*(no|nope|cancel|stop|don'?t)\b", re.I)
 
@@ -89,7 +89,7 @@ You are {name}'s agent for the bedside pillow that watches over {resident}, an o
 alone (pillow id {pillow}). You talk only to {name}, in a chat. Today is {today} ({tz}).
 
 Read tools answer at once: use them for every factual question, never answer from memory about the \
-night. Change tools (set_settings, send_goodnight, set_away, clear_away) do NOT run when \
+night. Change tools (set_settings, send_goodnight, add_reminder, set_away, clear_away) do NOT run when \
 you call them: they are queued into a plan that {name} sees as a Confirm / Cancel card. When {name} \
 gives you a goal ("I'm away Thu-Sun, make sure Mum's covered", "keep a closer eye this week"), work out \
 every step it needs and call all the change tools in one go, then describe the plan in 1-3 sentences \
@@ -137,6 +137,16 @@ TOOLS: list[dict[str, Any]] = [
      "strict": True, "input_schema": _strict({
          "quiet_start": {"type": ["string", "null"]}, "quiet_end": {"type": ["string", "null"]},
          "checkin_timeout_min": {"type": ["integer", "null"]}})},
+    {"name": "add_reminder", "description": "QUEUED for approval. A reminder the pillow says to her when "
+     "she's awake, e.g. 'call Sarah' or 'take your heart tablets'; she is asked to agree to it first. "
+     "label is an action phrase. Weekly on `days`, or once on `on_date`.", "strict": True,
+     "input_schema": _strict({
+         "label": {"type": "string"}, "time_of_day": {"type": "string", "description": "HH:MM, her time"},
+         "kind": {"type": "string", "enum": ["meds", "call", "custom"]},
+         "days": {"type": ["array", "null"], "items": {"type": "integer"},
+                  "description": "ISO weekdays 1=Mon..7=Sun; null = every day"},
+         "on_date": {"type": ["string", "null"], "description": "YYYY-MM-DD for a one-off, else null"},
+         "confirm": {"type": "boolean", "description": "ask her to confirm she did it (meds)"}})},
     {"name": "set_away", "description": f"QUEUED for approval. Nights {CONTACT_NAME} can't be called first.",
      "strict": True, "input_schema": _strict({
          "from_date": {"type": "string"}, "until_date": {"type": "string"},
@@ -144,6 +154,9 @@ TOOLS: list[dict[str, Any]] = [
     {"name": "clear_away", "description": f"QUEUED for approval. Forget all of {CONTACT_NAME}'s away dates.",
      "strict": True, "input_schema": _strict()},
 ]
+
+DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
 
 def _day(iso: str) -> str:
     try:
@@ -163,6 +176,16 @@ def describe(name: str, args: dict[str, Any]) -> tuple[str, str]:
         return "Pillow settings", ", ".join(parts) or "no change"
     if name == "send_goodnight":
         return f"Goodnight from {args.get('from_name')}", f"\"{args.get('message')}\""
+    if name == "add_reminder":
+        days = args.get("days")
+        if args.get("on_date"):
+            when = f"on {_day(args['on_date'])}"
+        elif not days or len(days) == 7:
+            when = "every day"
+        else:
+            when = "on " + ", ".join(DAY_NAMES[d - 1] for d in sorted(days) if 1 <= d <= 7)
+        label = f"{args.get('label')} at {args.get('time_of_day')} {when}"
+        return "Reminder for her", f"{label} (she is asked to agree first)"
     if name == "set_away":
         return f"{CONTACT_NAME} away", (f"{_day(args['from_date'])} to {_day(args['until_date'])} "
                                        f"({args.get('note') or 'away'}): others called first those nights")
@@ -223,6 +246,14 @@ async def call_tool(http: httpx.AsyncClient, storage: Any, name: str, args: dict
         r = await http.patch(f"{base}/settings", json=patch, headers=auth)
         r.raise_for_status()
         return r.json()
+    if name == "add_reminder":
+        # Agents write reminders as the family member they speak for (created_by = CONTACT_ID)
+        body = {k: v for k, v in args.items() if v is not None}
+        r = await http.post(f"{base}/reminders", params={"contact_id": CONTACT_ID}, json=body, headers=auth)
+        if r.status_code == 422:
+            return {"blocked": r.json().get("detail")}
+        r.raise_for_status()
+        return {"created": r.json()}
     if name == "set_away":
         for key in ("from_date", "until_date"):
             date.fromisoformat(args[key])  # a bad date raises, and Claude is told

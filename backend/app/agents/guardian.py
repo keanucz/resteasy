@@ -44,7 +44,11 @@ MEDICAL = re.compile(
     r"\b(strokes?|heart attack|cardiac|seizures?|dementia|alzheimer'?s?|delirium|concussion|"
     r"fractured?|broken? (?:her |his |a )?(?:hip|leg|arm|bone)|infection|sepsis|pneumonia|"
     r"hypoglyc\w*|overdose|diagnos\w*|symptoms? of|"
-    r"take (?:another|more|an extra|a second) (?:pill|tablet|dose))\b",
+    r"take (?:another|more|an extra|a second) (?:pill|tablet|dose)|"
+    # dosing: the pillow says it's time to take her tablets, never how much
+    r"(?:double|triple|half|halve|extra|increase|decrease|skip|change|stop) (?:\w+ ){0,2}doses?|"
+    r"doses? of|\d+(?:\.\d+)? ?(?:mg|mcg|ml|milligrams?|micrograms?|units?)|"
+    r"(?:\d+|two|three|four|five|half an?) (?:pills?|tablets?|capsules?|doses?))\b",
     re.IGNORECASE,
 )
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")

@@ -149,6 +149,16 @@ def test_free_text_for_her_is_checked_too():
     assert not guardian().check_text("Take another tablet if your chest hurts.").allowed
 
 
+def test_dosing_is_blocked_but_ordinary_reminders_pass():
+    """The pillow says it's time to take her tablets, never how much: a typo in a family member's
+    reminder (or an agent's) must not become a dose."""
+    for text in ("take double your dose of warfarin", "take 2 tablets", "take half a pill tonight",
+                 "take 50 mg of your blood thinner", "skip your evening dose", "increase the dose"):
+        assert not guardian().check_text(text).allowed, text
+    for text in ("take your heart tablets", "call Sarah", "take Biscuit for his walk"):
+        assert guardian().check_text(text).allowed, text
+
+
 def test_her_own_quoted_words_are_not_a_medical_claim():
     """She said it, the agent only reports it; family should hear her words."""
     quoted = Alert("Sarah", "sms", 'Mum got up at 03:00 and hasn\'t come back (25 min). '
