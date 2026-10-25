@@ -22,6 +22,7 @@ from app.core.app_constants import CONSENT_AGREED, REMIND_PURPOSE, REMINDERS_TOO
 from app.core.dependencies import (
     CareActor,
     CareActorDep,
+    ContactActorDep,
     PillowDep,
     ReminderServiceDep,
     ResidentDep,
@@ -104,7 +105,7 @@ async def read_calendar(
 
 @router.patch("/{reminder_id}")
 async def update_reminder(
-    pillow_id: str, reminder_id: int, patch: ReminderUpdate, actor: CareActorDep, db: SupabaseDep
+    pillow_id: str, reminder_id: int, patch: ReminderUpdate, actor: ContactActorDep, db: SupabaseDep
 ) -> Reminder:
     """Change a reminder; `active: false` pauses it. Changing what is said or when asks her again."""
     _screen(patch.label)
@@ -123,7 +124,9 @@ async def update_reminder(
 
 
 @router.delete("/{reminder_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_reminder(pillow_id: str, reminder_id: int, actor: CareActorDep, db: SupabaseDep) -> Response:
+async def delete_reminder(
+    pillow_id: str, reminder_id: int, actor: ContactActorDep, db: SupabaseDep
+) -> Response:
     row = await crud.delete_reminder(db, actor.resident["id"], reminder_id)
     if row is None:
         raise _not_found(reminder_id)

@@ -30,6 +30,7 @@ from app.core.app_constants import (
     PHOTO_TOO_LARGE,
     PHOTO_WRONG_TYPE,
     PILLOW_VOICE_AGENT,
+    RESIDENT_NOT_ALLOWED,
     SUPABASE_NOT_CONFIGURED,
 )
 from app.core.config import get_settings
@@ -372,6 +373,18 @@ async def pillow_care_actor(
 
 
 CareActorDep = Annotated[CareActor, Depends(pillow_care_actor)]
+
+
+async def contact_care_actor(actor: CareActorDep) -> CareActor:
+    """A member of her care circle, never the base laptop acting as her (`as=resident`): the talk
+    key may only set up a reminder and read her calendar, not change settings, goodnights, away
+    nights or other reminders. 403 for the resident."""
+    if actor.contact_id is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=RESIDENT_NOT_ALLOWED)
+    return actor
+
+
+ContactActorDep = Annotated[CareActor, Depends(contact_care_actor)]
 
 
 async def photo_upload(file: UploadFile) -> PhotoUpload:

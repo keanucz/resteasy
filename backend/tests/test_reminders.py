@@ -28,6 +28,7 @@ from app.core.app_constants import (
     AGENT_CONTACT_NOT_LINKED,
     FAMILY_AGENT,
     PILLOW_VOICE_AGENT,
+    RESIDENT_NOT_ALLOWED,
 )
 from app.core.config import get_settings
 from app.crud.crud_constants import (
@@ -602,3 +603,23 @@ def test_she_sets_a_reminder_by_voice_and_her_yes_is_her_consent(
 def test_as_resident_needs_the_agent_token(offline_client: TestClient):
     response = offline_client.post(f"{BASE}?as=resident", json=NEW, headers=_bearer("not-a-real-token"))
     assert response.status_code == 401
+
+
+def test_acting_as_her_only_sets_up_reminders_and_reads_her_calendar(
+    reminders_client: TestClient, checkin_auth: dict
+):
+    """The talk key's `as=resident` can't change settings, goodnights, away nights or reminders."""
+    as_her = "?as=resident"
+    rid = reminders_client.post(f"{BASE}{as_her}", json=NEW, headers=checkin_auth).json()["id"]
+    pillow = f"/api/pillows/{TEST_PILLOW_ID}"
+    calls = [
+        reminders_client.patch(f"{BASE}/{rid}{as_her}", json={"active": False}, headers=checkin_auth),
+        reminders_client.delete(f"{BASE}/{rid}{as_her}", headers=checkin_auth),
+        reminders_client.patch(f"{pillow}/settings{as_her}", json={"checkin_timeout_min": 25},
+                               headers=checkin_auth),
+        reminders_client.post(f"{pillow}/goodnight{as_her}", json={"message": "hi", "from_name": "me"},
+                              headers=checkin_auth),
+        reminders_client.get(f"{pillow}/away{as_her}", headers=checkin_auth),
+    ]
+    assert [(r.status_code, r.json()["detail"]) for r in calls] == [(403, RESIDENT_NOT_ALLOWED)] * len(calls)
+    assert reminders_client.get(BASE).json()[0]["active"]  # nothing changed

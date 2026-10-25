@@ -27,7 +27,7 @@ from app.core.app_constants import (
 )
 from app.core.dependencies import (
     CareActor,
-    CareActorDep,
+    ContactActorDep,
     PillowDep,
     SupabaseDep,
     require_checkin_token,
@@ -133,7 +133,7 @@ async def _log_for(
 
 @router.patch("/settings")
 async def patch_settings(
-    pillow_id: str, patch: SettingsPatch, actor: CareActorDep, db: SupabaseDep
+    pillow_id: str, patch: SettingsPatch, actor: ContactActorDep, db: SupabaseDep
 ) -> SettingsResult:
     """Anyone in her care circle (their login, or their family agent) changes when the pillow
     watches or the check-in wait, within the app's bounds (422 outside them)."""
@@ -146,7 +146,7 @@ async def patch_settings(
 
 @router.post("/goodnight", status_code=status.HTTP_201_CREATED)
 async def queue_goodnight(
-    pillow_id: str, msg: GoodnightCreate, actor: CareActorDep, db: SupabaseDep
+    pillow_id: str, msg: GoodnightCreate, actor: ContactActorDep, db: SupabaseDep
 ) -> Goodnight:
     """Queue a goodnight message from someone in her care circle; the pillow plays it when she next
     lies down. The words pass the Guardian's text check (422 otherwise)."""
@@ -220,13 +220,13 @@ def _today(actor: CareActor) -> str:
 
 
 @router.get("/away")
-async def read_away(actor: CareActorDep, db: SupabaseDep) -> list[Away]:
+async def read_away(actor: ContactActorDep, db: SupabaseDep) -> list[Away]:
     """The caller's own away nights from tonight on (her timezone), soonest first."""
     return [Away(**row) for row in await list_away(db, actor.contact_id, _today(actor))]
 
 
 @router.post("/away", status_code=status.HTTP_201_CREATED)
-async def create_away(pillow_id: str, away: AwayCreate, actor: CareActorDep, db: SupabaseDep) -> Away:
+async def create_away(pillow_id: str, away: AwayCreate, actor: ContactActorDep, db: SupabaseDep) -> Away:
     """Nights the caller can't be called first; on those nights the coordinator puts them off call."""
     row = await add_away(db, actor.contact_id, away.model_dump(mode="json"))
     when = f"{away.from_date.isoformat()} to {away.until_date.isoformat()}"
@@ -235,7 +235,7 @@ async def create_away(pillow_id: str, away: AwayCreate, actor: CareActorDep, db:
 
 
 @router.delete("/away", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_away(pillow_id: str, actor: CareActorDep, db: SupabaseDep) -> Response:
+async def delete_away(pillow_id: str, actor: ContactActorDep, db: SupabaseDep) -> Response:
     """Forget all of the caller's away nights."""
     await clear_away(db, actor.contact_id)
     await _log_for(db, pillow_id, actor, "cleared away dates", AWAY_TOOL, {})
