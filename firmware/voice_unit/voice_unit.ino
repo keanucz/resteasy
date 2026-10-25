@@ -606,11 +606,15 @@ void hotspotTask(void *) {
   static String line;
   uint32_t lastSent = 0;
   for (;;) {
-    if (!hotspot.connected()) {
+    // Wi-Fi first: when the access point goes away the socket still looks connected (writes just
+    // queue in lwIP) for ~30 s, and Bluetooth only advertises once we call the link lost.
+    if (WiFi.status() != WL_CONNECTED || !hotspot.connected()) {
       if (hotspotConnected) {
         hotspotConnected = false;
         micOn[FROM_HOTSPOT] = false;
-        Serial.print("hotspot: bridge connection lost\r\n");
+        hotspot.stop();
+        Serial.printf("hotspot: bridge connection lost (%s)\r\n",
+                      WiFi.status() != WL_CONNECTED ? "wi-fi down" : "socket closed");
         bleAdvertise(true);
       }
       if (!hotspotDial()) {
