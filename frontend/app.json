@@ -18,7 +18,14 @@
       "expo-router",
       "expo-status-bar",
       "expo-font",
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Rest Easy uses the microphone only when you record a family voice for the pillow.",
+          "enableBackgroundPlayback": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

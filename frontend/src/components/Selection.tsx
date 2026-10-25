@@ -64,7 +64,7 @@ export function SegmentedTabs<T extends string>({ options, value, onChange }: Se
             accessibilityRole="tab"
             accessibilityState={{ selected }}
             onPress={() => onChange(option.value)}
-            className={`flex-1 items-center rounded-lg py-2 ${selected ? 'bg-ink/15' : ''}`}
+            className={`min-h-11 flex-1 items-center justify-center rounded-lg ${selected ? 'bg-ink/15' : ''}`}
           >
             <Text className={`font-sans-semibold text-[13px] ${selected ? 'text-ink' : 'text-ink-muted'}`}>
               {option.label}
@@ -89,7 +89,7 @@ export function Checkbox({ label, checked, onChange }: CheckboxProps) {
       accessibilityRole="checkbox"
       accessibilityState={{ checked }}
       onPress={() => onChange(!checked)}
-      className="flex-row items-center gap-2.5"
+      className="min-h-11 flex-row items-center gap-2.5"
     >
       <View
         className={`size-[22px] items-center justify-center rounded-md border-[1.5px] ${
@@ -98,7 +98,7 @@ export function Checkbox({ label, checked, onChange }: CheckboxProps) {
       >
         {checked ? <Text className="font-sans-bold text-[13px] text-on-calm">✓</Text> : null}
       </View>
-      <Text className="font-sans text-base text-ink">{label}</Text>
+      <Text className="shrink font-sans text-base text-ink">{label}</Text>
     </Pressable>
   );
 }

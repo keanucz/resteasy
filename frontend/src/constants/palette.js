@@ -73,6 +73,12 @@ const modes = {
     'state-up': states.dark.up,
     'state-alert': states.dark.alert,
     'state-offline': states.dark.offline,
+    // Chart marks: deeper steps of the state hues, validated together for colour-blind separation
+    // and 3:1 on the card surface (the dataviz palette check). Text never uses these.
+    'chart-asleep': '#2FA886',
+    'chart-restless': '#AE6EDC',
+    'chart-up': '#C98419',
+    'chart-line': raw.glow,
   },
   light: {
     canvas: raw.day,
@@ -95,6 +101,10 @@ const modes = {
     'state-up': states.light.up,
     'state-alert': states.light.alert,
     'state-offline': states.light.offline,
+    'chart-asleep': '#0B8468',
+    'chart-restless': states.light.restless,
+    'chart-up': states.light.up,
+    'chart-line': raw['glow-day'],
   },
 };
 

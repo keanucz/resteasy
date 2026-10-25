@@ -24,6 +24,9 @@ const API_URL_VAR = 'EXPO_PUBLIC_API_URL';
 // Hosts only reachable from this computer (or its emulator), never from a phone.
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '10.0.2.2']);
 const TUNNEL_URL_PATTERN = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/;
+// Cloudflare's answer when this network has asked for too many quick tunnels (shared venue Wi-Fi).
+const RATE_LIMITED_PATTERN = /429 Too Many Requests|error code: 1015/;
+const ERROR_LINE_PATTERN = / ERR |error=|failed/;
 const TUNNEL_URL_TIMEOUT_MS = 60_000;
 // New trycloudflare hostnames take a few seconds to reach DNS, so readiness is polled.
 const READY_POLL_INTERVAL_MS = 2_000;
@@ -109,8 +112,13 @@ function startTunnel(port, label) {
     children.push(tunnel);
 
     const timer = setTimeout(() => reject(new Error(`cloudflared gave no ${label} URL within 60 s`)), TUNNEL_URL_TIMEOUT_MS);
+    let rateLimited = false;
+    let lastError = '';
     const onOutput = (chunk) => {
-      const match = chunk.toString().match(TUNNEL_URL_PATTERN);
+      const text = chunk.toString();
+      if (RATE_LIMITED_PATTERN.test(text)) rateLimited = true;
+      lastError = text.split(/\r?\n/).find((line) => ERROR_LINE_PATTERN.test(line))?.trim() ?? lastError;
+      const match = text.match(TUNNEL_URL_PATTERN);
       if (match) {
         clearTimeout(timer);
         resolve(match[0]);
@@ -124,6 +132,15 @@ function startTunnel(port, label) {
     });
     tunnel.on('exit', (code) => {
       console.error(`\ncloudflared (${label}) exited (code ${code}); the links no longer work.`);
+      if (rateLimited) {
+        console.error(
+          'Cloudflare is refusing new quick tunnels from this network (429, error 1015): everyone on this\n' +
+            'Wi-Fi shares one address. Wait 15+ minutes before retrying (each retry extends it), or put the\n' +
+            'laptop on a phone hotspot.',
+        );
+      } else if (lastError) {
+        console.error(`cloudflared said: ${lastError}`);
+      }
       shutdown(1);
     });
   });

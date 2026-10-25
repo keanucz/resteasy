@@ -41,8 +41,8 @@ export async function signIn(email: string, password: string): Promise<SignInRes
 }
 
 /**
- * Create an account with an email and password. When the Supabase project returns a session the
- * user is signed in straight away; if it wants confirmation first, the result says so.
+ * Create an account with an email and password and sign straight in. Only if the Supabase project
+ * still demands email confirmation does the result ask the user to confirm first.
  */
 export async function signUp(email: string, password: string): Promise<SignInResult> {
   const invalid = checkFields(email, password);
@@ -59,8 +59,11 @@ export async function signUp(email: string, password: string): Promise<SignInRes
   }
   // With confirmations on, Supabase hides an existing account behind a user with no identities.
   if (data.user && data.user.identities?.length === 0) return { ok: false, message: SIGNUP_TAKEN_MESSAGE };
-  if (!data.session) return { ok: false, message: SIGNUP_NEEDS_CONFIRMATION_MESSAGE };
-  return { ok: true };
+  if (data.session) return { ok: true };
+  // No session back means the project wants the email confirmed; try logging straight in anyway,
+  // which works as soon as confirmation is switched off.
+  const login = await signIn(email, password);
+  return login.ok ? login : { ok: false, message: SIGNUP_NEEDS_CONFIRMATION_MESSAGE };
 }
 
 /** End the session on this device. */

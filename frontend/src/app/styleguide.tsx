@@ -90,7 +90,7 @@ export default function StyleguideScreen() {
 
   return (
     <ScrollView className="flex-1 bg-canvas" contentContainerClassName="pb-16">
-      <SkyHeader state={state} name="Mum" initials="M" detail={DEMO[state].detail} />
+      <SkyHeader state={state} name="Mum" initials="M" detail={DEMO[state].detail} nightProgress={0.4} />
       <View className="gap-8 px-4">
         <View className="gap-3">
           <SegmentedTabs options={STATES} value={state} onChange={setState} />
