@@ -1,6 +1,8 @@
 """The sleep-quality and key events of coord/CONTRACT.md section 2 that Night Watch doesn't derive:
 restless, asleep, key_talk, key_family."""
 
+import math
+
 from app.agents.sleep_events import (
     ASLEEP_S,
     DEMO_ASLEEP_S,
@@ -19,9 +21,9 @@ T0 = 1_792_815_000.0
 def feed(tracker, start, seconds, **fields):
     """One report per second for `seconds` from `start`; returns (next ts, events)."""
     out = []
-    for t in range(seconds):
+    for t in range(math.ceil(seconds)):
         out += tracker.observe({"ts": start + t, "head_on": True, "motion": 0.03, "keys": {}, **fields})
-    return start + seconds, out
+    return start + math.ceil(seconds), out
 
 
 def types(events):
@@ -124,7 +126,7 @@ def test_demo_restless_only_after_seconds_of_hard_shaking_and_settled_when_it_st
     ts, ev = feed(tr, ts, 5, motion=0.6)
     assert types(ev) == []  # still restless, said once
     ts, ev = feed(tr, ts, DEMO_SETTLED_S + 1, motion=0.02)
-    assert types(ev)[0] == "settled"  # (and asleep, a few quiet seconds on)
+    assert "settled" in types(ev)  # (and asleep, a moment of quiet on)
 
 
 def test_demo_gentle_movement_is_never_restless():
@@ -143,5 +145,5 @@ def test_demo_restless_follows_the_imu_even_with_the_head_off():
     tr = SleepTracker(demo=True)
     ts, ev = feed(tr, T0, DEMO_RESTLESS_S + 1, motion=0.6, head_on=False)
     assert types(ev) == ["restless"]
-    _, ev = feed(tr, ts, DEMO_HEAD_OFF_GRACE_S + 1, head_on=False)
+    _, ev = feed(tr, ts, max(DEMO_HEAD_OFF_GRACE_S, DEMO_SETTLED_S) + 1, head_on=False)
     assert types(ev) == ["settled"]  # the IMU went still

@@ -49,14 +49,20 @@ class Timings:
 
 
 # PILLOW_DEMO_TIMINGS=1 on the server: every state shows within seconds of pressing or lifting the
-# head plate, so a five-minute judging slot sees them all. Held on 2 s = in bed, so with the bridge's
-# second of lag the app shows her in bed about 3 s after the press. The check-in counts from the lift. After
+# head plate, so a five-minute judging slot sees them all. Held on 0.5 s = in bed, off 1.25 s = up (a
+# quarter of the earlier 2 s and 5 s): over Bluetooth the readings arrive seconds apart, so in practice
+# the second reading that agrees decides. The check-in counts from the lift. After
 # "I'm fine" it waits a minute, so a rehearsal can't run into the second-fine family heads-up. A
 # check-in that hasn't reported within 120 s alerts family. The pillow's own check-in (up to two
 # asks, the warning, a 4 s judge each) reports first, so this only fires if the base laptop is gone;
 # 10 s and then 30 s both turned real "I'm fine"s into false alarms.
 DEMO_TIMINGS = Timings(
-    lay_down_s=2, bed_return_s=2, bed_exit_s=5, checkin_after_s=15, recheck_after_fine_s=60, checkin_max_s=120
+    lay_down_s=0.5,
+    bed_return_s=0.5,
+    bed_exit_s=1.25,
+    checkin_after_s=15,
+    recheck_after_fine_s=60,
+    checkin_max_s=120,
 )
 
 
