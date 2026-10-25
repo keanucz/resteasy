@@ -6,7 +6,7 @@ family see are computed, never guessed by a model. Times are in the resident's t
 
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -17,12 +17,13 @@ NIGHT_ENDS_H = 12  # ... to noon the next day
 LONG_TRIP_MIN = 15  # a trip this long is worth a line in the brief
 
 
-def last_night_window(now_ts: float, timezone: str) -> tuple[datetime, datetime]:
-    """The most recent night: from 18:00 the evening before, to noon or to now if that's sooner."""
+def last_night_window(now_ts: float, timezone: str, evening: date | None = None) -> tuple[datetime, datetime]:
+    """The most recent night: from 18:00 the evening before, to noon or to now if that's sooner.
+    `evening` picks another night: the one starting at 18:00 on that date."""
     tz = ZoneInfo(timezone)
     now = datetime.fromtimestamp(now_ts, tz)
     start_day = now.date() if now.hour >= NIGHT_STARTS_H else now.date() - timedelta(days=1)
-    start = datetime.combine(start_day, datetime.min.time(), tz).replace(hour=NIGHT_STARTS_H)
+    start = datetime.combine(evening or start_day, datetime.min.time(), tz).replace(hour=NIGHT_STARTS_H)
     end = min(now, start + timedelta(hours=24 - NIGHT_STARTS_H + NIGHT_ENDS_H))
     return start, end
 

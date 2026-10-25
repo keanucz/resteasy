@@ -1,6 +1,6 @@
 """Plain-code summary of one night from the events table (for the Morning Brief and the family agent)."""
 
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from app.agents.night_summary import last_night_window, pending_goodnight, summarize_night
@@ -27,6 +27,15 @@ def test_last_night_window_in_the_afternoon_is_the_whole_previous_night():
     now = datetime(2026, 10, 25, 15, 0, tzinfo=Z).timestamp()
     start, end = last_night_window(now, TZ)
     assert (start.day, start.hour, end.day, end.hour) == (24, 18, 25, 12)
+
+
+def test_an_earlier_night_by_its_evening():
+    """At 22:00 the latest night has only just begun; `evening` reads yesterday's whole night."""
+    tz = ZoneInfo(TZ)
+    now = datetime(2026, 10, 24, 22, 0, tzinfo=tz).timestamp()
+    start, end = last_night_window(now, TZ, date(2026, 10, 23))
+    assert start == datetime(2026, 10, 23, 18, 0, tzinfo=tz)
+    assert end == datetime(2026, 10, 24, 12, 0, tzinfo=tz)
 
 
 def test_summary_pairs_trips_and_finds_the_longest():

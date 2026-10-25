@@ -9,10 +9,11 @@ live.
 """
 
 import time as clock
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from typing import Annotated
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.agents.baseline import build_baseline, history_start
 from app.agents.guardian import Guardian
@@ -77,10 +78,14 @@ _guardian = Guardian()  # config checks need no per-resident settings
 
 
 @router.get("/night")
-async def read_night(pillow: PillowDep, db: SupabaseDep) -> NightReport:
-    """Last night: summary (trips, check-ins, alerts), events and the agent log. The droid's input."""
+async def read_night(
+    pillow: PillowDep, db: SupabaseDep,
+    night: Annotated[date | None, Query(description="The evening it started; default the latest")] = None,
+) -> NightReport:
+    """Last night: summary (trips, check-ins, alerts), events and the agent log. The droid's input.
+    `night` reads an earlier one, e.g. yesterday's while tonight has only just begun."""
     resident = await resident_of(db, pillow)
-    start, end = last_night_window(clock.time(), resident["timezone"])
+    start, end = last_night_window(clock.time(), resident["timezone"], night)
     events = await list_events_between(db, pillow.id, start.isoformat(), end.isoformat())
     log = await list_agent_log_between(db, pillow.id, start.isoformat(), end.isoformat())
     trips = await list_trips_between(db, pillow.id, history_start(start).isoformat(), start.isoformat())

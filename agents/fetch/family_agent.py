@@ -31,7 +31,7 @@ import json
 import os
 import re
 import sys
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -292,8 +292,18 @@ async def call_tool(http: httpx.AsyncClient, name: str, args: dict[str, Any]) ->
         r = await http.get(f"{base}/night")
         r.raise_for_status()
         night = r.json()
+        tonight = None
+        if not night["summary"].get("lay_down") and not night["summary"].get("trip_count"):
+            # Evening, and tonight hasn't really started: "how was her night" means last night
+            evening = date.fromisoformat(night["window_start"][:10]) - timedelta(days=1)
+            prev = await http.get(f"{base}/night", params={"night": evening.isoformat()})
+            if prev.status_code == 200:
+                tonight = {"window": [night["window_start"], night["window_end"]], "note": "nothing yet"}
+                night = prev.json()
         out = {"resident": night["resident"], "window": [night["window_start"], night["window_end"]],
                "summary": night["summary"], "settings": night["settings"]}
+        if tonight:
+            out["tonight_so_far"] = tonight
         b = await http.get(f"{base}/brief")
         if b.status_code == 200:
             out["morning_brief"] = b.json()
