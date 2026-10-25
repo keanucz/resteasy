@@ -23,6 +23,7 @@ from app.agents.reminders import (
     slot_today,
     spoken_line,
 )
+from app.core.app_constants import AGENT_CONTACT_MISSING, AGENT_CONTACT_NOT_LINKED, FAMILY_AGENT
 from app.core.config import get_settings
 from app.crud.crud_constants import (
     AGENT_LOG_TABLE,
@@ -32,7 +33,7 @@ from app.crud.crud_constants import (
     RESIDENTS_TABLE,
 )
 from app.schemas.reminder import ReminderCreate, ReminderUpdate
-from tests.seed_constants import TEST_PILLOW_ID, TEST_RESIDENT_ID
+from tests.seed_constants import TEST_PILLOW_ID, TEST_RESIDENT_ID, TEST_USER_ID, UNKNOWN_CONTACT_ID
 
 TZ = "America/Los_Angeles"
 SAT_8AM = datetime(2026, 10, 24, 8, 0, tzinfo=ZoneInfo(TZ))  # a Saturday (ISO 6)
@@ -178,27 +179,51 @@ def test_changing_reminders_and_the_calendar_need_a_login(offline_client: TestCl
     assert offline_client.get(CALENDAR, headers=headers).status_code == 401
 
 
-# ---------- router (live Supabase; skipped without credentials) ----------
-
-
-@pytest.fixture
-def reminders_client(db: Client, live_client: TestClient):
-    """The live client, with the test resident's reminders and the Routine agent's log rows on the
-    test pillow removed afterwards."""
-    started = datetime.now(UTC).isoformat()
-    yield live_client
-    db.table(REMINDERS_TABLE).delete().eq("resident_id", TEST_RESIDENT_ID).execute()
-    db.table(AGENT_LOG_TABLE).delete().eq("pillow_id", TEST_PILLOW_ID).eq("agent", AGENT).gte(
-        "ts", started
-    ).execute()
-
-
 @pytest.fixture
 def checkin_auth() -> dict[str, str]:
     token = get_settings().checkin_token
     if not token:
         pytest.skip("CHECKIN_TOKEN not set")
     return _bearer(token)
+
+
+def test_the_agent_token_must_name_a_contact(offline_client: TestClient, checkin_auth: dict):
+    calls = [
+        offline_client.post(BASE, json=NEW, headers=checkin_auth),
+        offline_client.patch(f"{BASE}/1", json={"active": False}, headers=checkin_auth),
+        offline_client.delete(f"{BASE}/1", headers=checkin_auth),
+    ]
+    assert [(r.status_code, r.json()["detail"]) for r in calls] == [(422, AGENT_CONTACT_MISSING)] * 3
+
+
+# ---------- router (live Supabase; skipped without credentials) ----------
+
+
+@pytest.fixture
+def reminders_client(db: Client, live_client: TestClient):
+    """The live client, with the test resident's reminders and the Routine and family agents' log
+    rows on the test pillow removed afterwards (from a minute early: this clock may run ahead of
+    the database's)."""
+    started = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
+    yield live_client
+    db.table(REMINDERS_TABLE).delete().eq("resident_id", TEST_RESIDENT_ID).execute()
+    db.table(AGENT_LOG_TABLE).delete().eq("pillow_id", TEST_PILLOW_ID).in_(
+        "agent", [AGENT, FAMILY_AGENT]
+    ).gte("ts", started).execute()
+
+
+def _family_agent_log(db: Client, reminder_id: int) -> list[dict]:
+    """What the family agent logged about this reminder on the test pillow, oldest first."""
+    return (
+        db.table(AGENT_LOG_TABLE)
+        .select("intent, tool, args")
+        .eq("pillow_id", TEST_PILLOW_ID)
+        .eq("agent", FAMILY_AGENT)
+        .eq("args->>reminder_id", str(reminder_id))
+        .order("id")
+        .execute()
+        .data
+    )
 
 
 def _due_occurrence(db: Client, reminder_id: int, purpose: str = "remind") -> int:
@@ -495,3 +520,56 @@ def test_due_list_and_confirmed_result(
     assert [(o["id"], o["status"], o["reply"], o["purpose"]) for o in today if o["id"] == oid] == [
         (oid, "done", "yes, with breakfast", "remind")
     ]
+
+
+# ---------- the Fetch.ai family agent, with the agent token (live) ----------
+
+
+def test_family_agent_sets_up_changes_and_deletes_for_a_contact(
+    db: Client, reminders_client: TestClient, checkin_auth: dict
+):
+    for_owner = f"?contact_id={TEST_USER_ID}"
+    made = reminders_client.post(f"{BASE}{for_owner}", json=NEW, headers=checkin_auth)
+    assert made.status_code == 201
+    assert (made.json()["created_by_name"], made.json()["consent"]) == ("Test User", "pending")
+    rid = made.json()["id"]
+    assert _reminder(db, rid)["created_by"] == TEST_USER_ID
+    db.table(REMINDERS_TABLE).update({"consent": "agreed"}).eq("id", rid).execute()
+    url = f"{BASE}/{rid}{for_owner}"
+    paused = reminders_client.patch(url, json={"active": False}, headers=checkin_auth).json()
+    assert (paused["active"], paused["consent"]) == (False, "agreed")
+    assert reminders_client.patch(url, json={"active": False}, headers=checkin_auth).status_code == 200
+    moved = reminders_client.patch(url, json={"time_of_day": "17:15"}, headers=checkin_auth).json()
+    assert (moved["time_of_day"], moved["consent"]) == ("17:15", "pending")  # she is asked again
+    assert reminders_client.delete(url, headers=checkin_auth).status_code == 204
+    assert reminders_client.delete(url, headers=checkin_auth).status_code == 404
+
+    logged = _family_agent_log(db, rid)  # the repeated pause wrote nothing, so logged nothing
+    assert [row["intent"] for row in logged] == [
+        "set up a reminder for Test User: walk the dog",
+        "changed a reminder for Test User: walk the dog",
+        "changed a reminder for Test User: walk the dog",
+        "deleted a reminder for Test User: walk the dog",
+    ]
+    assert {row["tool"] for row in logged} == {"reminders"}
+    assert all(row["args"]["contact_id"] == TEST_USER_ID for row in logged)
+    assert logged[2]["args"]["fields"] == {"time_of_day": "17:15", "consent": "pending", "consent_at": None}
+
+
+def test_family_agent_only_acts_for_her_contacts_and_labels_are_screened(
+    reminders_client: TestClient, owner_token: str, checkin_auth: dict
+):
+    rid = reminders_client.post(BASE, json=NEW, headers=_bearer(owner_token)).json()["id"]
+    stranger = f"?contact_id={UNKNOWN_CONTACT_ID}"
+    calls = [
+        reminders_client.post(f"{BASE}{stranger}", json=NEW, headers=checkin_auth),
+        reminders_client.patch(f"{BASE}/{rid}{stranger}", json={"active": False}, headers=checkin_auth),
+        reminders_client.delete(f"{BASE}/{rid}{stranger}", headers=checkin_auth),
+    ]
+    assert [(r.status_code, r.json()["detail"]) for r in calls] == [(403, AGENT_CONTACT_NOT_LINKED)] * 3
+    not_a_uuid = reminders_client.post(f"{BASE}?contact_id=sarah", json=NEW, headers=checkin_auth)
+    assert not_a_uuid.status_code == 422
+    medical = {"label": "check for symptoms of a stroke", "time_of_day": "09:00"}
+    response = reminders_client.post(f"{BASE}?contact_id={TEST_USER_ID}", json=medical, headers=checkin_auth)
+    assert response.status_code == 422
+    assert reminders_client.get(BASE).json()[0]["active"]  # the stranger changed nothing

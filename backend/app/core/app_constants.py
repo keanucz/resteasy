@@ -51,6 +51,13 @@ OWNER_ROLE = "owner"
 
 # agent_log.agent for changes made from the family app, so the app's live log can say who did it
 FAMILY_APP_AGENT = "family_app"
+# agent_log.agent for the Fetch.ai family agents, which act with the agent token (CHECKIN_TOKEN)
+FAMILY_AGENT = "family_agent"
+# Details returned when the agent token changes a reminder without naming a contact of hers
+AGENT_CONTACT_MISSING = "Say which contact the agent acts for: the contact_id query parameter"
+AGENT_CONTACT_NOT_LINKED = "This contact does not look after them"
+# agent_log.tool for a reminder the family agent set up, changed or deleted
+REMINDERS_TOOL = "reminders"
 # agent_log.intent for a settings change made from the family app
 SETTINGS_CHANGE_INTENT = "change settings"
 

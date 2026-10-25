@@ -5,14 +5,17 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import Depends, Header, HTTPException, Request, UploadFile, status
+from fastapi import Depends, Header, HTTPException, Query, Request, UploadFile, status
 from supabase import AsyncClient
 from supabase_auth.errors import AuthError
 
 from app.agents.reminders import ReminderService
 from app.agents.watch_service import WatchService
 from app.core.app_constants import (
+    AGENT_CONTACT_MISSING,
+    AGENT_CONTACT_NOT_LINKED,
     CHECKIN_TOKEN_NOT_CONFIGURED,
+    FAMILY_AGENT,
     NOT_LINKED,
     NOT_OWNER,
     NOT_SIGNED_IN,
@@ -25,7 +28,7 @@ from app.core.app_constants import (
     SUPABASE_NOT_CONFIGURED,
 )
 from app.core.config import get_settings
-from app.crud.accounts import get_link_for_user
+from app.crud.accounts import get_link_for_contact, get_link_for_user
 from app.crud.pillows import get_pillow
 from app.crud.residents import get_resident
 from app.schemas.pillow import Pillow
@@ -85,12 +88,17 @@ def get_reminders(request: Request) -> ReminderService:
 ReminderServiceDep = Annotated[ReminderService, Depends(get_reminders)]
 
 
+def _is_checkin_token(authorization: str | None, expected: str) -> bool:
+    """Whether `Authorization` is `Bearer <expected>`, compared in constant time."""
+    return secrets.compare_digest((authorization or "").encode(), f"Bearer {expected}".encode())
+
+
 def require_checkin_token(authorization: Annotated[str | None, Header()] = None) -> None:
     """Only the base laptop may report a check-in result (it can cancel or start an escalation)."""
     expected = get_settings().checkin_token
     if not expected:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=CHECKIN_TOKEN_NOT_CONFIGURED)
-    if not secrets.compare_digest((authorization or "").encode(), f"Bearer {expected}".encode()):
+    if not _is_checkin_token(authorization, expected):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid check-in token",
@@ -153,21 +161,62 @@ OwnedResidentDep = Annotated[dict[str, Any], Depends(owned_resident)]
 
 
 @dataclass(frozen=True)
-class CareLogin:
-    """A signed-in member of the pillow's resident's care circle: her row and their contact id."""
+class Caller:
+    """Who calls, before the pillow is read: a login (`user_id`), or the family agent with the
+    agent token speaking for `contact_id`."""
+
+    user_id: str | None = None
+    contact_id: str | None = None
+
+
+async def care_caller(
+    db: SupabaseDep,
+    authorization: Annotated[str | None, Header()] = None,
+    contact_id: Annotated[
+        UUID | None, Query(description="With the agent token: the contact it acts for")
+    ] = None,
+) -> Caller:
+    """The family agent (the agent token) for the `contact_id` it names, 422 without one; anyone
+    else is the app's login, 401 without a valid one. A login's `contact_id` is ignored."""
+    expected = get_settings().checkin_token
+    if expected and _is_checkin_token(authorization, expected):
+        if contact_id is None:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=AGENT_CONTACT_MISSING)
+        return Caller(contact_id=str(contact_id))
+    return Caller(user_id=await current_user_id(db, authorization))
+
+
+@dataclass(frozen=True)
+class CareActor:
+    """A member of the pillow's resident's care circle: her row and their contact id. `agent` is
+    the agent acting for them (with `contact_name`, for its log), None when they signed in."""
 
     resident: dict[str, Any]
     contact_id: str
+    agent: str | None = None
+    contact_name: str | None = None
 
 
-async def pillow_care_login(user_id: UserIdDep, resident: ResidentDep, db: SupabaseDep) -> CareLogin:
-    """The resident of the pillow in the path, for a login that looks after her (owner or contact):
-    401 without a login, 403 when it isn't linked to her."""
-    link = await require_role(db, user_id, resident["id"], owner=False)
-    return CareLogin(resident=resident, contact_id=link["contact_id"])
+async def pillow_care_actor(
+    caller: Annotated[Caller, Depends(care_caller)], resident: ResidentDep, db: SupabaseDep
+) -> CareActor:
+    """Who acts on the resident of the pillow in the path: a login that looks after her (owner or
+    contact), or the family agent for a contact of hers. 403 when they don't look after her."""
+    if caller.user_id is not None:
+        link = await require_role(db, caller.user_id, resident["id"], owner=False)
+        return CareActor(resident=resident, contact_id=link["contact_id"])
+    link = await get_link_for_contact(db, caller.contact_id, resident["id"])
+    if link is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=AGENT_CONTACT_NOT_LINKED)
+    return CareActor(
+        resident=resident,
+        contact_id=link["contact_id"],
+        agent=FAMILY_AGENT,
+        contact_name=link["contacts"]["full_name"],
+    )
 
 
-CareLoginDep = Annotated[CareLogin, Depends(pillow_care_login)]
+CareActorDep = Annotated[CareActor, Depends(pillow_care_actor)]
 
 
 async def photo_upload(file: UploadFile) -> PhotoUpload:

@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.agents.baseline import build_baseline, history_start
 from app.agents.guardian import Guardian
 from app.agents.night_summary import last_night_window, pending_goodnight, summarize_night
+from app.core.app_constants import FAMILY_AGENT
 from app.core.dependencies import PillowDep, SupabaseDep, require_checkin_token, resident_of
 from app.crud.night_log import (
     add_event,
@@ -41,7 +42,6 @@ from app.schemas.family import (
 router = APIRouter(prefix="/pillows/{pillow_id}", tags=["family"])
 
 BRIEF_AGENT = "morning_brief"
-FAMILY_AGENT = "family_agent"
 ROSTER_AGENT = "watch_roster"  # the Fetch.ai coordinator
 GOODNIGHT_TYPES = ["goodnight_queued", "goodnight_played"]
 SETTINGS_KEYS = ("checkin_timeout_min", "quiet_start", "quiet_end")  # residents columns

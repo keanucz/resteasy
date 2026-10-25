@@ -51,3 +51,14 @@ async def get_link_for_user(db: AsyncClient, user_id: str, resident_id: str) -> 
         .eq("resident_id", resident_id)
         .eq("contacts.user_id", user_id)
     )
+
+
+async def get_link_for_contact(db: AsyncClient, contact_id: str, resident_id: str) -> dict[str, Any] | None:
+    """How the contact looks after this resident (role, contact_id, their full_name), or None if
+    not linked."""
+    return await fetch_one(
+        db.table(RESIDENT_CONTACTS_TABLE)
+        .select("role, contact_id, contacts!inner(full_name)")
+        .eq("resident_id", resident_id)
+        .eq("contact_id", contact_id)
+    )

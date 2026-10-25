@@ -61,12 +61,13 @@ async def update_reminder(
     return await get_reminder(db, resident_id, reminder_id) if response.data else None
 
 
-async def delete_reminder(db: AsyncClient, resident_id: str, reminder_id: int) -> bool:
-    """Delete a reminder (its occurrences go with it); False if there was none."""
+async def delete_reminder(db: AsyncClient, resident_id: str, reminder_id: int) -> dict[str, Any] | None:
+    """Delete a reminder (its occurrences go with it) and return the deleted row; None if there was
+    none."""
     response = await (
         db.table(REMINDERS_TABLE).delete().eq("id", reminder_id).eq("resident_id", resident_id).execute()
     )
-    return bool(response.data)
+    return response.data[0] if response.data else None
 
 
 async def set_consent(db: AsyncClient, reminder_id: int, consent: str, at_iso: str) -> bool:
