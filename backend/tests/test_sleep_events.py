@@ -6,6 +6,8 @@ from app.agents.sleep_events import (
     DEMO_ASLEEP_S,
     DEMO_HEAD_OFF_GRACE_S,
     DEMO_RESTLESS_MOTION,
+    DEMO_RESTLESS_S,
+    DEMO_SETTLED_S,
     HEAD_OFF_GRACE_S,
     RESTLESS_S,
     SleepTracker,
@@ -113,16 +115,22 @@ def test_a_longer_absence_ends_the_sleep_session():
 # ---------- demo timings (PILLOW_DEMO_TIMINGS=1) ----------
 
 
-def test_demo_restless_when_she_moves_and_settled_when_she_stops():
+def test_demo_restless_only_after_seconds_of_hard_shaking_and_settled_when_it_stops():
     tr = SleepTracker(demo=True)
-    ts, ev = feed(tr, T0, 1, motion=DEMO_RESTLESS_MOTION + 0.1)
-    assert "restless" not in types(ev)  # one bump of the bedside unit isn't enough
+    ts, ev = feed(tr, T0, DEMO_RESTLESS_S, motion=DEMO_RESTLESS_MOTION + 0.1)
+    assert "restless" not in types(ev)  # pressing the pillow down or a short shake isn't enough
     ts, ev = feed(tr, ts, 1, motion=DEMO_RESTLESS_MOTION + 0.1)
     assert types(ev) == ["restless"]
-    ts, ev = feed(tr, ts, 5, motion=0.5)
+    ts, ev = feed(tr, ts, 5, motion=0.6)
     assert types(ev) == []  # still restless, said once
-    ts, ev = feed(tr, ts, 2, motion=0.02)
-    assert types(ev) == ["settled"]
+    ts, ev = feed(tr, ts, DEMO_SETTLED_S + 1, motion=0.02)
+    assert types(ev)[0] == "settled"  # (and asleep, a few quiet seconds on)
+
+
+def test_demo_gentle_movement_is_never_restless():
+    tr = SleepTracker(demo=True)
+    _, ev = feed(tr, T0, 30, motion=DEMO_RESTLESS_MOTION - 0.05)
+    assert "restless" not in types(ev)
 
 
 def test_demo_asleep_after_a_few_quiet_seconds():
@@ -131,9 +139,9 @@ def test_demo_asleep_after_a_few_quiet_seconds():
     assert types(ev) == ["asleep"]
 
 
-def test_demo_leaving_the_bed_while_restless_closes_the_spell():
+def test_demo_restless_follows_the_imu_even_with_the_head_off():
     tr = SleepTracker(demo=True)
-    ts, ev = feed(tr, T0, 2, motion=0.6)
+    ts, ev = feed(tr, T0, DEMO_RESTLESS_S + 1, motion=0.6, head_on=False)
     assert types(ev) == ["restless"]
     _, ev = feed(tr, ts, DEMO_HEAD_OFF_GRACE_S + 1, head_on=False)
-    assert types(ev) == ["settled"]  # so lying down again shows asleep, not the old restless
+    assert types(ev) == ["settled"]  # the IMU went still

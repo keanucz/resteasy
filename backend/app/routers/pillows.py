@@ -15,6 +15,7 @@ from app.core.dependencies import (
     SupabaseDep,
     require_checkin_token,
 )
+from app.crud.night_log import update_live_incidents
 from app.crud.pillow_state import get_state, save_state
 from app.crud.readings import upsert_reading
 from app.schemas.checkin import Acknowledgement, CheckinResult, KeyPress, NightStatus
@@ -95,11 +96,19 @@ async def report_checkin(
 async def acknowledge_alert(
     pillow: PillowDep, ack: Acknowledgement, db: SupabaseDep, night_watch: NightWatchDep
 ) -> NightStatus:
-    """The app's "I'm on it": stop alerting other contacts and tell Mum who is coming."""
+    """The app's "I'm on it": stop alerting other contacts and tell Mum who is coming. The
+    pillow's open alerts are marked acknowledged even when Night Watch has lost track of one (a
+    restart mid-alert), so the app's alert card always goes."""
     night_state = await night_watch.acknowledge(db, pillow, str(ack.contact_id))
     if night_state is None:
         detail = f"Contact {ack.contact_id} does not look after pillow {pillow.id}"
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+    acked = {
+        "status": "acknowledged",
+        "acked_by": str(ack.contact_id),
+        "acked_at": datetime.now(UTC).isoformat(),
+    }
+    await update_live_incidents(db, pillow.id, acked, statuses=("open",))
     return NightStatus(night_state=night_state)
 
 

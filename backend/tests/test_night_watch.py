@@ -209,6 +209,12 @@ def test_a_silent_checkin_keeps_the_gentle_ladder_even_if_distress_is_sent():
     assert [a.channel for a in acts if isinstance(a, Alert)] == ["app"]
 
 
+def test_a_gentle_distress_alert_starts_in_the_app():
+    nw = NightWatch(NightWatchConfig(contacts=("Sarah",)))
+    acts = nw.distress_heard(NIGHT, "Started from the app's alert debug.", urgent=False)
+    assert [(a.channel, a.contact) for a in acts if isinstance(a, Alert)] == [("app", "Sarah")]
+
+
 def feed(nw, start, seconds, head_on, fine=False):
     """One report per second for `seconds` from `start`. Returns (next start, actions)."""
     acts = []
@@ -292,14 +298,23 @@ def second_of(log, kind):
 
 def test_demo_timings_show_every_state_within_seconds():
     nw = NightWatch(timings=DEMO_TIMINGS)
-    # on 3 s = in bed; lifted at 10: up 5 s later, check-in 15 s after the lift; back on 3 s = back in bed
+    # on 2 s = in bed; lifted at 10: up 5 s later, check-in 15 s after the lift; back on 2 s = back in bed
     log = play(nw, NIGHT, [True] * 10 + [False] * 20 + [True] * 5)
-    assert second_of(log, "lay_down") == 3
+    assert second_of(log, "lay_down") == 2
     assert second_of(log, "bed_exit") == 15
     assert second_of(log, "no_return") == 25
     assert any(isinstance(a, StartCheckin) for s, a in log if s == 25)
-    assert second_of(log, "bed_return") == 33
+    assert second_of(log, "bed_return") == 32
     assert nw.state is State.IN_BED
+
+
+def test_demo_alerts_family_10_s_into_an_unanswered_checkin():
+    nw = NightWatch(timings=DEMO_TIMINGS)
+    play(nw, NIGHT, [True] * 4 + [False] * 20)  # check-in started at 19
+    assert nw.tick(NIGHT + 28) == []
+    acts = nw.tick(NIGHT + 29)
+    assert isinstance(acts[1], CancelCheckin) and nw.state is State.ESCALATING
+    assert [a.channel for a in acts if isinstance(a, Alert)] == ["app"]
 
 
 def test_demo_asks_again_a_minute_after_she_says_fine():

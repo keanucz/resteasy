@@ -54,6 +54,7 @@ from app.crud.night_log import (
     log_action,
     open_incident,
     update_incident,
+    update_live_incidents,
 )
 from app.crud.pillow_state import get_state, set_night_state
 from app.crud.pillows import get_pillow
@@ -145,14 +146,14 @@ class WatchService:
             await self._apply(db, pillow.id, w, actions, before, w.last_ts)
             return str(w.nw.state)
 
-    async def report_distress(self, db: AsyncClient, pillow: Pillow, reason: str) -> str:
-        """She sounded in trouble outside a check-in (e.g. answering a reminder): escalate now.
-        Return the new night state."""
+    async def report_distress(self, db: AsyncClient, pillow: Pillow, reason: str, urgent: bool = True) -> str:
+        """She sounded in trouble outside a check-in (e.g. answering a reminder): escalate now, calling
+        everyone at once unless not `urgent`. Return the new night state."""
         w = await self._watch(db, pillow)
         async with w.lock:
             before = w.nw.state
             ts = w.last_ts + (clock.monotonic() - w.last_seen) if w.last_seen else clock.time()
-            actions = w.nw.distress_heard(ts, reason)
+            actions = w.nw.distress_heard(ts, reason, urgent)
             await self._apply(db, pillow.id, w, actions, before, ts)
             return str(w.nw.state)
 
@@ -199,8 +200,9 @@ class WatchService:
                 w = self._watches.get(pillow.id)
                 if w is None:
                     demo = get_settings().pillow_demo_timings
-                    w = _Watch(NightWatch(timings=DEMO_TIMINGS if demo else None),
-                               sleep=SleepTracker(demo=demo))
+                    w = _Watch(
+                        NightWatch(timings=DEMO_TIMINGS if demo else None), sleep=SleepTracker(demo=demo)
+                    )
                     await self._load_settings(db, pillow, w, ts)
                     # Incidents left open by a previous run have lost their ladder: clear them, and
                     # a check-in or alert in flight restarts below and opens a fresh one if needed.
@@ -223,8 +225,9 @@ class WatchService:
         now = datetime.fromtimestamp(now_ts, ZoneInfo(resident["timezone"])).time()
         # The check-in wait: the owner's, or what the past week of trips says when that is shorter
         night_start, _ = last_night_window(now_ts, resident["timezone"])
-        trips = await list_trips_between(db, pillow.id, history_start(night_start).isoformat(),
-                                         night_start.isoformat())
+        trips = await list_trips_between(
+            db, pillow.id, history_start(night_start).isoformat(), night_start.isoformat()
+        )
         baseline = build_baseline(trips, night_start, resident["timezone"], resident["checkin_timeout_min"])
         # Reachable contacts (on call, outside their own quiet hours) first, in priority order; the
         # rest after them, so nobody is ever left out of an alert.
@@ -233,8 +236,10 @@ class WatchService:
         # contacts); a blank name falls back to the id.
         names = [(c.get("full_name") or "").strip() or c["id"] for c in contacts]
         firsts = [n.split()[0] for n in names]
-        w.contact_ids = {(f if firsts.count(f) == 1 else n): c["id"]
-                         for n, f, c in zip(names, firsts, contacts, strict=True)}
+        w.contact_ids = {
+            (f if firsts.count(f) == 1 else n): c["id"]
+            for n, f, c in zip(names, firsts, contacts, strict=True)
+        }
         quiet_hours = (time.fromisoformat(resident["quiet_start"]), time.fromisoformat(resident["quiet_end"]))
         w.nw.cfg = NightWatchConfig(
             pillow_id=pillow.id,
@@ -245,21 +250,29 @@ class WatchService:
             quiet_hours=quiet_hours,
             paused=resident["monitoring_paused"],
             step_wait_min=resident["step_wait_min"],
-            channels={name: frozenset(ch for ch, column in CHANNEL_SWITCHES.items() if c.get(column, True))
-                      for name, c in zip(w.contact_ids, contacts, strict=True)},
+            channels={
+                name: frozenset(ch for ch, column in CHANNEL_SWITCHES.items() if c.get(column, True))
+                for name, c in zip(w.contact_ids, contacts, strict=True)
+            },
         )
-        consent = {name: bool(c.get("sms_consent", True))
-                   for name, c in zip(w.contact_ids, contacts, strict=True)}
-        w.guardian.cfg = GuardianConfig(timezone=resident["timezone"], quiet_hours=quiet_hours,
-                                        step_wait_min=resident["step_wait_min"], sms_consent=consent)
+        consent = {
+            name: bool(c.get("sms_consent", True)) for name, c in zip(w.contact_ids, contacts, strict=True)
+        }
+        w.guardian.cfg = GuardianConfig(
+            timezone=resident["timezone"],
+            quiet_hours=quiet_hours,
+            step_wait_min=resident["step_wait_min"],
+            sms_consent=consent,
+        )
         w.loaded_at = clock.monotonic()
         if not w.wait_note:  # first load since the backend started: what was logged before it?
             last = await latest_log_row(db, pillow.id, AGENT, tool=BASELINE_TOOL)
             w.wait_note = last["intent"] if last else ""
         if baseline.note() != w.wait_note:
             w.wait_note = baseline.note()
-            await log_action(db, pillow.id, AGENT, intent=w.wait_note, tool=BASELINE_TOOL,
-                             args=baseline.as_dict())
+            await log_action(
+                db, pillow.id, AGENT, intent=w.wait_note, tool=BASELINE_TOOL, args=baseline.as_dict()
+            )
 
     # ---------- writing decisions back ----------
 
@@ -287,12 +300,22 @@ class WatchService:
             if not verdict.allowed:
                 instead = f"; ran instead: {_intent(run)}" if run is not None else "; dropped"
                 reason = f"blocked: {verdict.reason}{instead}" + (f" ({reason})" if reason else "")
-            await log_action(db, pillow_id, AGENT, intent=_intent(a), tool=type(a).__name__,
-                             args=asdict(a), incident_id=w.incident_id, guardian=verdict.label, reason=reason)
+            await log_action(
+                db,
+                pillow_id,
+                AGENT,
+                intent=_intent(a),
+                tool=type(a).__name__,
+                args=asdict(a),
+                incident_id=w.incident_id,
+                guardian=verdict.label,
+                reason=reason,
+            )
         if w.nw.state is not before:
             await set_night_state(db, pillow_id, str(w.nw.state), ts)
-            await log_action(db, pillow_id, AGENT, intent=f"{before} -> {w.nw.state}",
-                             incident_id=w.incident_id)
+            await log_action(
+                db, pillow_id, AGENT, intent=f"{before} -> {w.nw.state}", incident_id=w.incident_id
+            )
             if w.nw.state is not State.ESCALATING:
                 if w.incident_id is not None:  # ended another way (asleep, awake, distress -> check-in)
                     await clear_incident(db, w.incident_id)
@@ -322,13 +345,28 @@ class WatchService:
                 w.incident_id = await open_incident(db, pillow_id, kind, summary)
             w.incident_step += 1
             await update_incident(db, w.incident_id, {"step": w.incident_step})
-        elif w.incident_id is not None and e.type == "family_ack":
-            await update_incident(db, w.incident_id, {
-                "status": "acknowledged", "acked_by": w.contact_ids.get(e.data["contact"]),
-                "acked_at": _now_iso()})
-        elif w.incident_id is not None and e.type in RESOLVED_REASONS:
-            await update_incident(db, w.incident_id, {"status": "resolved", "resolved_at": _now_iso(),
-                                                      "resolved_reason": RESOLVED_REASONS[e.type]})
+        elif e.type == "family_ack":
+            await update_live_incidents(
+                db,
+                pillow_id,
+                {
+                    "status": "acknowledged",
+                    "acked_by": w.contact_ids.get(e.data["contact"]),
+                    "acked_at": _now_iso(),
+                },
+                statuses=("open",),
+            )
+        elif e.type in RESOLVED_REASONS:
+            await update_live_incidents(
+                db,
+                pillow_id,
+                {
+                    "status": "resolved",
+                    "resolved_at": _now_iso(),
+                    "resolved_reason": RESOLVED_REASONS[e.type],
+                },
+            )
+            w.incident_id, w.incident_step = None, 0  # the next alert is a new incident
 
     async def _send_command(self, db: AsyncClient, c: Command) -> str | None:
         """Queue a device command; skip (and say why) if that pillow isn't registered."""

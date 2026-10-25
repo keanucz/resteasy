@@ -14,8 +14,8 @@ import { SkyHeader } from '@/components/SkyHeader';
 import { DataTable, StatTile } from '@/components/Stats';
 import { StatusWord } from '@/components/Status';
 import { BellIcon, PhoneIcon, PillIcon } from '@/components/TabIcons';
-import { ALERT_ENDED_NOTICE_MS, MONTH_NIGHTS, RIBBON_HOURS, WEEK_NIGHTS } from '@/constants/pillow';
-import { tapAllClear, useAlertBuzz } from '@/hooks/useAlertBuzz';
+import { ALERT_ENDED_NOTICE_MS, MONTH_NIGHTS, RESTLESS_NOTICE_MS, RIBBON_HOURS, WEEK_NIGHTS } from '@/constants/pillow';
+import { tapAllClear, tapRestless, useAlertBuzz } from '@/hooks/useAlertBuzz';
 import { useAlertPrefs } from '@/hooks/useAlertPrefs';
 import { useDelayedLoading } from '@/hooks/useDelayedLoading';
 import { useGuardedPress } from '@/hooks/useGuardedPress';
@@ -129,6 +129,18 @@ export default function TonightScreen() {
   useEffect(() => {
     if (endedId !== undefined) tapAllClear();
   }, [endedId]);
+  // She's restless (the pillow is moving a lot): a gentle notice with one soft nudge, never an
+  // alarm. It goes when she settles, after a while, or when tapped.
+  const [dismissedRestless, setDismissedRestless] = useState<string | null>(null);
+  const restlessSince = useMemo(() => {
+    if (live || alertPrefs?.restless === false) return null;
+    const last = events.findLast((e) => e.event_type === 'restless' || e.event_type === 'settled');
+    if (last?.event_type !== 'restless' || now - Date.parse(last.device_ts) > RESTLESS_NOTICE_MS) return null;
+    return last.device_ts === dismissedRestless ? null : last.device_ts;
+  }, [live, alertPrefs?.restless, events, now, dismissedRestless]);
+  useEffect(() => {
+    if (restlessSince) tapRestless();
+  }, [restlessSince]);
   // This phone buzzes while an alert is open, until someone (this person, the moment they tap) is on it.
   const [tappedOnIt, setTappedOnIt] = useState<number | null>(null);
   const liveId = live?.id ?? null;
@@ -209,6 +221,7 @@ export default function TonightScreen() {
           <AlertCard
             key={live.id}
             pillowId={pillowId}
+            contactId={contactId}
             name={name}
             incident={live}
             tz={tz}
@@ -224,6 +237,18 @@ export default function TonightScreen() {
               detail="Tap to dismiss."
               time={clockTime(ended.resolved_at, tz)}
               onPress={() => setDismissed((d) => new Set(d).add(ended.id))}
+            />
+          </View>
+        ) : null}
+
+        {restlessSince ? (
+          <View accessibilityLiveRegion="polite">
+            <NotificationCard
+              initials={name.slice(0, 1)}
+              title={`${name} is restless`}
+              detail="Moving a lot in bed. Nothing urgent. Tap to dismiss."
+              time={clockTime(restlessSince, tz)}
+              onPress={() => setDismissedRestless(restlessSince)}
             />
           </View>
         ) : null}
@@ -328,15 +353,21 @@ const TonightSky = memo(function TonightSky({
   );
 });
 
-/** An alert in progress: what's happening, and the one thing to do about it. */
+/**
+ * An alert in progress: what's happening, and the one thing to do about it. It goes the moment
+ * "I'm on it" goes through (the sky then says who is on it), and comes back with a reason if the
+ * pillow never confirms.
+ */
 function AlertCard({
   pillowId,
+  contactId,
   name,
   incident,
   tz,
   onTapped,
 }: {
   pillowId: string;
+  contactId: string | null;
   name: string;
   incident: IncidentRow;
   tz: string;
@@ -344,7 +375,8 @@ function AlertCard({
   onTapped: (tapped: boolean) => void;
 }) {
   const { refresh } = usePillow();
-  // Told the pillow: the button keeps spinning until the alert itself says someone is on it.
+  const [busy, setBusy] = useState(false);
+  // Told the pillow: the card stays away while the alert catches up and says someone is on it.
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const acked = incident.status === 'acknowledged';
@@ -362,42 +394,39 @@ function AlertCard({
   }, [sent, acked, name, onTapped]);
 
   const ack = async () => {
+    if (busy) return;
     setError(null);
+    setBusy(true);
     onTapped(true);
     try {
-      const me = await api<{ contact_id: string | null }>('/me');
-      if (!me.contact_id) throw new Error(`This login isn't one of ${name}'s contacts yet.`);
-      await api(`/pillows/${pillowId}/ack`, { method: 'POST', body: { contact_id: me.contact_id } });
+      if (!contactId) throw new Error(`This login isn't one of ${name}'s contacts yet.`);
+      await api(`/pillows/${pillowId}/ack`, { method: 'POST', body: { contact_id: contactId } });
       setSent(true);
       void refresh();
     } catch (e) {
       onTapped(false);
       setError(e instanceof Error ? e.message : `Couldn't tell the pillow. Try again, or call ${name}.`);
+    } finally {
+      setBusy(false);
     }
   };
+
+  if (acked || sent) return null;
 
   return (
     <Card>
       <Text className="font-display text-xl text-ink">
-        {acked ? (
-          'Someone is on it'
-        ) : (
-          <>
-            {name} <StatusWord state="alert">needs you</StatusWord>
-          </>
-        )}
+        {name} <StatusWord state="alert">needs you</StatusWord>
       </Text>
       <Text className="font-sans text-base leading-6 text-ink-muted">
-        {acked
-          ? `Acknowledged at ${clockTime(incident.acked_at ?? incident.opened_at, tz)}. The pillow has told ${name} help is coming.`
-          : `${name} didn't answer the pillow's check-in. Family were alerted at ${clockTime(incident.opened_at, tz)}.`}
+        {`${name} didn't answer the pillow's check-in. Family were alerted at ${clockTime(incident.opened_at, tz)}.`}
       </Text>
       {error ? (
         <Text accessibilityLiveRegion="polite" className="font-sans text-sm text-danger-text">
           {error}
         </Text>
       ) : null}
-      {acked ? null : <Button fullWidth variant="alert" title="I'm on it" loading={sent} onPress={ack} />}
+      <Button fullWidth variant="alert" title="I'm on it" loading={busy} onPress={ack} />
     </Card>
   );
 }

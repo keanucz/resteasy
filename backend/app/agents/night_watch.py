@@ -45,13 +45,17 @@ class Timings:
     bed_exit_s: float = BED_EXIT_S
     checkin_after_s: float | None = None  # None: the owner's `checkin_timeout_min`
     recheck_after_fine_s: float | None = None  # after "I'm fine"; None: the same as checkin_after_s
+    checkin_max_s: float = CHECKIN_MAX_S  # a check-in still running this long escalates
 
 
 # PILLOW_DEMO_TIMINGS=1 on the server: every state shows within seconds of pressing or lifting the
-# head plate, so a five-minute judging slot sees them all. The check-in counts from the lift. After
-# "I'm fine" it waits a minute, so a rehearsal can't run into the second-fine family heads-up.
-DEMO_TIMINGS = Timings(lay_down_s=3, bed_return_s=3, bed_exit_s=5, checkin_after_s=15,
-                       recheck_after_fine_s=60)
+# head plate, so a five-minute judging slot sees them all. Held on 2 s = in bed, so with the bridge's
+# second of lag the app shows her in bed about 3 s after the press. The check-in counts from the lift. After
+# "I'm fine" it waits a minute, so a rehearsal can't run into the second-fine family heads-up. A
+# check-in she hasn't answered "I'm fine" to within 10 s alerts family, so the red alert shows fast.
+DEMO_TIMINGS = Timings(
+    lay_down_s=2, bed_return_s=2, bed_exit_s=5, checkin_after_s=15, recheck_after_fine_s=60, checkin_max_s=10
+)
 
 
 class State(StrEnum):
@@ -221,15 +225,16 @@ class NightWatch:
             return out + self._said_fine(ts)
         return out + self._escalate(ts, reason, distress=distress, on_trip=True)
 
-    def distress_heard(self, ts: float, reason: str) -> list[Action]:
+    def distress_heard(self, ts: float, reason: str, urgent: bool = True) -> list[Action]:
         """She said something alarming outside a check-in (answering a reminder, say): escalate now,
-        day or night. Never ignored, so it works in any state; an escalation already running goes on."""
+        day or night. Never ignored, so it works in any state; an escalation already running goes on.
+        `urgent` False climbs the ladder gently, from the in-app alert (the app's alert debug)."""
         if self.state is State.ESCALATING:
             return []
         out: list[Action] = [Event(ts, "distress_heard", {"reason": reason, "state": str(self.state)})]
         if self.state is State.CHECK_IN:
             out.append(CancelCheckin())
-        return out + self._escalate(ts, reason, distress=True)
+        return out + self._escalate(ts, reason, distress=True, urgent=urgent)
 
     def family_acknowledged(self, ts: float, contact: str) -> list[Action]:
         """A family member pressed "I'm on it" in the app: stop alerting anyone else."""
@@ -237,8 +242,10 @@ class NightWatch:
             return []  # a held tap arrives twice a second; only the first one counts
         self._acked = True
         self._ladder, self._next_step_at = [], math.inf
-        return [Event(ts, "family_ack", {"contact": contact}),
-                Say(f"{contact} knows, and is checking on you.")]
+        return [
+            Event(ts, "family_ack", {"contact": contact}),
+            Say(f"{contact} knows, and is checking on you."),
+        ]
 
     # ---------- transitions ----------
 
@@ -257,8 +264,10 @@ class NightWatch:
         if self.state is State.IN_BED:
             return []
         trip_min = round((ts - self._left_at) / 60, 1)
-        out: list[Action] = [Event(ts, "bed_return", {"trip_min": trip_min}),
-                             Command(self.cfg.pillow_id, "set_light", dict(PATH_LIGHT_OFF))]
+        out: list[Action] = [
+            Event(ts, "bed_return", {"trip_min": trip_min}),
+            Command(self.cfg.pillow_id, "set_light", dict(PATH_LIGHT_OFF)),
+        ]
         if self.state is State.CHECK_IN:
             out.append(CancelCheckin())
         out += self._tell_alerted(f"{self.cfg.resident} is back in bed.")
@@ -275,9 +284,11 @@ class NightWatch:
         self.state = State.UP
         self._left_at = left_at
         self._checkin_due = left_at + self._checkin_wait_s()
-        return [Event(ts, "bed_exit", {"left_at": left_at}),
-                Command(self.cfg.pillow_id, "set_light", dict(self.cfg.path_light)),
-                Say("The light's on. Take your time.")]
+        return [
+            Event(ts, "bed_exit", {"left_at": left_at}),
+            Command(self.cfg.pillow_id, "set_light", dict(self.cfg.path_light)),
+            Say("The light's on. Take your time."),
+        ]
 
     def _tick(self, ts: float) -> list[Action]:
         if self.state is State.AWAKE and self._head_on and self._is_night(ts):
@@ -290,9 +301,11 @@ class NightWatch:
             away = round((ts - self._left_at) / 60)
             self.state = State.CHECK_IN
             self._checkin_due = math.inf
-            self._checkin_deadline = ts + CHECKIN_MAX_S
-            return [Event(ts, "no_return", {"away_min": away, "round": self._fine_rounds + 1}),
-                    StartCheckin()]
+            self._checkin_deadline = ts + self.timings.checkin_max_s
+            return [
+                Event(ts, "no_return", {"away_min": away, "round": self._fine_rounds + 1}),
+                StartCheckin(),
+            ]
         if self.state is State.CHECK_IN and ts >= self._checkin_deadline:
             reason = "The pillow's check-in didn't finish, so we couldn't ask her."
             return [Event(ts, "checkin_timeout", {}), CancelCheckin(), *self._escalate(ts, reason)]
@@ -320,14 +333,22 @@ class NightWatch:
             return []
         away = round((ts - self._left_at) / 60)
         contact = self.cfg.contacts[0]
-        return [Event(ts, "heads_up", {"contact": contact, "away_min": away}),
-                Alert(contact, "sms", f"Heads-up, no action needed: {self.cfg.resident} has been up "
-                                      f"{away} min but says she's fine.")]
+        return [
+            Event(ts, "heads_up", {"contact": contact, "away_min": away}),
+            Alert(
+                contact,
+                "sms",
+                f"Heads-up, no action needed: {self.cfg.resident} has been up "
+                f"{away} min but says she's fine.",
+            ),
+        ]
 
     def _escalate(
-        self, ts: float, reason: str, distress: bool = False, on_trip: bool = False
+        self, ts: float, reason: str, distress: bool = False, on_trip: bool = False,
+        urgent: bool | None = None,
     ) -> list[Action]:
-        """`on_trip`: from a check-in, so she got up at `_left_at` (a distress call can say when)."""
+        """`on_trip`: from a check-in, so she got up at `_left_at` (a distress call can say when).
+        `urgent` False keeps a distress alert on the gentle ladder (the app's alert debug)."""
         self.state = State.ESCALATING
         self._on_trip = on_trip
         self._acked = False
@@ -337,7 +358,7 @@ class NightWatch:
         # help, or said she's fallen) is critical: the first step also phones every contact who takes
         # calls, all at once, and texts follow one by one.
         first = [("app", c) for c in self.cfg.contacts if self._allows(c, "app")]
-        if distress:
+        if distress if urgent is None else urgent:
             first += [("call", c) for c in self.cfg.contacts if self._allows(c, "call")]
             ladder = [first] + [[("sms", c)] for c in self.cfg.contacts if self._allows(c, "sms")]
         else:
@@ -362,11 +383,23 @@ class NightWatch:
         else:
             left = datetime.fromtimestamp(self._left_at, ZoneInfo(self.cfg.timezone)).strftime("%H:%M")
             away = round((ts - self._left_at) / 60)
-            message = (f"{self.cfg.resident} got up at {left} and hasn't come back to bed ({away} min). "
-                       f"{self._reason}")
+            message = (
+                f"{self.cfg.resident} got up at {left} and hasn't come back to bed ({away} min). "
+                f"{self._reason}"
+            )
         kind = "distress" if self._distress else "no_return"
-        out: list[Action] = [Event(ts, "escalation_step", {"channel": step[0][0], "kind": kind,
-                                                            "contacts": [c for _, c in step]})]
+        out: list[Action] = [
+            Event(
+                ts,
+                "escalation_step",
+                {
+                    "channel": step[0][0],
+                    "kind": kind,
+                    "channels": list(dict.fromkeys(ch for ch, _ in step)),
+                    "contacts": list(dict.fromkeys(c for _, c in step)),
+                },
+            )
+        ]
         for channel, contact in step:
             out.append(Alert(contact, channel, message))
             if contact not in self._alerted:

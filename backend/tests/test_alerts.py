@@ -3,35 +3,51 @@ then a round trip on the test user's own contact against live Supabase."""
 
 import re
 from collections.abc import Iterator
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from supabase import Client
 
-from app.core.app_constants import KEEP_ONE_CHANNEL, PHONE_INVALID
+from app.agents.reminders import slot_today
+from app.core.app_constants import ALERT_DEBUG_NOT_TEST, KEEP_ONE_CHANNEL, LAST_ON_CALL, PHONE_INVALID
 from app.core.dependencies import get_notifier
-from app.crud.crud_constants import CONTACTS_TABLE
+from app.crud.crud_constants import CONTACTS_TABLE, REMINDERS_TABLE
 from app.main import app
 from app.notify.sender import NotificationSender
 from app.routers import alerts as alerts_router
 from app.schemas.account import AlertSettingsPatch
-from tests.seed_constants import TEST_USER_ID
+from tests.seed_constants import TEST_PILLOW_ID, TEST_RESIDENT_ID, TEST_USER_ID
 from tests.test_notify import FakeIMessage, FakeTwilio
 
 URL = "/api/me/alerts"
-ALERT_COLUMNS = ("phone", "sms_consent", "call_alerts", "app_alerts")
+ALERT_COLUMNS = (
+    "phone",
+    "sms_consent",
+    "call_alerts",
+    "app_alerts",
+    "restless_alerts",
+    "on_call",
+    "quiet_start",
+    "quiet_end",
+    "is_test",
+)
 
 
 # ---------- offline ----------
 
 
-@pytest.mark.parametrize(("typed", "stored"), [
-    ("+44 7700 900123", "+447700900123"),
-    ("447700900123", "+447700900123"),
-    ("0044 (7700) 900-123", "+447700900123"),
-    ("", None),
-])
+@pytest.mark.parametrize(
+    ("typed", "stored"),
+    [
+        ("+44 7700 900123", "+447700900123"),
+        ("447700900123", "+447700900123"),
+        ("0044 (7700) 900-123", "+447700900123"),
+        ("", None),
+    ],
+)
 def test_phone_numbers_are_stored_in_e164(typed, stored):
     assert AlertSettingsPatch(phone=typed).phone == stored
 
@@ -102,3 +118,43 @@ def test_a_test_text_goes_to_your_own_number_once(client: TestClient, auth, twil
     assert twilio.texts == [("+15555550177", twilio.texts[0][1])]
     assert client.post(f"{URL}/test", json={"channel": "sms"}, headers=auth).status_code == 429
     assert client.post(f"{URL}/test", json={"channel": "call"}, headers=auth).json()["via"] == "call"
+
+
+def test_restless_notices_and_quiet_hours_round_trip(client: TestClient, auth, twilio):
+    quiet = {"restless": False, "quiet_start": "22:00", "quiet_end": "07:00"}
+    changed = client.patch(URL, json=quiet, headers=auth)
+    assert quiet.items() <= changed.json().items()
+    cleared = client.patch(URL, json={"quiet_start": None, "quiet_end": None}, headers=auth).json()
+    assert (cleared["quiet_start"], cleared["quiet_end"]) == (None, None)
+
+
+def test_the_last_contact_on_call_stays_on_call(client: TestClient, auth, twilio):
+    # Test User is test-pillow's only contact
+    refused = client.patch(URL, json={"on_call": False}, headers=auth)
+    assert (refused.status_code, refused.json()["detail"]) == (422, LAST_ON_CALL)
+
+
+def test_only_test_accounts_start_a_debug_alert(client: TestClient, db: Client, auth, twilio):
+    debug = f"/api/pillows/{TEST_PILLOW_ID}/alert-debug"
+    refused = client.post(f"{debug}/start", headers=auth)
+    assert (refused.status_code, refused.json()["detail"]) == (403, ALERT_DEBUG_NOT_TEST)
+    db.table(CONTACTS_TABLE).update({"is_test": True}).eq("id", TEST_USER_ID).execute()
+    assert client.post(f"{debug}/start", headers=auth).json()["night_state"] == "escalating"
+    assert client.post(f"{debug}/stop", headers=auth).json()["night_state"] != "escalating"
+
+
+def test_a_debug_reminder_plays_on_the_next_tick(client: TestClient, db: Client, auth, twilio):
+    url = f"/api/pillows/{TEST_PILLOW_ID}/alert-debug/reminder"
+    refused = client.post(url, headers=auth)
+    assert (refused.status_code, refused.json()["detail"]) == (403, ALERT_DEBUG_NOT_TEST)
+    db.table(CONTACTS_TABLE).update({"is_test": True}).eq("id", TEST_USER_ID).execute()
+    try:
+        made = client.post(url, headers=auth)
+        assert made.status_code == 200 and made.json()["night_state"]
+        row = db.table(REMINDERS_TABLE).select("*").eq("resident_id", TEST_RESIDENT_ID).single().execute()
+        resident = db.table("residents").select("timezone").eq("id", TEST_RESIDENT_ID).single().execute()
+        row, tz = row.data, resident.data["timezone"]
+        assert (row["consent"], row["confirm"]) == ("agreed", False)
+        assert slot_today(row, tz, datetime.now(ZoneInfo(tz))) is not None  # due now, so the tick claims it
+    finally:
+        db.table(REMINDERS_TABLE).delete().eq("resident_id", TEST_RESIDENT_ID).execute()

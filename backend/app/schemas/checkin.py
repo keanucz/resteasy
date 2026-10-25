@@ -7,7 +7,8 @@ from pydantic import BaseModel, Field
 
 
 class CheckinResult(BaseModel):
-    """How the check-in ended (voice/checkin.py Outcome): escalate, and why, in one plain sentence."""
+    """How the check-in ended (voice/checkin.py Outcome): escalate, and why, in one plain sentence.
+    `distress`: she asked for help, so every contact is called at once."""
 
     escalate: bool
     reason: str = Field(max_length=300)

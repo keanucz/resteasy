@@ -22,11 +22,12 @@ ASLEEP_S = 15 * 60  # ... continuously for this long, head on the pillow = aslee
 HEAD_OFF_GRACE_S = 3 * 60
 EDGE_KEYS = ("talk", "family")  # key_fine is Night Watch's (it cancels alerts)
 
-# PILLOW_DEMO_TIMINGS=1 on the server (with Night Watch's DEMO_TIMINGS): restless the moment she
-# moves, settled the moment she stops, so judges see both in seconds. Two reports in a row (one
-# second) either way, so a single bump of the bedside unit doesn't flip it.
-DEMO_RESTLESS_MOTION = 0.15
-DEMO_MOTION_REPORTS = 2
+# PILLOW_DEMO_TIMINGS=1 on the server (with Night Watch's DEMO_TIMINGS): restless once the pillow's
+# IMU has been shaking hard for a few seconds, settled a few seconds after it stops, head on the
+# plate or not, so judges see both quickly. Pressing the pillow down or a single bump never counts.
+DEMO_RESTLESS_MOTION = 0.4
+DEMO_RESTLESS_S = 5  # this long at or above DEMO_RESTLESS_MOTION = restless
+DEMO_SETTLED_S = 3  # this long below it = settled
 DEMO_ASLEEP_S = 3
 DEMO_HEAD_OFF_GRACE_S = 5  # Night Watch's demo bed exit: off this long ends the bed session
 
@@ -38,7 +39,7 @@ class SleepTracker:
         self._demo = demo
         self._asleep_s = DEMO_ASLEEP_S if demo else ASLEEP_S
         self._grace_s = DEMO_HEAD_OFF_GRACE_S if demo else HEAD_OFF_GRACE_S
-        self._streak = 0  # demo: reports in a row on the other side of DEMO_RESTLESS_MOTION
+        self._flip_since: float | None = None  # demo: since when motion has been on the other side
         self._last_ts = -math.inf
         self._window: deque[tuple[float, float]] = deque()  # (ts, motion) over the last RESTLESS_S
         self._quiet_since: float | None = None  # first ts of the current run of motion < ASLEEP_MOTION
@@ -54,6 +55,8 @@ class SleepTracker:
         self._last_ts = ts
         out = self._keys(ts, s.get("keys") or {})
         head, motion = s.get("head_on"), s.get("motion")
+        if self._demo and motion is not None:
+            out += self._demo_restless(ts, float(motion))
         if head is None or motion is None:
             return out  # a sensor that isn't wired can't say anything about sleep
         if not head:
@@ -77,17 +80,15 @@ class SleepTracker:
         return out
 
     def _leave_bed(self, ts: float) -> list[Event]:
-        # In the demo a restless spell left open would still show "restless" when she lies down again
-        out = [Event(ts, "settled", {"left_bed": True})] if self._demo and self._restless else []
         self._window.clear()
         self._quiet_since = None
         self._asleep = False
-        self._restless = False
-        self._streak = 0
-        return out
+        if not self._demo:  # the demo's restless spell follows the IMU alone
+            self._restless = False
+        return []
 
     def _motion(self, ts: float, motion: float) -> list[Event]:
-        out = self._demo_restless(ts, motion) if self._demo else self._restless_window(ts, motion)
+        out = [] if self._demo else self._restless_window(ts, motion)
         # asleep: continuously quiet for the asleep time
         if motion < ASLEEP_MOTION:
             if self._quiet_since is None:
@@ -102,10 +103,14 @@ class SleepTracker:
 
     def _demo_restless(self, ts: float, motion: float) -> list[Event]:
         moving = motion >= DEMO_RESTLESS_MOTION
-        self._streak = self._streak + 1 if moving != self._restless else 0
-        if self._streak < DEMO_MOTION_REPORTS:
+        if moving == self._restless:
+            self._flip_since = None
             return []
-        self._streak = 0
+        if self._flip_since is None:
+            self._flip_since = ts
+        if ts - self._flip_since < (DEMO_RESTLESS_S if moving else DEMO_SETTLED_S):
+            return []
+        self._flip_since = None
         self._restless = moving
         if moving:
             return [Event(ts, "restless", {"motion": round(motion, 3)})]

@@ -307,6 +307,12 @@ export function PillowProvider({ pillowId, children }: PropsWithChildren<{ pillo
         refreshSoon,
       )
       .on('postgres_changes', { event: '*', schema: 'public', table: 'reminder_occurrences' }, refreshSoon)
+      // Night events (restless, settled ...) show as they happen, not at the next state change.
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'events', filter: `pillow_id=eq.${pillowId}` },
+        refreshSoon,
+      )
       // Read once the channel is listening (so no change slips between the read and the
       // subscription), or straight away if Realtime can't connect.
       .subscribe((status) => {

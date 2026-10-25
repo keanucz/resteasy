@@ -61,3 +61,5 @@ export const ALERT_BUZZ_EVERY_MS = 1200;
 export const ALERT_TEST_BUZZ_MS = 3000;
 /** How long Tonight keeps saying an alert ended ("she says she's fine") before it drops off. */
 export const ALERT_ENDED_NOTICE_MS = 15 * 60 * 1000;
+/** How long Tonight keeps saying she's restless after the spell began, unless she settles first. */
+export const RESTLESS_NOTICE_MS = 10 * 60 * 1000;

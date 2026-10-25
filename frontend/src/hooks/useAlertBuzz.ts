@@ -25,6 +25,13 @@ export function tapAllClear() {
   });
 }
 
+/** One soft nudge: she's restless. Worth a look, not an alarm. */
+export function tapRestless() {
+  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {
+    // No haptics engine: the card on Tonight says it anyway.
+  });
+}
+
 /** Buzz like an alert for `ms`, for the test button in Settings. */
 export function buzzFor(ms: number) {
   const stop = startBuzz();

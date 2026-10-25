@@ -99,6 +99,10 @@ PHONE_INVALID = "Use the full number with its country code, like +44 7700 900123
 PHONE_TAKEN = "Another person in the app already uses this number"
 NO_ALERT_CONTACT = "Connect a pillow first, then choose how you're alerted"
 KEEP_ONE_CHANNEL = "Keep at least one way to reach you on, so an alert always gets through"
+# Settings > Alerts fields that are plain contacts columns, beside the three channel switches
+ALERT_EXTRA_COLUMNS = {"restless": "restless_alerts", "on_call": "on_call",
+                       "quiet_start": "quiet_start", "quiet_end": "quiet_end"}
+LAST_ON_CALL = "Someone else has to be on call first, so an alert always tries someone straight away"
 # The test buttons at the bottom of Settings: one per channel per person this often at most
 ALERT_TEST_GAP_S = 30
 ALERT_TEST_TOO_SOON = "A test just went out. Try again in half a minute"
@@ -107,6 +111,17 @@ ALERT_TEST_NOT_CONFIGURED = "Texts and calls aren't set up on this server"
 ALERT_TEST_MESSAGES = {
     "sms": "Rest Easy test: alert texts reach this phone. Nothing is wrong.",
     "call": "This is a Rest Easy test call. Alerts will reach you on this number. Nothing is wrong.",
+}
+
+# Alert debug (test accounts only, contacts.is_test): a real alert through Night Watch, and its end
+ALERT_DEBUG_NOT_TEST = "Only test accounts can start or stop alerts from the app"
+ALERT_DEBUG_REASON = "Started from the app's alert debug by a test account."
+# A one-off reminder due this minute, agreed already, so the pillow says it within a reminder tick
+DEMO_REMINDER = {
+    "label": "take your evening tablets",
+    "kind": "meds",
+    "confirm": False,
+    "channels": ["voice"],
 }
 
 # Profile photos the API accepts, the same limits as the resident-photos bucket

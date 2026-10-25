@@ -59,6 +59,12 @@ async def clear_live_incidents(db: AsyncClient, pillow_id: str) -> None:
     (a restart forgets it), so the app must stop showing them as alerts in progress."""
     await (db.table(INCIDENTS_TABLE).update(_cleared()).eq("pillow_id", pillow_id)
            .in_("status", list(LIVE_INCIDENT_STATUSES)).execute())
+async def update_live_incidents(db: AsyncClient, pillow_id: str, fields: dict[str, Any],
+                                statuses: tuple[str, ...] = ("open", "acknowledged")) -> None:
+    """Update every incident of the pillow still in `statuses`: an alert the backend lost track of
+    (a restart mid-alert) ends, or is acknowledged, with the one it is running."""
+    await (db.table(INCIDENTS_TABLE).update(fields).eq("pillow_id", pillow_id)
+           .in_("status", list(statuses)).execute())
 
 
 async def add_notification(

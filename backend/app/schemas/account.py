@@ -7,7 +7,13 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, PlainSerializer, StringConstraints, field_validator
 
 from app.agents.guardian import CONFIG_BOUNDS
-from app.core.app_constants import ALERT_SWITCH_COLUMNS, PHONE_INVALID, PHONE_PATTERN, RESIDENT_NAME_MAX
+from app.core.app_constants import (
+    ALERT_EXTRA_COLUMNS,
+    ALERT_SWITCH_COLUMNS,
+    PHONE_INVALID,
+    PHONE_PATTERN,
+    RESIDENT_NAME_MAX,
+)
 from app.core.voice_constants import VOICE_IDS
 
 TIMEOUT_MIN, TIMEOUT_MAX = CONFIG_BOUNDS["checkin_timeout_min"]
@@ -37,7 +43,7 @@ class Account(BaseModel):
 
 
 class NewPillow(BaseModel):
-    """"Connect pillow" on a fresh sign-up: who the pillow is for, as the app should call them."""
+    """ "Connect pillow" on a fresh sign-up: who the pillow is for, as the app should call them."""
 
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=RESIDENT_NAME_MAX)]
 
@@ -99,22 +105,32 @@ class CheckinWaitUpdate(BaseModel):
 
 class AlertSettings(BaseModel):
     """How the signed-in person is reached in an alert: the in-app alert, texts and calls, the mobile
-    number they go to, and whether this server can send texts and calls at all."""
+    number they go to, and whether this server can send texts and calls at all. `restless`: a gentle
+    notice in the app when she's restless. Off call, or inside their quiet hours (her clock), they
+    are alerted after the others, never left out."""
 
     phone: str | None
     app: bool
     sms: bool
     call: bool
+    restless: bool
+    on_call: bool
+    quiet_start: ClockTime | None
+    quiet_end: ClockTime | None
     twilio_ready: bool
 
 
 class AlertSettingsPatch(BaseModel):
-    """Any subset of the alert settings. An empty phone removes the number."""
+    """Any subset of the alert settings. An empty phone removes the number; null quiet hours mean none."""
 
     phone: str | None = None
     app: bool | None = None
     sms: bool | None = None
     call: bool | None = None
+    restless: bool | None = None
+    on_call: bool | None = None
+    quiet_start: time | None = None
+    quiet_end: time | None = None
 
     @field_validator("phone")
     @classmethod
@@ -130,9 +146,12 @@ class AlertSettingsPatch(BaseModel):
         return number
 
     def columns(self) -> dict[str, str | bool | None]:
-        """The fields the caller sent, as contacts columns."""
-        names = {"phone": "phone"} | ALERT_SWITCH_COLUMNS
-        return {names[key]: getattr(self, key) for key in self.model_fields_set}
+        """The fields the caller sent, as contacts columns (times as "HH:MM")."""
+        names = {"phone": "phone"} | ALERT_SWITCH_COLUMNS | ALERT_EXTRA_COLUMNS
+        values = {key: getattr(self, key) for key in self.model_fields_set}
+        return {
+            names[key]: v.strftime(CLOCK_FORMAT) if isinstance(v, time) else v for key, v in values.items()
+        }
 
 
 class AlertTest(BaseModel):

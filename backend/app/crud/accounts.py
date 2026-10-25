@@ -23,12 +23,24 @@ async def get_contact_for_user(db: AsyncClient, user_id: str) -> dict[str, Any] 
 
 
 async def get_alert_contact(db: AsyncClient, user_id: str) -> dict[str, Any] | None:
-    """Return the login's contact with its mobile number and alert switches, or None."""
+    """Return the login's contact with its mobile number, alert switches, on-call and quiet hours,
+    and test flag, or None."""
     return await fetch_one(
         db.table(CONTACTS_TABLE)
-        .select("id, full_name, phone, sms_consent, call_alerts, app_alerts")
+        .select(
+            "id, full_name, phone, sms_consent, call_alerts, app_alerts, restless_alerts, on_call, "
+            "quiet_start, quiet_end, is_test"
+        )
         .eq("user_id", user_id)
     )
+
+
+async def list_contact_resident_ids(db: AsyncClient, contact_id: str) -> list[str]:
+    """Every resident this contact looks after."""
+    response = (
+        await db.table(RESIDENT_CONTACTS_TABLE).select("resident_id").eq("contact_id", contact_id).execute()
+    )
+    return [row["resident_id"] for row in response.data]
 
 
 async def update_contact(db: AsyncClient, contact_id: str, fields: dict[str, Any]) -> bool:

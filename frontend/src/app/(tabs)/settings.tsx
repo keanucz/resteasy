@@ -22,10 +22,18 @@ import { usePillowLink } from '@/hooks/usePillowLink';
 import { setResidentPhoto, useResidentPhoto } from '@/hooks/useResidentPhoto';
 import { useSession } from '@/hooks/useSession';
 import { useTheme } from '@/hooks/useTheme';
-import { type AlertPrefsPatch, saveAlertPrefs, sendTestAlert, toE164 } from '@/services/alerts';
+import {
+  type AlertPrefsPatch,
+  saveAlertPrefs,
+  sendTestAlert,
+  startDebugAlert,
+  startDebugReminder,
+  stopDebugAlert,
+  toE164,
+} from '@/services/alerts';
 import { api, ApiError } from '@/services/api';
 import { signOut } from '@/services/auth';
-import { isTestAccount, SIMULATED_ALERTS, type SimulatedAlert, simulateAlert } from '@/services/debug';
+import { isTestAccount } from '@/services/debug';
 import { pickAndUploadPhoto } from '@/services/photo';
 import { supabase } from '@/services/supabase/client';
 
@@ -437,8 +445,6 @@ export default function SettingsScreen() {
 
           <AlertsSection name={name} />
 
-          <AlertDebugSection pillowId={pillowId} />
-
           <Section title="This phone">
             <SegmentedTabs options={SCHEMES} value={scheme} onChange={switchScheme} />
           </Section>
@@ -455,7 +461,7 @@ export default function SettingsScreen() {
             </View>
           </Section>
 
-          <AlertTestSection />
+          <AlertTestSection pillowId={pillowId} name={name} />
         </ScrollView>
         <Dialog
           visible={confirm === 'pause'}
@@ -626,71 +632,10 @@ function DraftField<T>({ label, saved, parse, format, invalid, onCommit, digitsO
   );
 }
 
-/**
- * Test accounts only (contacts.is_test in Supabase): plays an alert on the pillow, one rung at a
- * time, so the app's alert screens can be tried without anyone getting out of bed. The database
- * refuses other accounts, and nobody is called or texted.
- */
-const AlertDebugSection = memo(function AlertDebugSection({ pillowId }: { pillowId: string | null }) {
-  const [allowed, setAllowed] = useState(false);
-  const [busy, setBusy] = useState<SimulatedAlert | null>(null);
-  const [status, setStatus] = useState<Status | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    isTestAccount().then(
-      (yes) => {
-        if (!cancelled) setAllowed(yes);
-      },
-      () => {
-        // Not knowing means not a test account: the section just stays hidden.
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (!allowed || !pillowId) return null;
-
-  const play = async (level: SimulatedAlert) => {
-    setBusy(level);
-    setStatus(null);
-    try {
-      setStatus({ kind: 'saved', text: await simulateAlert(pillowId, level) });
-    } catch (e) {
-      setStatus({ kind: 'error', text: e instanceof Error ? e.message : "Couldn't play that alert." });
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  return (
-    <Section
-      title="Alert debug"
-      note="Test account only. Plays an alert on this pillow as if it happened now, in the order a real night climbs. Nobody is called or texted."
-    >
-      <View className="flex-row flex-wrap gap-2.5">
-        {SIMULATED_ALERTS.map((a) => (
-          <View key={a.level} className="min-w-[46%] flex-1">
-            <Button
-              fullWidth
-              variant={a.level === 'clear' ? 'ghost' : 'secondary'}
-              title={a.label}
-              loading={busy === a.level}
-              disabled={busy !== null && busy !== a.level}
-              onPress={() => play(a.level)}
-            />
-          </View>
-        ))}
-      </View>
-      <StatusLine status={status} />
-    </Section>
-  );
-});
-
 const PHONE_INVALID = 'Use the full number with its country code';
 const KEEP_ONE_WAY = 'Keep at least one way to reach you on, so an alert always gets through.';
+// Quiet hours start here when first turned on; either end can be changed after.
+const QUIET_DEFAULT = { quiet_start: '22:00', quiet_end: '07:00' } as const;
 
 /** The typed mobile as the backend stores it; an empty field removes the number. */
 const parsePhone = (typed: string) => (typed.trim() ? toE164(typed) : '');
@@ -748,6 +693,7 @@ const AlertsSection = memo(function AlertsSection({ name }: { name: string }) {
   );
 
   if (!prefs) return null;
+  const quiet = prefs.quiet_start !== null && prefs.quiet_end !== null;
 
   return (
     <Section title="Alerts" note={`How you're told when ${name} needs help.`}>
@@ -767,7 +713,56 @@ const AlertsSection = memo(function AlertsSection({ name }: { name: string }) {
           meta="Rest Easy calls you if nobody is on it after the text."
           trailing={<Toggle label="Call me" value={prefs.call} onValueChange={(call) => change({ call })} />}
         />
+        <ListRow
+          title={`Tell me when ${name} is restless`}
+          meta="A quiet note on Tonight and one soft buzz. Never a text or a call."
+          trailing={
+            <Toggle
+              label={`Tell me when ${name} is restless`}
+              value={prefs.restless}
+              onValueChange={(restless) => change({ restless })}
+            />
+          }
+        />
+        <ListRow
+          title="On call"
+          meta={prefs.on_call ? 'You are among the first told.' : 'Others are told first. You still hear if nobody answers.'}
+          trailing={<Toggle label="On call" value={prefs.on_call} onValueChange={(on_call) => change({ on_call })} />}
+        />
+        <ListRow
+          title="Quiet hours"
+          meta={
+            quiet
+              ? `Others are told first between ${prefs.quiet_start} and ${prefs.quiet_end}, ${name}'s time.`
+              : 'For when you sleep or work. You are never left out.'
+          }
+          trailing={
+            <Toggle
+              label="Quiet hours"
+              value={quiet}
+              onValueChange={(on) => change(on ? QUIET_DEFAULT : { quiet_start: null, quiet_end: null })}
+            />
+          }
+        />
       </List>
+      {quiet ? (
+        <View className="flex-row gap-3">
+          <View className="flex-1">
+            <TimeSelect
+              label="Quiet from"
+              value={prefs.quiet_start ?? undefined}
+              onChange={(quiet_start) => change({ quiet_start })}
+            />
+          </View>
+          <View className="flex-1">
+            <TimeSelect
+              label="Until"
+              value={prefs.quiet_end ?? undefined}
+              onChange={(quiet_end) => change({ quiet_end })}
+            />
+          </View>
+        </View>
+      ) : null}
       <DraftField
         label="Your mobile"
         saved={prefs.phone ?? ''}
@@ -789,19 +784,84 @@ const AlertsSection = memo(function AlertsSection({ name }: { name: string }) {
   );
 });
 
-type AlertTest = 'sms' | 'call' | 'buzz';
+type AlertTest = 'sms' | 'call' | 'buzz' | 'start' | 'stop' | 'reminder';
+
+// Why a demo reminder waits: like every reminder, it never talks over her night
+const REMINDER_HELD: Record<string, string> = {
+  in_bed: 'in bed',
+  up: 'up in the night',
+  check_in: 'being checked on',
+  escalating: 'on an alert',
+};
 
 /**
  * Test buttons for every account: a real text or call to your own number now, and this phone's buzz,
- * so you know an alert will reach you before a night when it matters.
+ * so you know an alert will reach you before a night when it matters. Test accounts
+ * (contacts.is_test) also start a real alert on the pillow and end it; the backend refuses anyone else.
  */
-const AlertTestSection = memo(function AlertTestSection() {
+const AlertTestSection = memo(function AlertTestSection({ pillowId, name }: { pillowId: string | null; name: string }) {
   const { contactId } = usePillowLink();
   const prefs = useAlertPrefs(contactId);
+  const { refresh } = usePillow();
   const [busy, setBusy] = useState<AlertTest | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
+  const [debug, setDebug] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    isTestAccount().then(
+      (yes) => {
+        if (!cancelled) setDebug(yes);
+      },
+      () => {
+        // Not knowing means not a test account: only the everyday tests show.
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (!prefs) return null;
+
+  const alert = async (test: 'start' | 'stop') => {
+    if (!pillowId) return;
+    setBusy(test);
+    try {
+      const { night_state } = await (test === 'start' ? startDebugAlert(pillowId) : stopDebugAlert(pillowId));
+      void refresh();
+      setStatus(
+        test === 'stop'
+          ? { kind: 'saved', text: `Alert ended as if ${name} said she's fine.` }
+          : night_state === 'escalating'
+            ? { kind: 'saved', text: 'Alert started. Open Tonight to see it.' }
+            : { kind: 'error', text: `The pillow didn't start an alert (it says ${night_state}).` },
+      );
+    } catch (e) {
+      setStatus({ kind: 'error', text: e instanceof ApiError ? e.message : "Couldn't reach the server. Try again." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const remind = async () => {
+    if (!pillowId) return;
+    setBusy('reminder');
+    try {
+      const { night_state } = await startDebugReminder(pillowId);
+      const held = REMINDER_HELD[night_state];
+      setStatus({
+        kind: 'saved',
+        text: held
+          ? `Reminder set for now. It plays once ${name} is up; the pillow says she's ${held}.`
+          : 'Reminder set for now. The pillow says it in about 20 seconds.',
+      });
+    } catch (e) {
+      setStatus({ kind: 'error', text: e instanceof ApiError ? e.message : "Couldn't reach the server. Try again." });
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const run = async (test: AlertTest) => {
     setStatus(null);
@@ -810,6 +870,8 @@ const AlertTestSection = memo(function AlertTestSection() {
       setStatus({ kind: 'saved', text: 'Buzzing like an alert for a few seconds.' });
       return;
     }
+    if (test === 'start' || test === 'stop') return alert(test);
+    if (test === 'reminder') return remind();
     setBusy(test);
     try {
       const result = await sendTestAlert(test);
@@ -826,7 +888,14 @@ const AlertTestSection = memo(function AlertTestSection() {
   };
 
   return (
-    <Section title="Test alerts" note="Check alerts reach you. Nothing is wrong when these go out.">
+    <Section
+      title={debug ? 'Alert debug' : 'Test alerts'}
+      note={
+        debug
+          ? `Test account. Texts and calls go to your number; an alert is a real one on ${name}'s pillow, texts and calls included.`
+          : 'Check alerts reach you. Nothing is wrong when these go out.'
+      }
+    >
       {prefs.phone ? null : (
         <Text className="font-sans text-sm text-ink-muted">Add your mobile under Alerts to test texts and calls.</Text>
       )}
@@ -834,7 +903,7 @@ const AlertTestSection = memo(function AlertTestSection() {
         <Button
           fullWidth
           variant="secondary"
-          title="Send me a test text"
+          title={debug ? 'Send message' : 'Send me a test text'}
           loading={busy === 'sms'}
           disabled={!prefs.phone || (busy !== null && busy !== 'sms')}
           onPress={() => run('sms')}
@@ -842,11 +911,39 @@ const AlertTestSection = memo(function AlertTestSection() {
         <Button
           fullWidth
           variant="secondary"
-          title="Call me as a test"
+          title={debug ? 'Call with message' : 'Call me as a test'}
           loading={busy === 'call'}
           disabled={!prefs.phone || (busy !== null && busy !== 'call')}
           onPress={() => run('call')}
         />
+        {debug && pillowId ? (
+          <>
+            <Button
+              fullWidth
+              variant="alert"
+              title="Change to alert"
+              loading={busy === 'start'}
+              disabled={busy !== null && busy !== 'start'}
+              onPress={() => run('start')}
+            />
+            <Button
+              fullWidth
+              variant="secondary"
+              title={`End the alert (${name} is fine)`}
+              loading={busy === 'stop'}
+              disabled={busy !== null && busy !== 'stop'}
+              onPress={() => run('stop')}
+            />
+            <Button
+              fullWidth
+              variant="secondary"
+              title="Scheduled reminder"
+              loading={busy === 'reminder'}
+              disabled={busy !== null && busy !== 'reminder'}
+              onPress={() => run('reminder')}
+            />
+          </>
+        ) : null}
         <Button fullWidth variant="ghost" title="Test vibration" onPress={() => run('buzz')} />
       </View>
       <StatusLine status={status} />
