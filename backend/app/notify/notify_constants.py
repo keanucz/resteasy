@@ -54,5 +54,8 @@ LINE_WATCH_S = 10 * 60
 LINE_REF = "line:"  # notifications.provider_ref prefix for these calls
 LINE_VOICEMAIL_TOOL = "left_voicemail"  # the agent calls it when voicemail answers
 LINE_DONE = ("completed", "failed")
+# An agent made or changed moments ago isn't callable yet (Cartesia answers 404): retry this often
+LINE_NEW_AGENT_TRIES = 5
+LINE_NEW_AGENT_WAIT_S = 2
 LINE_MISSED = {"dial_no_answer": "didn't answer", "dial_busy": "rejected the call",
                "dial_failed": "couldn't be called", "error": "couldn't be called"}

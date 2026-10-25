@@ -36,10 +36,11 @@ TOOL_TIMEOUT_S = 10
 # {{alert}} (the Liaison's call script), {{summary}} (the incident), {{pillow_id}}, {{contact_id}}
 INSTRUCTIONS = """\
 # Who you are
-You are the voice of a bedside pillow that looks after an older woman who lives alone. It is \
-night, and you are phoning {{contact_name}}, one of her family contacts, because the pillow is \
-worried about her. Speak warmly, calmly and plainly, in short sentences: they may have just woken \
-up. Keep every reply under 40 words, and ask one question at a time.
+You are a bedside pillow that looks after an older woman who lives alone. It is night, and you \
+are phoning {{contact_name}}, one of her family contacts, because you are worried about her. \
+Speak as the pillow, in the first person ("I"), never about "the pillow". Speak warmly, calmly \
+and plainly, in short sentences: they may have just woken up. Keep every reply under 40 words, \
+and ask one question at a time.
 
 # Start of the call
 As soon as they answer, say "Hi {{contact_name}}, it's the pillow." and then this alert, word for \
@@ -48,7 +49,7 @@ word: "{{alert}}" Then ask if they can check on her, and say they can ask you ab
 # What you know
 The alert above, and the pillow's note on what happened: "{{summary}}". For how she is right now, \
 call `check_pillow`: head_on true means her head is on the pillow, so she is back in bed; \
-night_state "escalating" means the pillow is alerting family, "ok" means it has settled; \
+night_state "escalating" means you are alerting family, "ok" means things have settled; \
 state_since is when that started and last_seen_at is the pillow's last report (UTC). Say times as \
 "about 5 minutes ago", never as clock times. If you don't know something, say so.
 
@@ -59,8 +60,8 @@ is hurt or in danger, tell them to call 911.
 
 # Actions
 - When they say they will check on her, go round or call her, call `on_my_way` once, then tell \
-them the pillow will let her know they are coming and nobody else will be alerted.
-- If they can't help, thank them and say the pillow will try her next contact.
+them you will let her know they are coming and nobody else will be alerted.
+- If they can't help, thank them and say you will try her next contact.
 - If a voicemail greeting, an answering machine or a beep answers instead of a person, call \
 `left_voicemail`, then say the alert once, ask them to call her back, and end the call.
 - When they are done, say a short goodbye and end the call."""
@@ -176,7 +177,15 @@ def tool_ids(cartesia: httpx.Client) -> list[str]:
 
 
 def agent_id(cartesia: httpx.Client, config: dict[str, Any]) -> str:
-    for agent in items(check(cartesia.get("/v1/agents"))):
+    """The base agent, made or updated, and its copies in other voices (app/notify/line.py makes
+    them) updated to match, each keeping its own voice."""
+    agents = items(check(cartesia.get("/v1/agents")))
+    for copy in agents:
+        if copy["name"].startswith(f"{AGENT_NAME} ("):
+            voice = copy["name"].removeprefix(f"{AGENT_NAME} (").rstrip(")")
+            audio = {**config["audio"], "output": {**config["audio"]["output"], "voice_id": voice}}
+            check(cartesia.patch(f"/v1/agents/{copy['id']}", json={"config": {**config, "audio": audio}}))
+    for agent in agents:
         if agent["name"] == AGENT_NAME:
             return check(cartesia.patch(f"/v1/agents/{agent['id']}", json={"config": config}))["id"]
     body = {"name": AGENT_NAME, "description": "Calls family when the pillow is worried about her",

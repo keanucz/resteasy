@@ -27,6 +27,8 @@ from app.notify.notify_constants import (
     LINE_API_PATH,
     LINE_DONE,
     LINE_MISSED,
+    LINE_NEW_AGENT_TRIES,
+    LINE_NEW_AGENT_WAIT_S,
     LINE_RING_S,
     LINE_VOICEMAIL_TOOL,
 )
@@ -56,7 +58,8 @@ async def call_voice(db: AsyncClient, pillow_id: str, contact_id: str | None) ->
 
 
 def _with_voice(config: dict[str, Any], voice_id: str) -> dict[str, Any]:
-    """The base agent's config speaking in `voice_id` (minus what Cartesia derives itself)."""
+    """The base agent's config speaking in `voice_id` (minus what Cartesia derives itself).
+    scripts/setup_line.py does the same for the copies it updates."""
     audio = config.get("audio") or {}
     output = {**(audio.get("output") or {}), "voice_id": voice_id}
     copy = {k: v for k, v in config.items() if k != "dynamic_variable_placeholders"}
@@ -98,7 +101,7 @@ class CartesiaLine:
         body = {"agent_id": await self.agent_for(voice), "from_number_id": self.number_id,
                 "ringing_timeout_seconds": LINE_RING_S,
                 "outbound_calls": [{"to_number": phone, "dynamic_variables": variables}]}
-        placed = (await self._send("POST", LINE_API_PATH, json=body)).get("calls") or [{}]
+        placed = (await self._place(body)).get("calls") or [{}]
         if not placed[0].get("agent_call_id"):
             raise DeliveryError(f"Line refused the call: {str(placed[0].get('error') or placed)[:200]}")
         return placed[0]["agent_call_id"]
@@ -131,15 +134,24 @@ class CartesiaLine:
             name = f"{LINE_AGENT_NAME} ({voice_id})"
             listed = (await self._send("GET", LINE_AGENTS_PATH)).get("data") or []
             found = next((agent["id"] for agent in listed if agent.get("name") == name), None)
-            config = _with_voice(base["config"], voice_id)
-            if found is None:
+            if found is None:  # setup_line.py keeps existing copies in step with the base agent
                 found = (await self._send("POST", LINE_AGENTS_PATH, json={
-                    "name": name, "description": base.get("description"), "config": config}))["id"]
+                    "name": name, "description": base.get("description"),
+                    "config": _with_voice(base["config"], voice_id)}))["id"]
                 log.info("Made a Line agent for voice %s", voice_id)
-            else:  # bring it up to date with the base agent (setup_line.py may have changed it)
-                await self._send("PATCH", f"{LINE_AGENTS_PATH}/{found}", json={"config": config})
             self._agents[voice_id] = found
             return found
+
+    async def _place(self, body: dict[str, Any]) -> dict[str, Any]:
+        """POST the call; a just-made (or just-changed) agent answers 404 for a few seconds."""
+        for attempt in range(LINE_NEW_AGENT_TRIES):
+            try:
+                return await self._send("POST", LINE_API_PATH, json=body)
+            except DeliveryError as err:
+                if "404" not in str(err) or attempt == LINE_NEW_AGENT_TRIES - 1:
+                    raise
+                await asyncio.sleep(LINE_NEW_AGENT_WAIT_S)
+        raise AssertionError("unreachable")
 
     async def _send(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         try:

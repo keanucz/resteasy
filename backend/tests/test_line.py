@@ -115,6 +115,18 @@ def test_call_posts_the_alert_as_dynamic_variables():
         "pillow_id": "mum", "contact_id": "c-sarah"}}]
 
 
+def test_a_just_made_agent_is_retried_until_callable(monkeypatch):
+    monkeypatch.setattr(line_module, "LINE_NEW_AGENT_WAIT_S", 0)
+    answers = [httpx.Response(404, json={"message": "The requested agent does not exist."})] * 2
+
+    def handler(request):
+        if request.method == "GET":
+            return httpx.Response(200, json=BASE)
+        return answers.pop(0) if answers else httpx.Response(200, json={"calls": [{"agent_call_id": "ac_2"}]})
+
+    assert asyncio.run(client(handler).call(call_row(), PHONE)) == "ac_2"
+
+
 def test_a_refused_call_entry_is_a_delivery_error():
     def handler(request):
         if request.method == "GET":
@@ -147,7 +159,7 @@ def test_how_a_finished_call_is_read(call, expected):
     assert asyncio.run(client(lambda r: httpx.Response(200, json=call)).missed("ac_1")) == expected
 
 
-def test_other_voices_get_a_copy_of_the_agent_made_once_then_kept_in_sync():
+def test_other_voices_get_a_copy_of_the_agent_made_once():
     seen, agents = [], []
 
     def handler(request):
@@ -168,9 +180,9 @@ def test_other_voices_get_a_copy_of_the_agent_made_once_then_kept_in_sync():
     assert asyncio.run(line.agent_for(CLONE)) == "agent_copy"
     assert asyncio.run(line.agent_for(CLONE)) == "agent_copy"  # cached: no more requests
     assert [m for m, _ in seen].count("POST") == 1
-    later = client(handler)  # a restarted backend finds the copy and updates it
+    later = client(handler)  # a restarted backend finds the copy
     assert asyncio.run(later.agent_for(CLONE)) == "agent_copy"
-    assert seen[-1] == ("PATCH", "/v1/agents/agent_copy")
+    assert [m for m, _ in seen].count("POST") == 1 and "PATCH" not in [m for m, _ in seen]
     assert BASE["config"]["audio"]["output"]["voice_id"] == DEFAULT_VOICE_ID  # base left alone
 
 
