@@ -16,6 +16,7 @@ AGENT_LOG_TABLE = "agent_log"
 REMINDERS_TABLE = "reminders"
 REMINDER_OCCURRENCES_TABLE = "reminder_occurrences"
 VOICE_CLONES_TABLE = "voice_clones"
+CONTACT_AWAY_TABLE = "contact_away"
 
 # A cloned voice with the name of the family member who recorded it
 VOICE_CLONE_COLUMNS = "*, creator:contacts(full_name)"

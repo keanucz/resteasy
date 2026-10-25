@@ -1,10 +1,16 @@
-"""Data access for a resident's settings and the contacts who look after them."""
+"""Data access for a resident's settings and the contacts who look after them, with the nights
+each contact is away."""
 
 from typing import Any
 
 from supabase import AsyncClient
 
-from app.crud.crud_constants import CONTACTS_TABLE, RESIDENT_CONTACTS_TABLE, RESIDENTS_TABLE
+from app.crud.crud_constants import (
+    CONTACT_AWAY_TABLE,
+    CONTACTS_TABLE,
+    RESIDENT_CONTACTS_TABLE,
+    RESIDENTS_TABLE,
+)
 from app.crud.supabase_query import fetch_one
 
 
@@ -34,3 +40,26 @@ async def update_resident(db: AsyncClient, resident_id: str, fields: dict[str, A
 async def set_contact_on_call(db: AsyncClient, contact_id: str, on_call: bool) -> None:
     """Set whether a contact is on call; Night Watch tries reachable contacts first (re-read every 60 s)."""
     await db.table(CONTACTS_TABLE).update({"on_call": on_call}).eq("id", contact_id).execute()
+
+
+async def list_away(db: AsyncClient, contact_id: str, since: str) -> list[dict[str, Any]]:
+    """The contact's away nights that end on or after `since` (YYYY-MM-DD), soonest first."""
+    response = await (
+        db.table(CONTACT_AWAY_TABLE)
+        .select("id, from_date, until_date, note")
+        .eq("contact_id", contact_id)
+        .gte("until_date", since)
+        .order("from_date")
+        .execute()
+    )
+    return response.data
+
+
+async def add_away(db: AsyncClient, contact_id: str, fields: dict[str, Any]) -> dict[str, Any]:
+    response = await db.table(CONTACT_AWAY_TABLE).insert({**fields, "contact_id": contact_id}).execute()
+    row = response.data[0]
+    return {k: row[k] for k in ("id", "from_date", "until_date", "note")}
+
+
+async def clear_away(db: AsyncClient, contact_id: str) -> None:
+    await db.table(CONTACT_AWAY_TABLE).delete().eq("contact_id", contact_id).execute()

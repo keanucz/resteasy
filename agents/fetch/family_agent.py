@@ -20,7 +20,7 @@ only queued. The person sees the whole plan and confirms it; only then does plai
 steps out, through the backend and its Guardian. Reads answer straight away.
 
     export AGENT_SEED='<private phrase>' CONTACT_ID=<contacts.id> CONTACT_NAME=Sarah
-    export ANTHROPIC_API_KEY=...  CHECKIN_TOKEN=<backend/.env>  COORDINATOR_ADDRESS=agent1q...
+    export ANTHROPIC_API_KEY=...  AGENT_TOKEN=<its FAMILY_AGENT_TOKENS entry>  COORDINATOR_ADDRESS=agent1q...
     uv run agents/fetch/family_agent.py
 See agents/fetch/README.md.
 """
@@ -54,7 +54,8 @@ from models import AvailabilityReply, AvailabilityRequest, JoinRoster, roster_pr
 
 SERVER = os.environ.get("PILLOW_SERVER", "https://pillow.keanuc.net").rstrip("/")
 PILLOW_ID = os.environ.get("PILLOW_ID", "mum")
-TOKEN = os.environ.get("CHECKIN_TOKEN", "").strip()
+# Its own token (the backend's FAMILY_AGENT_TOKENS, which says who it speaks for); CHECKIN_TOKEN until then
+TOKEN = (os.environ.get("AGENT_TOKEN") or os.environ.get("CHECKIN_TOKEN", "")).strip()
 CONTACT_ID = os.environ.get("CONTACT_ID", "").strip()
 CONTACT_NAME = os.environ.get("CONTACT_NAME", "").strip() or "their family member"
 RESIDENT = os.environ.get("RESIDENT_NAME", "Mum")
@@ -64,6 +65,8 @@ MODEL = "claude-opus-5-5"
 HISTORY_TURNS = 6
 HERE = Path(__file__).resolve().parent
 PORT = int(os.environ.get("AGENT_PORT", "8001"))
+AUTH = {"Authorization": f"Bearer {TOKEN}"}
+AS_CONTACT = {"contact_id": CONTACT_ID}  # it acts as the family member it speaks for
 _slug = re.sub(r"[^a-z0-9]+", "-", CONTACT_NAME.lower()).strip("-") or "family"
 
 agent = Agent(
@@ -134,7 +137,7 @@ TOOLS: list[dict[str, Any]] = [
      "the Guardian's allowed/blocked verdicts.", "strict": True, "input_schema": _strict()},
     {"name": "get_roster", "description": "Who looks after her, in alert order, and who is on call "
      "(tried first) right now.", "strict": True, "input_schema": _strict()},
-    {"name": "get_my_availability", "description": f"The away dates {CONTACT_NAME} has given this agent.",
+    {"name": "get_my_availability", "description": f"{CONTACT_NAME}'s away nights, from tonight on.",
      "strict": True, "input_schema": _strict()},
     {"name": "show_goodnight_form", "description": "Show a form where they type a goodnight message.",
      "strict": True, "input_schema": _strict()},
@@ -244,13 +247,16 @@ def describe(name: str, args: dict[str, Any]) -> tuple[str, str]:
     return name, json.dumps(args)
 
 
-def _away(storage: Any) -> list[dict[str, str]]:
-    return storage.get("away") or []
+async def away_nights(http: httpx.AsyncClient) -> list[dict[str, Any]]:
+    """The away nights saved for this agent's person (GET /away), from tonight on."""
+    r = await http.get(f"{SERVER}/api/pillows/{PILLOW_ID}/away", params=AS_CONTACT, headers=AUTH)
+    r.raise_for_status()
+    return r.json()
 
 
-def away_on(storage: Any, night: str) -> dict[str, str] | None:
-    """The away entry covering `night` (YYYY-MM-DD), if any. Plain code: the roster's answer."""
-    return next((a for a in _away(storage) if a["from"] <= night <= a["until"]), None)
+def away_on(nights: list[dict[str, Any]], night: str) -> dict[str, Any] | None:
+    """The away stretch covering `night` (YYYY-MM-DD), if any. Plain code: the roster's answer."""
+    return next((a for a in nights if a["from_date"] <= night <= a["until_date"]), None)
 
 
 def _rejected(r: httpx.Response) -> dict[str, str] | None:
@@ -269,10 +275,8 @@ async def find_reminder(http: httpx.AsyncClient, reminder_id: int) -> dict[str, 
     return next((x for x in r.json() if x["id"] == reminder_id), None)
 
 
-async def call_tool(http: httpx.AsyncClient, storage: Any, name: str, args: dict[str, Any]) -> Any:
+async def call_tool(http: httpx.AsyncClient, name: str, args: dict[str, Any]) -> Any:
     base = f"{SERVER}/api/pillows/{PILLOW_ID}"
-    auth = {"Authorization": f"Bearer {TOKEN}"}
-    as_contact = {"contact_id": CONTACT_ID}  # agents act on reminders as the family member they speak for
     gone = {"error": "that reminder no longer exists"}
     if name == "get_status":
         r = await http.get(f"{base}/state")
@@ -295,14 +299,14 @@ async def call_tool(http: httpx.AsyncClient, storage: Any, name: str, args: dict
         return [{k: row.get(k) for k in ("ts", "agent", "intent", "guardian", "reason")}
                 for row in r.json()["agent_log"]][-40:]
     if name == "get_roster":
-        r = await http.get(f"{base}/roster", headers=auth)
+        r = await http.get(f"{base}/roster", headers=AUTH)
         r.raise_for_status()
         keys = ("name", "on_call", "quiet_start", "quiet_end")
         return [{k: c[k] for k in keys} for c in r.json()["contacts"]]
     if name == "get_my_availability":
-        return {"away": _away(storage)}
+        return {"away": await away_nights(http)}
     if name == "send_goodnight":
-        r = await http.post(f"{base}/goodnight", json=args)
+        r = await http.post(f"{base}/goodnight", params=AS_CONTACT, json=args, headers=AUTH)
         if rejected := _rejected(r):
             return rejected
         r.raise_for_status()
@@ -311,7 +315,9 @@ async def call_tool(http: httpx.AsyncClient, storage: Any, name: str, args: dict
         patch = {k: v for k, v in args.items() if v is not None}
         if not patch:
             return {"error": "nothing to change"}
-        r = await http.patch(f"{base}/settings", json=patch, headers=auth)
+        r = await http.patch(f"{base}/settings", params=AS_CONTACT, json=patch, headers=AUTH)
+        if rejected := _rejected(r):
+            return rejected
         r.raise_for_status()
         return r.json()
     if name == "get_reminders":
@@ -319,14 +325,14 @@ async def call_tool(http: httpx.AsyncClient, storage: Any, name: str, args: dict
         r.raise_for_status()
         return [{k: x.get(k) for k in REMINDER_KEYS} for x in r.json()]
     if name == "get_calendar":
-        r = await http.get(f"{base}/reminders/calendar", params={**as_contact, **args}, headers=auth)
+        r = await http.get(f"{base}/reminders/calendar", params={**AS_CONTACT, **args}, headers=AUTH)
         if r.status_code == 422:
             return {"error": r.json().get("detail")}
         r.raise_for_status()
         return [{k: e.get(k) for k in ("date", "due_at", "label", "consent", "status")} for e in r.json()]
     if name == "add_reminder":
         body = {k: v for k, v in args.items() if v is not None}
-        r = await http.post(f"{base}/reminders", params=as_contact, json=body, headers=auth)
+        r = await http.post(f"{base}/reminders", params=AS_CONTACT, json=body, headers=AUTH)
         if rejected := _rejected(r):
             return rejected
         r.raise_for_status()
@@ -343,7 +349,7 @@ async def call_tool(http: httpx.AsyncClient, storage: Any, name: str, args: dict
             body["skip_dates"] = sorted({*current["skip_dates"], *args["skip_dates"]})
         if not body:
             return {"error": "nothing to change"}
-        r = await http.patch(f"{base}/reminders/{rid}", params=as_contact, json=body, headers=auth)
+        r = await http.patch(f"{base}/reminders/{rid}", params=AS_CONTACT, json=body, headers=AUTH)
         if r.status_code == 404:
             return gone
         if rejected := _rejected(r):
@@ -351,19 +357,21 @@ async def call_tool(http: httpx.AsyncClient, storage: Any, name: str, args: dict
         r.raise_for_status()
         return {"changed": r.json()}
     if name == "delete_reminder":
-        r = await http.delete(f"{base}/reminders/{args['reminder_id']}", params=as_contact, headers=auth)
+        r = await http.delete(f"{base}/reminders/{args['reminder_id']}", params=AS_CONTACT, headers=AUTH)
         if r.status_code == 404:
             return gone
         r.raise_for_status()
         return {"deleted": args["reminder_id"]}
     if name == "set_away":
-        for key in ("from_date", "until_date"):
-            date.fromisoformat(args[key])  # a bad date raises, and Claude is told
-        entry = {"from": args["from_date"], "until": args["until_date"], "note": args.get("note") or "away"}
-        storage.set("away", [*_away(storage), entry])
-        return {"saved": entry}
+        body = {**args, "note": args.get("note") or "away"}
+        r = await http.post(f"{base}/away", params=AS_CONTACT, json=body, headers=AUTH)
+        if rejected := _rejected(r):
+            return rejected
+        r.raise_for_status()
+        return {"saved": r.json()}
     if name == "clear_away":
-        storage.set("away", [])
+        r = await http.delete(f"{base}/away", params=AS_CONTACT, headers=AUTH)
+        r.raise_for_status()
         return {"cleared": True}
     return {"error": f"unknown tool {name}"}
 
@@ -378,7 +386,7 @@ class Turn:
         self.form = False
 
 
-async def answer(storage: Any, history: list[dict[str, Any]], text: str) -> Turn:
+async def answer(history: list[dict[str, Any]], text: str) -> Turn:
     """One Claude tool loop: reads run now, change tools are collected into a plan."""
     turn = Turn()
     client = anthropic.AsyncAnthropic(max_retries=1, timeout=60)
@@ -416,7 +424,7 @@ async def answer(storage: Any, history: list[dict[str, Any]], text: str) -> Turn
                         turn.form = True
                         out = {"shown": True}
                     else:
-                        out = await call_tool(http, storage, call.name, args)
+                        out = await call_tool(http, call.name, args)
                         if call.name == "get_night":
                             turn.night = out
                     results.append({"type": "tool_result", "tool_use_id": call.id,
@@ -436,18 +444,16 @@ def outcome(name: str, args: dict[str, Any], result: Any) -> str:
         return f"{label}: not done, the pillow's safety rules blocked it ({result['blocked']})"
     if isinstance(result, dict) and result.get("error"):
         return f"{label}: not done, {result['error']}"
-    if name == "set_settings" and isinstance(result, dict) and result.get("guardian") == "blocked":
-        return f"{label}: adjusted by the safety rules to {result.get('applied')} ({result.get('reason')})"
     return f"{label}: {value}"
 
 
-async def run_plan(storage: Any, steps: list[dict[str, Any]]) -> str:
+async def run_plan(steps: list[dict[str, Any]]) -> str:
     lines = []
     async with httpx.AsyncClient(timeout=20, headers={"User-Agent": "calhacks-family-agent/1.0"}) as http:
         for step in steps:
             try:
                 lines.append(outcome(step["tool"], step["args"],
-                                     await call_tool(http, storage, step["tool"], step["args"])))
+                                     await call_tool(http, step["tool"], step["args"])))
             except Exception as err:  # noqa: BLE001 - one failed step must not hide the others
                 label, _ = describe(step["tool"], step["args"])
                 lines.append(f"{label}: failed ({type(err).__name__}), please try that one again")
@@ -481,7 +487,7 @@ async def respond(ctx: Context, sender: str, text: str) -> ChatMessage:
         if selection and selection.get("plan_id") != pending["id"]:
             return cards.reply("That plan has been replaced by a newer one; nothing changed.")
         ctx.storage.set(pending_key, None)
-        said, done = "(confirmed the plan)", await run_plan(ctx.storage, pending["steps"])
+        said, done = "(confirmed the plan)", await run_plan(pending["steps"])
     elif action == cards.CANCEL_PLAN or (pending and action is None and NO.match(text)):
         ctx.storage.set(pending_key, None)
         said, done = "(cancelled the plan)", "OK, nothing has changed."
@@ -493,14 +499,14 @@ async def respond(ctx: Context, sender: str, text: str) -> ChatMessage:
         if not args["message"]:
             return cards.reply("The message was empty, so nothing was sent.")
         said = "(sent a goodnight from the form)"
-        done = await run_plan(ctx.storage, [{"tool": "send_goodnight", "args": args}])
+        done = await run_plan([{"tool": "send_goodnight", "args": args}])
     elif action == cards.SHOW_LOG:
         text = "What exactly did the pillow and its agents do last night?"
     if done is not None:
         remember(ctx.storage, sender, said, done)
         return cards.reply(done)
 
-    turn = await answer(ctx.storage, ctx.storage.get(f"history:{sender}") or [], text)
+    turn = await answer(ctx.storage.get(f"history:{sender}") or [], text)
     reply_text = turn.text or "Done."
     if turn.steps:
         plan_id = uuid4().hex[:12]
@@ -546,7 +552,12 @@ async def on_availability(ctx: Context, sender: str, msg: AvailabilityRequest) -
     if sender != COORDINATOR or msg.pillow_id != PILLOW_ID:
         ctx.logger.warning(f"availability request from unknown {sender[:16]} ignored")
         return
-    away = away_on(ctx.storage, msg.night)
+    try:
+        async with httpx.AsyncClient(timeout=20, headers={"User-Agent": "calhacks-family-agent/1.0"}) as http:
+            away = away_on(await away_nights(http), msg.night)
+    except httpx.HTTPError as err:  # the coordinator leaves this person as they were
+        ctx.logger.error(f"roster {msg.night}: away nights unavailable, not answering: {err}")
+        return
     reason = f"{CONTACT_NAME} is away: {away['note']}" if away else f"{CONTACT_NAME} has no plans noted"
     ctx.logger.info(f"roster {msg.night}: {reason}")
     await ctx.send(sender, AvailabilityReply(contact_id=CONTACT_ID, available=away is None, reason=reason))
@@ -568,7 +579,7 @@ agent.include(chat, publish_manifest=True)
 agent.include(roster, publish_manifest=True)
 
 if __name__ == "__main__":
-    for var, why in (("CHECKIN_TOKEN", "settings changes and the roster will fail"),
+    for var, why in (("AGENT_TOKEN", "every change, the roster and away nights fail (or set CHECKIN_TOKEN)"),
                      ("CONTACT_ID", "this agent can't take part in the evening roster"),
                      ("COORDINATOR_ADDRESS", "this agent can't take part in the evening roster")):
         if not os.environ.get(var):

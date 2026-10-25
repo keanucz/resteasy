@@ -31,8 +31,9 @@ uv run ruff check .  # lint
 | `POST` | `/api/pillows/{pillow_id}/ack` | app: "I'm on it" (`{"contact_id": uuid}`) |
 | `GET` | `/api/pillows/{pillow_id}/night` | Morning Brief droid / family agent: last night's summary, events, agent log |
 | `GET` `POST` | `/api/pillows/{pillow_id}/brief` | family agent reads the latest Morning Brief; the droid posts it (bearer); diff goes through the Guardian |
-| `PATCH` | `/api/pillows/{pillow_id}/settings` | family agent: quiet hours / timeout, Guardian-bounded (bearer) |
-| `GET` `POST` | `/api/pillows/{pillow_id}/goodnight` | family agent queues a goodnight message; the base laptop reads it and posts `/goodnight/played` (bearer) |
+| `PATCH` | `/api/pillows/{pillow_id}/settings` | anyone in her care circle (login, or their family agent's own token): quiet hours / check-in wait, the app's bounds |
+| `GET` `POST` | `/api/pillows/{pillow_id}/goodnight` | a care-circle login or family agent queues a goodnight message; the base laptop reads it and posts `/goodnight/played` (bearer) |
+| `GET` `POST` `DELETE` | `/api/pillows/{pillow_id}/away` | the caller's own away nights (login or family agent); the coordinator's evening roster reads them through each family agent |
 | `GET` `PUT` | `/api/residents/{resident_id}/watch-hours` | app, "when it watches": `{"quiet_start": "22:00", "quiet_end": "07:00"}`, equal times watch all day. Any linked login reads, the owner writes (app login bearer) |
 | `GET` `PUT` | `/api/residents/{resident_id}/checkin-wait` | app, "before telling family": `{"checkin_timeout_min": 20}`, 10 to 30 (422 outside). Same access as above |
 
@@ -50,7 +51,8 @@ Every `POST /state` runs the pillow's agents in order; all settings come from `r
 | `guardian.py` | checks every command / line / alert: contract ranges, brightness <= 40 % at night, no medical claims, alert caps, SMS consent, config whitelist | `contacts.sms_consent`, `residents.step_wait_min` |
 | `watch_service.py` | glues them to Supabase: events, commands, incidents, notifications, `agent_log` (with the Guardian's verdict) | |
 
-`.env` keys: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `CHECKIN_TOKEN`, `ANTHROPIC_API_KEY`.
+`.env` keys: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `CHECKIN_TOKEN`, `FAMILY_AGENT_TOKENS`,
+`COORDINATOR_TOKEN`, `ANTHROPIC_API_KEY` (see `.env.example`).
 
 ## Supabase
 

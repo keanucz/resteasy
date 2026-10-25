@@ -2,7 +2,7 @@
 
 import secrets
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import Depends, Form, Header, HTTPException, Query, Request, UploadFile, status
@@ -12,10 +12,13 @@ from supabase_auth.errors import AuthError
 from app.agents.reminders import ReminderService
 from app.agents.watch_service import WatchService
 from app.core.app_constants import (
+    AGENT_CONTACT_MISMATCH,
     AGENT_CONTACT_MISSING,
     AGENT_CONTACT_NOT_LINKED,
+    AGENT_OWN_TOKEN,
     CHECKIN_TOKEN_NOT_CONFIGURED,
     FAMILY_AGENT,
+    NOT_AN_AGENT,
     NOT_LINKED,
     NOT_OWNER,
     NOT_SIGNED_IN,
@@ -114,6 +117,54 @@ ReminderServiceDep = Annotated[ReminderService, Depends(get_reminders)]
 def _is_checkin_token(authorization: str | None, expected: str) -> bool:
     """Whether `Authorization` is `Bearer <expected>`, compared in constant time."""
     return secrets.compare_digest((authorization or "").encode(), f"Bearer {expected}".encode())
+
+
+LAPTOP, COORDINATOR, FAMILY = "laptop", "coordinator", "family"
+
+
+@dataclass(frozen=True)
+class AgentToken:
+    """Whose bearer token this is: the shared agent token (`CHECKIN_TOKEN`, the base laptop and the
+    droid), the Fetch.ai coordinator's, or a family agent's, which speaks for `contact_id`."""
+
+    kind: Literal["laptop", "coordinator", "family"]
+    contact_id: str | None = None
+
+
+def agent_token(authorization: str | None) -> AgentToken | None:
+    """The agent behind `Authorization`, or None when it carries no agent token."""
+    settings = get_settings()
+    for contact_id, token in settings.family_agent_tokens.items():
+        if token and _is_checkin_token(authorization, token):
+            return AgentToken(FAMILY, str(contact_id))
+    if settings.coordinator_token and _is_checkin_token(authorization, settings.coordinator_token):
+        return AgentToken(COORDINATOR)
+    if settings.checkin_token and _is_checkin_token(authorization, settings.checkin_token):
+        return AgentToken(LAPTOP)
+    return None
+
+
+def _require_agent(authorization: str | None, kinds: set[str]) -> None:
+    """503 when no agent token is configured, 401 without a valid one, 403 for an agent of another kind."""
+    settings = get_settings()
+    if not (settings.checkin_token or settings.coordinator_token or settings.family_agent_tokens):
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=CHECKIN_TOKEN_NOT_CONFIGURED)
+    token = agent_token(authorization)
+    if token is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=NOT_AN_AGENT,
+                            headers={"WWW-Authenticate": "Bearer"})
+    if token.kind not in kinds:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=NOT_AN_AGENT)
+
+
+def require_coordinator(authorization: Annotated[str | None, Header()] = None) -> None:
+    """The watch roster's writes: the coordinator, or the shared agent token until it has its own."""
+    _require_agent(authorization, {COORDINATOR} if get_settings().coordinator_token else {LAPTOP})
+
+
+def require_roster_reader(authorization: Annotated[str | None, Header()] = None) -> None:
+    """Reading the watch roster (names, on call, quiet hours): any of the pillow's agents."""
+    _require_agent(authorization, {LAPTOP, COORDINATOR, FAMILY})
 
 
 def require_checkin_token(authorization: Annotated[str | None, Header()] = None) -> None:
@@ -259,10 +310,18 @@ async def care_caller(
         UUID | None, Query(description="With the agent token: the contact it acts for")
     ] = None,
 ) -> Caller:
-    """The family agent (the agent token) for the `contact_id` it names, 422 without one; anyone
-    else is the app's login, 401 without a valid one. A login's `contact_id` is ignored."""
-    expected = get_settings().checkin_token
-    if expected and _is_checkin_token(authorization, expected):
+    """A family agent with its own token, for its own contact (403 if `contact_id` names another);
+    until the family agents have their own tokens, the shared agent token for the `contact_id` it
+    names (422 without one). Anyone else is the app's login, 401 without a valid one. A login's
+    `contact_id` is ignored."""
+    token = agent_token(authorization)
+    if token is not None and token.kind == FAMILY:
+        if contact_id is not None and str(contact_id) != token.contact_id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail=AGENT_CONTACT_MISMATCH)
+        return Caller(contact_id=token.contact_id)
+    if token is not None and token.kind == LAPTOP:
+        if get_settings().family_agent_tokens:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, detail=AGENT_OWN_TOKEN)
         if contact_id is None:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=AGENT_CONTACT_MISSING)
         return Caller(contact_id=str(contact_id))

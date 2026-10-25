@@ -42,7 +42,7 @@ services:
     profiles: [fetch]
     build: ../agents/fetch
     command: ["python", "/app/coordinator_agent.py"]
-    env_file: /opt/pillow/fetch-coordinator.env  # AGENT_SEED, CHECKIN_TOKEN, AGENTVERSE_API_KEY
+    env_file: /opt/pillow/fetch-coordinator.env  # AGENT_SEED, AGENT_TOKEN, AGENTVERSE_API_KEY
     environment:
       PILLOW_SERVER: http://backend:8000
     volumes:
@@ -55,7 +55,7 @@ services:
     profiles: [fetch]
     build: ../agents/fetch
     command: ["python", "/app/family_agent.py"]
-    env_file: /opt/pillow/fetch-family-1.env  # + CONTACT_ID, CONTACT_NAME, COORDINATOR_ADDRESS, ANTHROPIC_API_KEY
+    env_file: /opt/pillow/fetch-family-1.env  # + its own AGENT_TOKEN, CONTACT_ID, CONTACT_NAME, COORDINATOR_ADDRESS, ANTHROPIC_API_KEY
     environment:
       PILLOW_SERVER: http://backend:8000
     volumes:

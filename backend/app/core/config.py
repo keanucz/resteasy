@@ -1,6 +1,7 @@
 """Typed application settings loaded from environment variables and `.env`."""
 
 from functools import lru_cache
+from uuid import UUID
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -25,6 +26,11 @@ class Settings(BaseSettings):
     supabase_secret_key: str = ""
     # Shared secret the base laptop sends as `Authorization: Bearer ...` with POST /checkin
     checkin_token: str = ""
+    # Each Fetch.ai family agent's own bearer token, as JSON {"<contacts.id>": "<token>"}: the token
+    # is who the agent speaks for. Empty = the agents still use CHECKIN_TOKEN with ?contact_id=.
+    family_agent_tokens: dict[UUID, str] = {}
+    # The Fetch.ai coordinator's bearer token, for the watch roster. Empty = CHECKIN_TOKEN still works.
+    coordinator_token: str = ""
     # Claude, for the Family Liaison's wording (app/agents/liaison.py); empty = fixed messages only
     anthropic_api_key: str = ""
     # Cartesia, for the app's voice previews and clones (app/voice); empty = those routes answer 503

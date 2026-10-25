@@ -1,9 +1,12 @@
 """Schemas for what the family-facing agents read and write: the night, the Morning Brief,
-goodnight messages and settings changes."""
+goodnight messages, settings changes and the nights a family member is away."""
 
-from typing import Any
+from datetime import date
+from typing import Any, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from app.schemas.account import CheckinTimeout, ClockTime
 
 
 class NightReport(BaseModel):
@@ -49,18 +52,35 @@ class Brief(BaseModel):
 
 
 class SettingsPatch(BaseModel):
-    """Settings the family agent may change; the Guardian whitelists and bounds them."""
+    """When it watches and the check-in wait, with the same types and bounds as the app's settings
+    (the Guardian's); null or left out = unchanged."""
 
-    checkin_timeout_min: int | None = None
-    quiet_start: str | None = None
-    quiet_end: str | None = None
-    path_light_pct: int | None = None
+    checkin_timeout_min: CheckinTimeout | None = None
+    quiet_start: ClockTime | None = None
+    quiet_end: ClockTime | None = None
 
 
 class SettingsResult(BaseModel):
     applied: dict[str, Any]
-    guardian: str
-    reason: str | None = None
+
+
+class AwayCreate(BaseModel):
+    """Nights a family member can't be called first: `from_date` (first night) to `until_date`
+    (last night), inclusive."""
+
+    from_date: date
+    until_date: date
+    note: str = Field("away", min_length=1, max_length=80, examples=["in Denver"])
+
+    @model_validator(mode="after")
+    def ordered(self) -> Self:
+        if self.until_date < self.from_date:
+            raise ValueError("until_date must be on or after from_date")
+        return self
+
+
+class Away(AwayCreate):
+    id: int
 
 
 class RosterContact(BaseModel):

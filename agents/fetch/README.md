@@ -40,7 +40,8 @@ step.
 
 At 21:00 in her timezone (or when you ask the coordinator "plan tonight"), the coordinator asks every
 family member's agent **at the same time**: "can your person be called first tonight?" Each agent
-answers from what its person told it (the away dates in its memory). The coordinator then puts the
+answers from what its person told it (their away nights, saved in the pillow's backend, so the
+family app can show them too). The coordinator then puts the
 available people on call and the away ones off call, and reports who is first tonight.
 
     coordinator --AvailabilityRequest--> Sarah's agent, Tom's agent   (in parallel, 30 s to answer)
@@ -62,13 +63,13 @@ it speaks for; the coordinator accepts it only for people who really look after 
 Locally, each agent in its own terminal:
 
 ```bash
-export CHECKIN_TOKEN=...            # backend/.env: the agents' token for the pillow API
 export PILLOW_ID=mum                # default
-AGENT_SEED='coordinator private phrase' uv run agents/fetch/coordinator_agent.py
+# AGENT_TOKEN: each agent's own token for the pillow API (backend COORDINATOR_TOKEN / FAMILY_AGENT_TOKENS)
+AGENT_SEED='coordinator private phrase' AGENT_TOKEN=... uv run agents/fetch/coordinator_agent.py
 # prints: coordinator for mum: agent1q...
 
 export ANTHROPIC_API_KEY=sk-ant-...
-AGENT_SEED='sarah private phrase' CONTACT_ID=<contacts.id> CONTACT_NAME=Sarah \
+AGENT_SEED='sarah private phrase' AGENT_TOKEN=... CONTACT_ID=<contacts.id> CONTACT_NAME=Sarah \
   COORDINATOR_ADDRESS=agent1q... uv run agents/fetch/family_agent.py
 ```
 
@@ -83,7 +84,7 @@ on by `COMPOSE_PROFILES=fetch` in `deploy/.env`. Each reads its env file from `/
 | Variable | Agent | What |
 |---|---|---|
 | `AGENT_SEED` | all | private phrase = the agent's identity; never change it, never commit it |
-| `CHECKIN_TOKEN` | all | the pillow API's agent token (same as `backend.env`) |
+| `AGENT_TOKEN` | all | this agent's own token for the pillow API: the coordinator's is `COORDINATOR_TOKEN`, a family agent's is its entry in `FAMILY_AGENT_TOKENS` (both in `backend.env`), which also says who it speaks for. Until those are set, `CHECKIN_TOKEN` still works |
 | `AGENTVERSE_API_KEY` | all | connects the mailbox without the Inspector |
 | `PILLOW_ID` | all | default `mum` |
 | `ROSTER_AT` | coordinator | default `21:00`, her time |

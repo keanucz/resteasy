@@ -18,7 +18,7 @@ Safe by construction: Night Watch only reads `on_call` to choose who it tries FI
 every contact in the end, so a wrong, late or missing roster can reorder help but never withhold it.
 If this agent is down, last night's roster simply stays. Plain code throughout, no LLM.
 
-    export AGENT_SEED='<private phrase>'  CHECKIN_TOKEN=<backend/.env>  PILLOW_ID=mum
+    export AGENT_SEED='<private phrase>'  AGENT_TOKEN=<the backend's COORDINATOR_TOKEN>  PILLOW_ID=mum
     uv run agents/fetch/coordinator_agent.py
 """
 
@@ -49,7 +49,8 @@ from models import AvailabilityReply, AvailabilityRequest, JoinRoster, roster_pr
 
 SERVER = os.environ.get("PILLOW_SERVER", "https://pillow.keanuc.net").rstrip("/")
 PILLOW_ID = os.environ.get("PILLOW_ID", "mum")
-TOKEN = os.environ.get("CHECKIN_TOKEN", "").strip()
+# The backend's COORDINATOR_TOKEN; CHECKIN_TOKEN until the backend has one
+TOKEN = (os.environ.get("AGENT_TOKEN") or os.environ.get("CHECKIN_TOKEN", "")).strip()
 ROSTER_AT = os.environ.get("ROSTER_AT", "21:00")  # HH:MM in her timezone
 ROSTER_TIMEOUT_S = int(os.environ.get("ROSTER_TIMEOUT_S", "30"))
 HERE = Path(__file__).resolve().parent
@@ -221,6 +222,6 @@ agent.include(roster, publish_manifest=True)
 
 if __name__ == "__main__":
     if not TOKEN:
-        sys.exit("CHECKIN_TOKEN is not set: the coordinator can't read or set the roster")
+        sys.exit("AGENT_TOKEN (or CHECKIN_TOKEN) is not set: the coordinator can't read or set the roster")
     print(f"coordinator for {PILLOW_ID}: {agent.address}")
     agent.run()

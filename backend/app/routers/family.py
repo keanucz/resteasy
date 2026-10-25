@@ -1,20 +1,39 @@
-"""Family router: what the Morning Brief droid and the Fetch.ai family agent read and write.
+"""Family router: what the Morning Brief droid and the Fetch.ai agents read and write.
 
-Reads are open like the rest of the app API. Writes that change settings or claim to be the
-droid carry the shared agent token (`CHECKIN_TOKEN`), and every change goes through the Guardian
-and into `agent_log`, so the family app shows it live.
+Reads of the night are open like the rest of the app API. A family member's own writes (settings,
+a goodnight, the nights they're away) take the app's login of anyone in her care circle, or that
+person's family agent with its own token (`FAMILY_AGENT_TOKENS`), the same way as reminders. The
+droid's brief carries the shared agent token (`CHECKIN_TOKEN`); the watch roster takes the
+coordinator's (`COORDINATOR_TOKEN`). Every change lands in `agent_log`, so the family app shows it
+live.
 """
 
 import time as clock
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from app.agents.baseline import build_baseline, history_start
 from app.agents.guardian import Guardian
 from app.agents.night_summary import last_night_window, pending_goodnight, summarize_night
-from app.core.app_constants import FAMILY_AGENT
-from app.core.dependencies import PillowDep, SupabaseDep, require_checkin_token, resident_of
+from app.core.app_constants import (
+    AWAY_TOOL,
+    FAMILY_APP_AGENT,
+    GOODNIGHT_TOOL,
+    SETTINGS_CHANGE_INTENT,
+    SETTINGS_TOOL,
+)
+from app.core.dependencies import (
+    CareActor,
+    CareActorDep,
+    PillowDep,
+    SupabaseDep,
+    require_checkin_token,
+    require_coordinator,
+    require_roster_reader,
+    resident_of,
+)
 from app.crud.night_log import (
     add_event,
     latest_log_row,
@@ -24,8 +43,17 @@ from app.crud.night_log import (
     list_trips_between,
     log_action,
 )
-from app.crud.residents import list_contacts_in_order, set_contact_on_call, update_resident
+from app.crud.residents import (
+    add_away,
+    clear_away,
+    list_away,
+    list_contacts_in_order,
+    set_contact_on_call,
+    update_resident,
+)
 from app.schemas.family import (
+    Away,
+    AwayCreate,
     Brief,
     BriefCreate,
     Goodnight,
@@ -89,30 +117,40 @@ async def write_brief(pillow: PillowDep, brief: BriefCreate, db: SupabaseDep) ->
                  applied=allowed, guardian=verdict.label, reason=verdict.reason or None)
 
 
-@router.patch("/settings", dependencies=[Depends(require_checkin_token)])
-async def patch_settings(pillow: PillowDep, patch: SettingsPatch, db: SupabaseDep) -> SettingsResult:
-    """The family agent changes quiet hours or the timeout; the Guardian bounds it."""
-    resident = await resident_of(db, pillow)
-    diff = patch.model_dump(exclude_none=True)
-    verdict = _guardian.check_config(diff)
-    allowed = diff if verdict.allowed else (verdict.replacement or {})
-    await update_resident(db, resident["id"], {k: v for k, v in allowed.items() if k in SETTINGS_KEYS})
-    await log_action(db, pillow.id, FAMILY_AGENT, intent="settings change", tool="settings",
-                     args={"proposed": diff, "applied": allowed}, guardian=verdict.label,
-                     reason=verdict.reason or None)
-    return SettingsResult(applied=allowed, guardian=verdict.label, reason=verdict.reason or None)
+async def _log_for(
+    db: SupabaseDep, pillow_id: str, actor: CareActor, intent: str, tool: str, args: dict
+) -> None:
+    """Note in agent_log what a family member did, through their agent or the app, and who."""
+    who = f" for {actor.contact_name}" if actor.contact_name else ""
+    await log_action(db, pillow_id, actor.agent or FAMILY_APP_AGENT, intent=intent + who, tool=tool,
+                     args={"contact_id": actor.contact_id, **args}, guardian="allowed")
+
+
+@router.patch("/settings")
+async def patch_settings(
+    pillow_id: str, patch: SettingsPatch, actor: CareActorDep, db: SupabaseDep
+) -> SettingsResult:
+    """Anyone in her care circle (their login, or their family agent) changes when the pillow
+    watches or the check-in wait, within the app's bounds (422 outside them)."""
+    fields = patch.model_dump(mode="json", exclude_none=True)
+    if fields:
+        await update_resident(db, actor.resident["id"], fields)
+        await _log_for(db, pillow_id, actor, SETTINGS_CHANGE_INTENT, SETTINGS_TOOL, {"applied": fields})
+    return SettingsResult(applied=fields)
 
 
 @router.post("/goodnight", status_code=status.HTTP_201_CREATED)
-async def queue_goodnight(pillow: PillowDep, msg: GoodnightCreate, db: SupabaseDep) -> Goodnight:
-    """Queue a goodnight message from family; the pillow plays it when she next lies down."""
+async def queue_goodnight(
+    pillow_id: str, msg: GoodnightCreate, actor: CareActorDep, db: SupabaseDep
+) -> Goodnight:
+    """Queue a goodnight message from someone in her care circle; the pillow plays it when she next
+    lies down. The words pass the Guardian's text check (422 otherwise)."""
     verdict = _guardian.check_text(msg.message)
     if not verdict.allowed:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=verdict.reason)
     data = {"message": msg.message, "from_name": msg.from_name}
-    await add_event(db, pillow.id, "goodnight_queued", clock.time(), data)
-    await log_action(db, pillow.id, FAMILY_AGENT, intent=f"goodnight from {msg.from_name}", tool="goodnight",
-                     args=data, guardian="allowed")
+    await add_event(db, pillow_id, "goodnight_queued", clock.time(), data)
+    await _log_for(db, pillow_id, actor, f"goodnight from {msg.from_name}", GOODNIGHT_TOOL, data)
     return Goodnight(**data)
 
 
@@ -135,7 +173,7 @@ async def goodnight_played(pillow: PillowDep, db: SupabaseDep) -> Goodnight | No
     return Goodnight(**pending)
 
 
-@router.get("/roster", dependencies=[Depends(require_checkin_token)])
+@router.get("/roster", dependencies=[Depends(require_roster_reader)])
 async def read_roster(pillow: PillowDep, db: SupabaseDep) -> Roster:
     """The resident's contacts in alert order, for the Fetch.ai coordinator's evening roster."""
     resident = await resident_of(db, pillow)
@@ -148,7 +186,7 @@ async def read_roster(pillow: PillowDep, db: SupabaseDep) -> Roster:
     )
 
 
-@router.put("/roster/{contact_id}", dependencies=[Depends(require_checkin_token)])
+@router.put("/roster/{contact_id}", dependencies=[Depends(require_coordinator)])
 async def set_on_call(
     pillow: PillowDep, contact_id: str, update: OnCallUpdate, db: SupabaseDep
 ) -> OnCallResult:
@@ -170,3 +208,30 @@ async def set_on_call(
     stored = update.on_call if verdict.allowed else contact.get("on_call", True)
     return OnCallResult(contact_id=contact_id, on_call=stored, guardian=verdict.label,
                         reason=verdict.reason or None)
+
+
+def _today(actor: CareActor) -> str:
+    return datetime.now(ZoneInfo(actor.resident["timezone"])).date().isoformat()
+
+
+@router.get("/away")
+async def read_away(actor: CareActorDep, db: SupabaseDep) -> list[Away]:
+    """The caller's own away nights from tonight on (her timezone), soonest first."""
+    return [Away(**row) for row in await list_away(db, actor.contact_id, _today(actor))]
+
+
+@router.post("/away", status_code=status.HTTP_201_CREATED)
+async def create_away(pillow_id: str, away: AwayCreate, actor: CareActorDep, db: SupabaseDep) -> Away:
+    """Nights the caller can't be called first; on those nights the coordinator puts them off call."""
+    row = await add_away(db, actor.contact_id, away.model_dump(mode="json"))
+    when = f"{away.from_date.isoformat()} to {away.until_date.isoformat()}"
+    await _log_for(db, pillow_id, actor, f"away {when} ({away.note})", AWAY_TOOL, row)
+    return Away(**row)
+
+
+@router.delete("/away", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_away(pillow_id: str, actor: CareActorDep, db: SupabaseDep) -> Response:
+    """Forget all of the caller's away nights."""
+    await clear_away(db, actor.contact_id)
+    await _log_for(db, pillow_id, actor, "cleared away dates", AWAY_TOOL, {})
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
