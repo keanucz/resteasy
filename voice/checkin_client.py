@@ -16,7 +16,8 @@ and mic) can. It polls GET /api/pillows/{id}/state about once a second and react
 
 With --keys pad (the 3-key macro pad, voice/keypad.py) or --keys stdin (t / f / c lines):
     talk    hold 2 s, let go, then she speaks: set or hear her reminders (voice/talk.py), or
-            "I can't sleep": ten minutes of quiet music (voice/settle.py)
+            "I can't sleep": ten (or twenty) minutes of quiet music, rain, or a track she names
+            (voice/settle.py); her head off the plate for 10 s also stops it
     fine    POST /keys "fine" at once: stops a check-in or an alert (and the music)
     family  POST /keys "family" at once: starts the alert ladder
 The pillow never needs a key to hear her: whenever it asks something, it listens straight away.
@@ -156,6 +157,7 @@ def main() -> None:
     stop_checkin = threading.Event()
     talk_session = None
     music = None  # settle.Player: the lowest priority sound; any key, check-in or reminder stops it
+    head_off = None  # settle.HeadOff: so does her head off the plate for 10 s (she got up)
 
     def post_key(key: str) -> None:
         """POST /keys now, from the keypad thread: "I'm fine" must not wait behind speech."""
@@ -175,6 +177,7 @@ def main() -> None:
         if args.text:
             sys.exit("--keys needs real audio: rehearse talking with voice/talk.py --text instead")
         music = settle.Player(voice.play, log=lambda m: print(f"          {m}", flush=True))
+        head_off = settle.HeadOff()
 
         def on_key(event: str) -> None:
             if event in (keypad.FINE, keypad.FAMILY, keypad.TALK_ARM):
@@ -234,11 +237,15 @@ def main() -> None:
             try:
                 r = http.get(f"{base}/state")
                 r.raise_for_status()
-                state = r.json()["night_state"]
+                body = r.json()
+                state = body["night_state"]
             except (httpx.HTTPError, KeyError, ValueError) as err:
                 print(f"[client] state poll failed: {err}", file=sys.stderr, flush=True)
                 time.sleep(POLL_S * 3)
                 continue
+            if head_off is not None and head_off.observe(body.get("head_on"), time.monotonic()) and music.playing:
+                music.stop()
+                print(f"{time.strftime('%H:%M:%S')}  music    stopped: she got up", flush=True)
             for action in watcher.on_state(state):
                 stamp = time.strftime("%H:%M:%S")
                 if action[0] == "say":

@@ -71,6 +71,8 @@ class Request:
     kind: str = "custom"
     start: str = ""
     end: str = ""
+    sound: str = ""  # settle: what she wants to hear, if she named it ("rain", "flute", "zen")
+    minutes: int = 0  # settle: 20 if she asked for twenty minutes
 
 
 INTENT_SYSTEM = """\
@@ -91,7 +93,8 @@ round, as a one-off. kind: "meds" for medicine, "call" for calling someone, else
 one day; "tomorrow" = tomorrow; "today"; "this week" = today to 6 days on; nothing said = today and \
 tomorrow).
 - "settle": she can't sleep or wants to calm down and asks for music, something quiet or soothing, \
-or just some company for a while. No other fields.
+or just some company for a while. sound = one lower-case word for what she wants to hear if she named \
+it ("rain", "flute", "zen", "music"), else "". minutes = 20 if she asked for twenty minutes, else 0.
 - "unclear": anything else, or you can't tell.
 Unused fields: "" or []."""
 
@@ -106,8 +109,10 @@ INTENT_SCHEMA = {
         "kind": {"type": "string", "enum": ["meds", "call", "custom"]},
         "start": {"type": "string"},
         "end": {"type": "string"},
+        "sound": {"type": "string"},
+        "minutes": {"type": "integer"},
     },
-    "required": ["intent", "label", "time_of_day", "on_date", "days", "kind", "start", "end"],
+    "required": ["intent", "label", "time_of_day", "on_date", "days", "kind", "start", "end", "sound", "minutes"],
     "additionalProperties": False,
 }
 
@@ -126,7 +131,8 @@ def claude_intent(text: str, now: datetime) -> Request:
         return Request("unclear")
     return Request(intent=data["intent"], label=data["label"].strip(), time_of_day=data["time_of_day"],
                    on_date=data["on_date"], days=tuple(sorted({d for d in data["days"] if 1 <= d <= 7})),
-                   kind=data["kind"], start=data["start"], end=data["end"])
+                   kind=data["kind"], start=data["start"], end=data["end"],
+                   sound=str(data.get("sound", "")).strip().lower(), minutes=int(data.get("minutes") or 0))
 
 
 def valid(r: Request) -> bool:
@@ -301,7 +307,7 @@ class Voice:
     pillow: Any  # Pillow, or a fake
     on_distress: Callable[[str], None]  # start the alert ladder
     log: Callable[[str], None] = print
-    settle: Callable[[], None] | None = None  # start the quiet music (settle.Player.start); None = no speaker path
+    settle: Callable[[str, int], Any] | None = None  # (sound, minutes) -> settle.Plan; None = no speaker path
 
 
 class TalkSession:
@@ -348,7 +354,7 @@ class TalkSession:
         elif request.intent == "list_reminders":
             self._list(request, now.date())
         elif request.intent == "settle":
-            self._settle()
+            self._settle(request)
         else:
             self._set(request, text, now)
 
@@ -394,12 +400,13 @@ class TalkSession:
                 break
         self.v.say(GAVE_UP)
 
-    def _settle(self) -> None:
+    def _settle(self, request: Request) -> None:
         if self.v.settle is None:
             self.v.say(settle.NO_MUSIC)
             return
-        self.v.say(settle.SETTLE_LINE)
-        self.v.settle()
+        plan = self.v.settle(request.sound, request.minutes)
+        self.v.say(plan.line)
+        plan.start()  # after the line: one speaker owner at a time
 
     def _save(self, r: Request) -> None:
         try:
@@ -442,7 +449,7 @@ def live_voice(pillow: Any, on_distress: Callable[[str], None], *, keywords: boo
     return Voice(
         say=say, beep=lambda: voice.play(beep), got_it=lambda: voice.play(got_it), listen=voice.listen,
         intent=claude_intent, confirm=judge.keyword_confirm_judge if keywords else judge.quick_confirm_judge,
-        pillow=pillow, on_distress=on_distress, settle=player.start if player is not None else None)
+        pillow=pillow, on_distress=on_distress, settle=(lambda sound, minutes: settle.plan(player, sound, minutes)) if player is not None else None)
 
 
 def main() -> None:
