@@ -7,10 +7,7 @@
 Night Watch runs on the server and can't talk; this laptop (next to the pillow, with the speaker
 and mic) can. It polls GET /api/pillows/{id}/state about once a second and reacts to `night_state`:
 
-    in_bed      -> play a queued goodnight message from family, if there is one (GET /goodnight)
-    up          -> "The light's on. Take your time."
     check_in    -> run voice/checkin.py, then POST /api/pillows/{id}/checkin with the result
-    in_bed      -> "You're back in bed. Goodnight." (only after an alert)
     awake       -> every 10 s, say any due reminder (GET /reminders/due, voice/reminder.py), then
                    POST /reminders/{occurrence_id}/result
 
@@ -51,42 +48,27 @@ from zoneinfo import ZoneInfo
 
 DEFAULT_SERVER = "https://pillow.keanuc.net"
 POLL_S = 1.0
-PATH_LIGHT_LINE = "The light's on. Take your time."
-GOODNIGHT_LINE = "You're back in bed. Goodnight."
-ALERTED = {"check_in", "escalating"}
 REMINDER_CHECK_S = 10.0  # the server only marks reminders due while she's awake
 VOICE_CHECK_S = 30.0  # how soon a voice picked or cloned in the app reaches the pillow
 ALERT_ASKS_MAX = 6  # while escalating, "just say I'm fine" every 30 s, for at most 3 minutes
 
-Action = tuple  # ("say", text) | ("checkin",) | ("goodnight",)
+Action = tuple  # ("checkin",)
 
 
 class Watcher:
-    """Turns the stream of night states into the laptop's actions. Pure; no I/O."""
+    """Turns the stream of night states into the laptop's actions. Pure; no I/O.
+
+    The pillow stays quiet through the night: no word when she gets up, lies down, is restless or
+    falls asleep. It only speaks when it has to ask whether she's okay (a check-in, an alert) and to
+    answer her "I'm fine"; reminders and what she asks with the talk key are hers to start."""
 
     def __init__(self) -> None:
         self.state: str | None = None
-        self._alerted = False  # an alert was in flight since she got up
 
     def on_state(self, state: str) -> list[Action]:
         prev, self.state = self.state, state
-        if state == prev:
-            return []
-        if state in ALERTED:
-            self._alerted = True
-        if state == "check_in":
+        if state == "check_in" and state != prev:
             return [("checkin",)]
-        if prev is None:
-            return []  # just started: don't narrate a state we didn't see begin
-        if state == "up" and prev == "in_bed":
-            return [("say", PATH_LIGHT_LINE)]
-        if state == "in_bed" and self._alerted:
-            self._alerted = False
-            return [("say", GOODNIGHT_LINE)]
-        if state == "in_bed":
-            return [("goodnight",)]  # she's lying down for the night: any message from family?
-        if state == "awake":
-            self._alerted = False
         return []
 
 
@@ -278,24 +260,7 @@ def main() -> None:
                 print(f"{time.strftime('%H:%M:%S')}  music    stopped: she got up", flush=True)
             for action in watcher.on_state(state):
                 stamp = time.strftime("%H:%M:%S")
-                if action[0] == "say":
-                    print(f"{stamp}  say      {action[1]!r}", flush=True)
-                    speak(action[1])
-                elif action[0] == "goodnight":
-                    try:
-                        pending = http.get(f"{base}/goodnight").json()
-                    except (httpx.HTTPError, ValueError) as err:
-                        print(f"[client] goodnight check failed: {err}", file=sys.stderr, flush=True)
-                        pending = None
-                    if pending:
-                        line = f"A goodnight message from {pending['from_name']}: {pending['message']}"
-                        print(f"{stamp}  say      {line!r}", flush=True)
-                        speak(line)
-                        try:
-                            http.post(f"{base}/goodnight/played", headers=auth)
-                        except httpx.HTTPError as err:
-                            print(f"[client] could not mark it played: {err}", file=sys.stderr, flush=True)
-                else:
+                if action[0] == "checkin":
                     print(f"{stamp}  check-in starting", flush=True)
                     if music is not None:
                         music.stop()  # the check-in owns the speaker and the mic now

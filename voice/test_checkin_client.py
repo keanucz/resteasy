@@ -9,12 +9,6 @@ def test_first_state_is_only_remembered():
     assert w.on_state("in_bed") == []
 
 
-def test_getting_up_at_night_speaks_the_path_light_line():
-    w = Watcher()
-    w.on_state("in_bed")
-    assert w.on_state("up") == [("say", "The light's on. Take your time.")]
-
-
 def test_check_in_runs_once_per_entry():
     w = Watcher()
     w.on_state("up")
@@ -29,16 +23,8 @@ def test_starting_mid_check_in_runs_it():
     assert Watcher().on_state("check_in") == [("checkin",)]
 
 
-def test_back_in_bed_after_an_escalation_says_goodnight():
+def test_the_pillow_says_nothing_for_ordinary_moves_through_the_night():
+    """Getting up, lying down, back in bed after an alert, restless, asleep, awake: no words."""
     w = Watcher()
-    w.on_state("escalating")
-    assert w.on_state("in_bed") == [("say", "You're back in bed. Goodnight.")]
-    w.on_state("awake")
-    assert w.on_state("in_bed") == [("goodnight",)]  # an ordinary lie-down only checks for a message
-
-
-def test_lying_down_asks_for_a_goodnight_message():
-    w = Watcher()
-    w.on_state("awake")
-    assert w.on_state("in_bed") == [("goodnight",)]
-    assert w.on_state("in_bed") == []
+    for state in ("awake", "in_bed", "restless", "asleep", "up", "in_bed", "escalating", "in_bed", "awake"):
+        assert w.on_state(state) == []
