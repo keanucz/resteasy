@@ -1,4 +1,5 @@
-# Backend CI: lint and test every PR; deploy master to the VPS (deploy/README.md).
+# Backend CI: lint and test every PR and every push to master. The VPS deploy was removed after
+# Cal Hacks 13.0 (2026-10-25), when the pillow stack was taken off the server.
 name: backend
 
 on:
@@ -7,7 +8,7 @@ on:
   push:
     branches: [master]
     paths: ["backend/**", "deploy/**", "agents/fetch/**", ".github/workflows/backend.yml"]
-  workflow_dispatch:  # redeploy master by hand from the Actions tab
+  workflow_dispatch:
 
 jobs:
   test:
@@ -24,24 +25,3 @@ jobs:
       - run: uv run ruff check .
       - run: uv run pytest -q
 
-  deploy:
-    needs: test
-    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    concurrency:
-      group: deploy-vps
-      cancel-in-progress: false
-    steps:
-      - name: Deploy ${{ github.sha }}
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          # The key's authorized_keys entry forces deploy/deploy.sh; the command is only the sha
-          ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes "deploy@$DEPLOY_HOST" "$GITHUB_SHA"
-      - name: Public health check
-        run: curl -fsS --retry 5 --retry-delay 3 --retry-all-errors https://pillow.keanuc.net/api/health
