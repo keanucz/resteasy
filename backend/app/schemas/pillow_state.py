@@ -1,8 +1,12 @@
 """Schemas for the device state the pillow pushes and the latest state the app reads."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
+
+# How the bridge reaches the bedside voice unit right now
+Link = Literal["ble", "hotspot", "usb"]
 
 
 class Keys(BaseModel):
@@ -29,6 +33,8 @@ class DeviceState(BaseModel):
     humidity: float | None = Field(default=None, ge=0, le=100)
     keys: Keys = Keys()
     knob: int | None = Field(default=None, ge=0, le=10)
+    sound_db: float | None = Field(default=None, ge=-120, le=0)
+    link: Link | None = None
 
 
 class PillowState(BaseModel):
@@ -46,6 +52,9 @@ class PillowState(BaseModel):
     key_fine: bool | None
     key_family: bool | None
     knob: int | None
+    # Absent until the live_readings migration is applied
+    sound_db: float | None = None
+    link: Link | None = None
     night_state: str
     state_since: datetime
     last_seen_at: datetime

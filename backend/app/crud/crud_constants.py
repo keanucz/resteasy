@@ -36,6 +36,12 @@ OCCURRENCE_COLUMNS = (
 # Conflict target for the one-row-per-pillow upsert into pillow_state
 PILLOW_STATE_KEY = "pillow_id"
 
+# One row per pillow per minute of sensor history, for the app's night charts
+READINGS_TABLE = "readings"
+READINGS_KEY = "pillow_id,ts"
+# Columns the live_readings migration adds to pillow_state; a write retries without them until it's applied
+LIVE_READING_COLUMNS = ("sound_db", "link")
+
 # Columns the device receives for each queued command (the CONTRACT.md command shape)
 COMMAND_COLUMNS = "id, cmd, args"
 

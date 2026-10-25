@@ -24,6 +24,7 @@ from app.core.app_constants import (
 from app.core.config import get_settings
 from app.notify.sender import NotificationSender
 from app.routers import api_router
+from app.sensors.readings_recorder import ReadingsRecorder
 from app.voice.cartesia import Cartesia, VoiceServiceError
 
 log = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.night_watch = WatchService(Liaison.from_api_key(settings.anthropic_api_key))
     app.state.reminders = ReminderService(app.state.night_watch)
+    app.state.readings = ReadingsRecorder()
     app.state.notifier = NotificationSender.from_settings(settings)
     app.state.cartesia = Cartesia.from_settings(settings)
     tickers = (

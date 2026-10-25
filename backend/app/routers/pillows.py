@@ -1,12 +1,24 @@
 """Pillow router: the device pushes its state here and the app reads it back."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import logging
 
-from app.core.dependencies import NightWatchDep, PillowDep, SupabaseDep, require_checkin_token
+from fastapi import APIRouter, Depends, HTTPException, status
+from postgrest.exceptions import APIError
+
+from app.core.dependencies import (
+    NightWatchDep,
+    PillowDep,
+    ReadingsRecorderDep,
+    SupabaseDep,
+    require_checkin_token,
+)
 from app.crud.pillow_state import get_state, save_state
+from app.crud.readings import upsert_reading
 from app.schemas.checkin import Acknowledgement, CheckinResult, NightStatus
 from app.schemas.pillow import Pillow
 from app.schemas.pillow_state import DeviceState, PillowState
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/pillows/{pillow_id}", tags=["pillows"])
 
@@ -19,11 +31,23 @@ async def read_pillow(pillow: PillowDep) -> Pillow:
 
 @router.post("/state")
 async def report_state(
-    pillow: PillowDep, state: DeviceState, db: SupabaseDep, night_watch: NightWatchDep
+    pillow: PillowDep,
+    state: DeviceState,
+    db: SupabaseDep,
+    night_watch: NightWatchDep,
+    readings: ReadingsRecorderDep,
 ) -> PillowState:
-    """Store the device's latest sensor report (CONTRACT.md section 1) and let Night Watch act on it."""
+    """Store the device's latest sensor report (CONTRACT.md section 1) and let Night Watch act on it.
+
+    It also goes into the per-minute history the app's night charts draw; a failed history write
+    is logged and never fails the report."""
     stored = await save_state(db, pillow.id, state)
     await night_watch.report_state(db, pillow, state)
+    for row in readings.observe(pillow.id, state):
+        try:
+            await upsert_reading(db, row)
+        except APIError:
+            log.exception("Could not write the reading for pillow %s at %s", pillow.id, row["ts"])
     return stored
 
 

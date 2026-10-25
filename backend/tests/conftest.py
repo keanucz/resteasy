@@ -12,7 +12,13 @@ from supabase_auth.errors import AuthApiError
 
 from app.core.config import get_settings
 from app.core.dependencies import get_supabase
-from app.crud.crud_constants import COMMANDS_TABLE, CONTACTS_TABLE, RESIDENT_CONTACTS_TABLE, RESIDENTS_TABLE
+from app.crud.crud_constants import (
+    COMMANDS_TABLE,
+    CONTACTS_TABLE,
+    READINGS_TABLE,
+    RESIDENT_CONTACTS_TABLE,
+    RESIDENTS_TABLE,
+)
 from app.main import app
 from tests.seed_constants import TEST_HELPER_PRIORITY, TEST_PILLOW_ID, TEST_RESIDENT_ID, TEST_USER_ID
 
@@ -39,9 +45,11 @@ def db() -> Client:
 
 @pytest.fixture
 def live_client(db: Client, client: TestClient) -> Iterator[TestClient]:
-    """Yield a test client backed by the live Supabase project, clearing the test pillow's queue after."""
+    """Yield a test client backed by the live Supabase project, clearing the test pillow's queue and
+    sensor history after."""
     yield client
-    db.table(COMMANDS_TABLE).delete().eq("pillow_id", TEST_PILLOW_ID).execute()
+    for table in (COMMANDS_TABLE, READINGS_TABLE):
+        db.table(table).delete().eq("pillow_id", TEST_PILLOW_ID).execute()
 
 
 class _RejectingAuth:

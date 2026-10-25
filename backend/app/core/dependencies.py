@@ -46,6 +46,7 @@ from app.crud.residents import get_resident
 from app.schemas.pillow import Pillow
 from app.schemas.resident_photo import PhotoUpload
 from app.schemas.voice import CloneUpload
+from app.sensors.readings_recorder import ReadingsRecorder
 from app.voice.cartesia import Cartesia
 
 
@@ -92,6 +93,14 @@ def get_night_watch(request: Request) -> WatchService:
 
 
 NightWatchDep = Annotated[WatchService, Depends(get_night_watch)]
+
+
+def get_readings_recorder(request: Request) -> ReadingsRecorder:
+    """Return the process-wide recorder that turns state reports into per-minute readings."""
+    return request.app.state.readings
+
+
+ReadingsRecorderDep = Annotated[ReadingsRecorder, Depends(get_readings_recorder)]
 
 
 def get_reminders(request: Request) -> ReminderService:
