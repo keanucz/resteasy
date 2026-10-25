@@ -15,8 +15,9 @@ and mic) can. It polls GET /api/pillows/{id}/state about once a second and react
                    POST /reminders/{occurrence_id}/result
 
 With --keys pad (the 3-key macro pad, voice/keypad.py) or --keys stdin (t / f / c lines):
-    talk    hold 2 s, let go, then she speaks: set or hear her reminders (voice/talk.py)
-    fine    POST /keys "fine" at once: stops a check-in or an alert
+    talk    hold 2 s, let go, then she speaks: set or hear her reminders (voice/talk.py), or
+            "I can't sleep": ten minutes of quiet music (voice/settle.py)
+    fine    POST /keys "fine" at once: stops a check-in or an alert (and the music)
     family  POST /keys "family" at once: starts the alert ladder
 The pillow never needs a key to hear her: whenever it asks something, it listens straight away.
 
@@ -154,6 +155,7 @@ def main() -> None:
     events: queue.Queue[str] = queue.Queue()
     stop_checkin = threading.Event()
     talk_session = None
+    music = None  # settle.Player: the lowest priority sound; any key, check-in or reminder stops it
 
     def post_key(key: str) -> None:
         """POST /keys now, from the keypad thread: "I'm fine" must not wait behind speech."""
@@ -167,12 +169,16 @@ def main() -> None:
 
     if args.keys != "none":
         import keypad
+        import settle
         import talk
 
         if args.text:
             sys.exit("--keys needs real audio: rehearse talking with voice/talk.py --text instead")
+        music = settle.Player(voice.play, log=lambda m: print(f"          {m}", flush=True))
 
         def on_key(event: str) -> None:
+            if event in (keypad.FINE, keypad.FAMILY, keypad.TALK_ARM):
+                music.stop()  # from the keypad thread: the music must not wait behind speech
             if event in (keypad.FINE, keypad.FAMILY):
                 if event == keypad.FINE:
                     stop_checkin.set()
@@ -181,7 +187,7 @@ def main() -> None:
 
         talk_session = talk.TalkSession(
             talk.live_voice(talk.Pillow(args.server, args.pillow_id, token), lambda _reason: post_key("family"),
-                            keywords=args.keywords),
+                            keywords=args.keywords, player=music),
             talk.Ears(), ZoneInfo(args.tz))
         keypad.start(on_key, args.keys)
 
@@ -254,6 +260,8 @@ def main() -> None:
                             print(f"[client] could not mark it played: {err}", file=sys.stderr, flush=True)
                 else:
                     print(f"{stamp}  check-in starting", flush=True)
+                    if music is not None:
+                        music.stop()  # the check-in owns the speaker and the mic now
                     judge.warm_up_in_background()
                     stop_checkin.clear()
                     out = checkin.run_checkin(speak, listen, judge=judge_fn, contact=args.contact,
@@ -274,6 +282,8 @@ def main() -> None:
                 except (httpx.HTTPError, ValueError) as err:
                     print(f"[client] reminder check failed: {err}", file=sys.stderr, flush=True)
                     due = []
+                if due and music is not None:
+                    music.stop()
                 for item in due:
                     stamp = time.strftime("%H:%M:%S")
                     print(f"{stamp}  reminder {item['text']!r}", flush=True)

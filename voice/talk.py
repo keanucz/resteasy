@@ -6,6 +6,8 @@
 
     "Remind me to take my tablets tomorrow morning"  -> read back -> "yes" -> saved, as hers
     "What have I got tomorrow?"                       -> her reminders for that day, read out
+    "I can't sleep"                                   -> one short line, then ten minutes of quiet
+                                                         music (settle.py); the key stops it
 
 The key starts the voice side while she holds it (mic, Cartesia socket), so nothing is lost to
 start-up time. While she holds, the socket gets silence, not the mic: the pillow's own "I'm
@@ -34,9 +36,12 @@ from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import settle
+
 LISTENING = "I'm listening."
 NOT_HEARD = "I didn't catch that. Hold the button again whenever you're ready."
-NOT_UNDERSTOOD = "Sorry, I can set a reminder for you, or tell you your reminders. Hold the button and try again."
+NOT_UNDERSTOOD = ("Sorry, I can set a reminder for you, tell you your reminders, or play some quiet music. "
+                  "Hold the button and try again.")
 ASK_CHANGE = "Okay. What should I change?"
 GAVE_UP = "Okay, I'll leave it for now. You can ask me again any time."
 SAVE_FAILED = "Sorry, I couldn't save that just now. Please try again in a little while."
@@ -58,7 +63,7 @@ DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
 class Request:
     """Her words as one request. `on_date` set = once that day; otherwise weekly on `days`."""
 
-    intent: str  # "set_reminder" | "list_reminders" | "unclear"
+    intent: str  # "set_reminder" | "list_reminders" | "settle" | "unclear"
     label: str = ""
     time_of_day: str = ""  # HH:MM, her time
     on_date: str = ""  # YYYY-MM-DD
@@ -85,13 +90,15 @@ round, as a one-off. kind: "meds" for medicine, "call" for calling someone, else
 - "list_reminders": she asks what reminders she has. start and end = YYYY-MM-DD (both the same for \
 one day; "tomorrow" = tomorrow; "today"; "this week" = today to 6 days on; nothing said = today and \
 tomorrow).
+- "settle": she can't sleep or wants to calm down and asks for music, something quiet or soothing, \
+or just some company for a while. No other fields.
 - "unclear": anything else, or you can't tell.
 Unused fields: "" or []."""
 
 INTENT_SCHEMA = {
     "type": "object",
     "properties": {
-        "intent": {"type": "string", "enum": ["set_reminder", "list_reminders", "unclear"]},
+        "intent": {"type": "string", "enum": ["set_reminder", "list_reminders", "settle", "unclear"]},
         "label": {"type": "string"},
         "time_of_day": {"type": "string"},
         "on_date": {"type": "string"},
@@ -132,6 +139,8 @@ def valid(r: Request) -> bool:
             return bool(r.label) and (bool(r.on_date) or bool(r.days))
         if r.intent == "list_reminders":
             return date.fromisoformat(r.start) <= date.fromisoformat(r.end)
+        if r.intent == "settle":
+            return True
     except ValueError:
         return False
     return False
@@ -292,6 +301,7 @@ class Voice:
     pillow: Any  # Pillow, or a fake
     on_distress: Callable[[str], None]  # start the alert ladder
     log: Callable[[str], None] = print
+    settle: Callable[[], None] | None = None  # start the quiet music (settle.Player.start); None = no speaker path
 
 
 class TalkSession:
@@ -337,6 +347,8 @@ class TalkSession:
             self.v.say(NOT_UNDERSTOOD)
         elif request.intent == "list_reminders":
             self._list(request, now.date())
+        elif request.intent == "settle":
+            self._settle()
         else:
             self._set(request, text, now)
 
@@ -382,6 +394,13 @@ class TalkSession:
                 break
         self.v.say(GAVE_UP)
 
+    def _settle(self) -> None:
+        if self.v.settle is None:
+            self.v.say(settle.NO_MUSIC)
+            return
+        self.v.say(settle.SETTLE_LINE)
+        self.v.settle()
+
     def _save(self, r: Request) -> None:
         try:
             saved, reason = self.v.pillow.add_reminder(r)
@@ -401,8 +420,10 @@ class TalkSession:
         self.v.on_distress(f"She asked the pillow for help: \"{text[:200]}\"")
 
 
-def live_voice(pillow: Any, on_distress: Callable[[str], None], *, keywords: bool = False) -> Voice:
-    """Cartesia + Claude wiring for the base laptop (checkin_client.py and this file's main)."""
+def live_voice(pillow: Any, on_distress: Callable[[str], None], *, keywords: bool = False,
+               player: "settle.Player | None" = None) -> Voice:
+    """Cartesia + Claude wiring for the base laptop (checkin_client.py and this file's main). `player`
+    is the music (settle.Player over voice.play); without one, "I can't sleep" gets a kind no."""
     import judge
     import numpy as np
     import voice
@@ -421,7 +442,7 @@ def live_voice(pillow: Any, on_distress: Callable[[str], None], *, keywords: boo
     return Voice(
         say=say, beep=lambda: voice.play(beep), got_it=lambda: voice.play(got_it), listen=voice.listen,
         intent=claude_intent, confirm=judge.keyword_confirm_judge if keywords else judge.quick_confirm_judge,
-        pillow=pillow, on_distress=on_distress)
+        pillow=pillow, on_distress=on_distress, settle=player.start if player is not None else None)
 
 
 def main() -> None:
