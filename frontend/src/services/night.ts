@@ -35,7 +35,11 @@ export type IncidentRow = {
   status: 'open' | 'acknowledged' | 'resolved' | 'cancelled';
   opened_at: string;
   acked_at: string | null;
+  /** The contact who pressed "I'm on it". */
+  acked_by: string | null;
   resolved_at: string | null;
+  /** Why it ended: she said she's fine, she's back in bed, or it was cleared (the simulator). */
+  resolved_reason: 'fine' | 'back_in_bed' | 'cleared' | null;
   summary: string | null;
 };
 
@@ -206,12 +210,21 @@ const within = (all: EventRow[], w: NightWindow) => {
 
 // ---------- the status headline ----------
 
-/** The five app states from the backend's night_state; a silent pillow is offline, not "fine". */
-export function appState(row: PillowStateRow | null, events: EventRow[], now: number): PillowState {
+/**
+ * The five app states from the backend's night_state; a silent pillow is offline, not "fine". `live`
+ * is the alert in progress: once someone pressed "I'm on it" the pillow stops calling round but stays
+ * escalating until she's back in bed or says she's fine, so the app shows her as up, not alarmed.
+ */
+export function appState(
+  row: PillowStateRow | null,
+  events: EventRow[],
+  now: number,
+  live: IncidentRow | null = null,
+): PillowState {
   if (!row || now - Date.parse(row.last_seen_at) > OFFLINE_AFTER_MS) return 'offline';
   switch (row.night_state) {
     case 'escalating':
-      return 'alert';
+      return live?.status === 'acknowledged' ? 'up' : 'alert';
     case 'up':
     case 'check_in':
     case 'awake':
@@ -225,7 +238,8 @@ export function appState(row: PillowStateRow | null, events: EventRow[], now: nu
 
 /**
  * The line under the headline: when this state began, in plain words. Offline, `ping` (the app's
- * own check every few seconds) says which part of the pillow isn't answering.
+ * own check every few seconds) says which part of the pillow isn't answering. Up after "I'm on it",
+ * `onIt` says who is ("You're on it.").
  */
 export function stateDetail(
   state: PillowState,
@@ -234,10 +248,12 @@ export function stateDetail(
   tz: string,
   now: number,
   ping: PillowPing | null = null,
+  onIt = 'Someone is on it.',
 ): string {
   if (!row) return 'Waiting for the pillow to say hello.';
   const since = clockTime(row.state_since, tz);
   const latest = (type: string) => [...events].reverse().find((e) => e.event_type === type);
+  const upSince = () => clockTime(latest('bed_exit')?.device_ts ?? row.state_since, tz);
   switch (state) {
     case 'offline': {
       const heard = `Last heard from ${duration(now - Date.parse(row.last_seen_at))} ago, at ${clockTime(row.last_seen_at, tz)}.`;
@@ -255,6 +271,7 @@ export function stateDetail(
     case 'restless':
       return `In bed since ${since}, moving about.`;
     case 'up':
+      if (row.night_state === 'escalating') return `Up since ${upSince()}. ${onIt}`;
       if (row.night_state === 'check_in') return `Up since ${since}. The pillow is checking in.`;
       if (row.night_state === 'awake') {
         const gotUp = latest('got_up');
@@ -262,7 +279,7 @@ export function stateDetail(
       }
       return `Up since ${since}.`;
     case 'alert':
-      return `Up since ${clockTime(latest('bed_exit')?.device_ts ?? row.state_since, tz)}. Family are being told.`;
+      return `Up since ${upSince()}. Family are being told.`;
   }
 }
 

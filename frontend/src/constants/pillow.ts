@@ -53,3 +53,11 @@ export const CHECKIN_MAX_WAIT = 30;
 
 /** How long "Saved" stays under a setting after a save goes through. */
 export const SAVED_NOTE_MS = 2000;
+
+/** While an alert is open on this phone it buzzes this long, this often, until "I'm on it". */
+export const ALERT_BUZZ_MS = 600;
+export const ALERT_BUZZ_EVERY_MS = 1200;
+/** How long the "Test vibration" button in Settings buzzes for. */
+export const ALERT_TEST_BUZZ_MS = 3000;
+/** How long Tonight keeps saying an alert ended ("she says she's fine") before it drops off. */
+export const ALERT_ENDED_NOTICE_MS = 15 * 60 * 1000;

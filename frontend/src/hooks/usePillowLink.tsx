@@ -36,6 +36,8 @@ type PillowLink = {
   people: Person[];
   /** The signed-in family member's full name from /me, or null when unknown. */
   myName: string | null;
+  /** The signed-in family member's contact id from /me (who pressed "I'm on it"), or null. */
+  contactId: string | null;
   /** True once /me has answered for this login, so routing can wait instead of flashing "Connect". */
   ready: boolean;
   /** Show another person's pillow; remembered on this device like the first link. */
@@ -56,8 +58,8 @@ const NO_PEOPLE: Person[] = [];
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-type Account = { people: Person[]; myName: string | null };
-type Me = { pillows: Person[]; full_name?: string | null };
+type Account = { people: Person[]; myName: string | null; contactId: string | null };
+type Me = { pillows: Person[]; full_name?: string | null; contact_id?: string | null };
 
 /**
  * The login's account with the first pillow it looks after. Throws when there's none: linking a
@@ -90,7 +92,7 @@ async function requireBothBoards(pillowId: string): Promise<void> {
 }
 
 function toAccount(me: Me): Account {
-  return { people: me.pillows, myName: me.full_name ?? null };
+  return { people: me.pillows, myName: me.full_name ?? null, contactId: me.contact_id ?? null };
 }
 
 /** Everyone the signed-in login looks after, and their own name; null when /me can't be read. */
@@ -144,14 +146,17 @@ export function PillowLinkProvider({
     userId: string | null;
     people: Person[];
     myName: string | null;
+    contactId: string | null;
   }>({
     userId: null,
     people: [],
     myName: null,
+    contactId: null,
   });
   const ready = found.userId === userId;
   const people = ready ? found.people : NO_PEOPLE;
   const myName = ready ? found.myName : null;
+  const contactId = ready ? found.contactId : null;
 
   useEffect(() => {
     if (!userId) return;
@@ -161,7 +166,7 @@ export function PillowLinkProvider({
         if (cancelled) return;
         // Unreachable backend: keep this device's link, so a known login still opens its pillow.
         if (!account) {
-          setFound({ userId, people: [], myName: null });
+          setFound({ userId, people: [], myName: null, contactId: null });
           return;
         }
         setFound({ userId, ...account });
@@ -241,8 +246,8 @@ export function PillowLinkProvider({
 
   // The same object until something in it changes, so screens re-render only when it does.
   const value = useMemo(
-    () => ({ pillowId, people, myName, ready, select, connect, refreshAccount, disconnect }),
-    [pillowId, people, myName, ready, select, connect, refreshAccount, disconnect],
+    () => ({ pillowId, people, myName, contactId, ready, select, connect, refreshAccount, disconnect }),
+    [pillowId, people, myName, contactId, ready, select, connect, refreshAccount, disconnect],
   );
   return <PillowLinkContext.Provider value={value}>{children}</PillowLinkContext.Provider>;
 }

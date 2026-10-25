@@ -90,6 +90,25 @@ REMINDERS_TOOL = "reminders"
 # agent_log.intent for a settings change made from the family app
 SETTINGS_CHANGE_INTENT = "change settings"
 
+# Settings > Alerts (GET/PATCH /api/me/alerts): the app's switch names -> the contacts columns.
+# Night Watch's ladder skips a channel whose switch is off; texts keep the original consent column
+ALERT_SWITCH_COLUMNS = {"app": "app_alerts", "sms": "sms_consent", "call": "call_alerts"}
+# A mobile number in E.164 once spaces, dashes and brackets are gone ("00" counts as "+")
+PHONE_PATTERN = r"\+[1-9]\d{7,14}"
+PHONE_INVALID = "Use the full number with its country code, like +44 7700 900123"
+PHONE_TAKEN = "Another person in the app already uses this number"
+NO_ALERT_CONTACT = "Connect a pillow first, then choose how you're alerted"
+KEEP_ONE_CHANNEL = "Keep at least one way to reach you on, so an alert always gets through"
+# The test buttons at the bottom of Settings: one per channel per person this often at most
+ALERT_TEST_GAP_S = 30
+ALERT_TEST_TOO_SOON = "A test just went out. Try again in half a minute"
+ALERT_TEST_NO_PHONE = "Add your mobile number first"
+ALERT_TEST_NOT_CONFIGURED = "Texts and calls aren't set up on this server"
+ALERT_TEST_MESSAGES = {
+    "sms": "Rest Easy test: alert texts reach this phone. Nothing is wrong.",
+    "call": "This is a Rest Easy test call. Alerts will reach you on this number. Nothing is wrong.",
+}
+
 # Profile photos the API accepts, the same limits as the resident-photos bucket
 PHOTO_CONTENT_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
 PHOTO_MAX_BYTES = 5 * 1024 * 1024

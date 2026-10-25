@@ -272,3 +272,14 @@ still open:
   0.9-1.2 s (eager_end ~0.6 s), transcript word-perfect, Claude request parse 1.9-2.4 s, Sonic full
   render ~1.1 s per line. End of her sentence -> read-back starts ~4.3 s, covered by a "got it" chime;
   a plain yes/no is decided by keywords (Claude only when unclear, saves ~1.5 s).
+- Sun 25 Oct: alerts follow each family member's own settings (Szymon, branch `szymon/alerts`). The
+  app's Settings > Alerts sets, per contact: alert on this phone (`contacts.app_alerts`), text me
+  (`sms_consent`), call me (`contacts.call_alerts`), and their mobile (E.164). Night Watch's ladder
+  skips a rung the contact turned off (`NightWatchConfig.channels`, empty = every channel); the
+  sender also refuses a call with `call_alerts` off; one way always stays on (PATCH refuses all
+  off). API: `GET|PATCH /api/me/alerts`, `POST /api/me/alerts/test` (one text or a plain Twilio call
+  to your own number, 30 s apart; never the Line agent). The app buzzes while an alert is open and
+  this phone's alert is on, stops on "I'm on it", and then shows her as up ("You're on it.") while
+  the pillow stays escalating. `incidents.resolved_reason` (`fine` from the fine key, including
+  #102's spoken "I'm fine"; `back_in_bed`; `cleared` from the simulator) lets Tonight say how it
+  ended. Migration `20261025082448_alert_channels` (live). Email alerts dropped (texts are enough).

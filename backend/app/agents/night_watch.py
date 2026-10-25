@@ -15,6 +15,7 @@ The Guardian (guardian.py) sits between these actions and the outside world.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, time
 from enum import StrEnum
@@ -75,6 +76,9 @@ class NightWatchConfig:
     paused: bool = False  # she (or the owner) paused monitoring: start no new watch
     path_light: dict = field(default_factory=lambda: dict(PATH_LIGHT_ON))
     step_wait_min: float = 2  # between escalation steps
+    # The ladder channels ("app", "sms", "call") each contact allows (Settings > Alerts in the app);
+    # a contact missing here allows every channel
+    channels: Mapping[str, frozenset[str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -319,10 +323,11 @@ class NightWatch:
         self._acked = False
         self._distress = distress
         # Least intrusive first: an in-app alert to every contact at once, then SMS and a call to
-        # each contact in turn.
-        self._ladder = [[("app", c) for c in self.cfg.contacts]]
+        # each contact in turn, skipping the channels a contact turned off.
+        ladder = [[("app", c) for c in self.cfg.contacts if self._allows(c, "app")]]
         for contact in self.cfg.contacts:
-            self._ladder += [[("sms", contact)], [("call", contact)]]
+            ladder += [[(channel, contact)] for channel in ("sms", "call") if self._allows(contact, channel)]
+        self._ladder = [step for step in ladder if step]
         self._reason = reason
         return self._next_step(ts)
 
@@ -349,6 +354,11 @@ class NightWatch:
         return out
 
     # ---------- helpers ----------
+
+    def _allows(self, contact: str, channel: str) -> bool:
+        """Whether `contact` takes alerts on `channel`."""
+        allowed = self.cfg.channels.get(contact)
+        return allowed is None or channel in allowed
 
     def _tell_alerted(self, message: str) -> list[Action]:
         return [Alert(c, "sms", message) for c in self._alerted]

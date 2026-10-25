@@ -22,6 +22,28 @@ async def get_contact_for_user(db: AsyncClient, user_id: str) -> dict[str, Any] 
     return await fetch_one(db.table(CONTACTS_TABLE).select("id, full_name").eq("user_id", user_id))
 
 
+async def get_alert_contact(db: AsyncClient, user_id: str) -> dict[str, Any] | None:
+    """Return the login's contact with its mobile number and alert switches, or None."""
+    return await fetch_one(
+        db.table(CONTACTS_TABLE)
+        .select("id, full_name, phone, sms_consent, call_alerts, app_alerts")
+        .eq("user_id", user_id)
+    )
+
+
+async def update_contact(db: AsyncClient, contact_id: str, fields: dict[str, Any]) -> bool:
+    """Change the contact's own fields; False when the new phone number belongs to another contact."""
+    if not fields:
+        return True
+    try:
+        await db.table(CONTACTS_TABLE).update(fields).eq("id", contact_id).execute()
+    except APIError as err:
+        if err.code == UNIQUE_VIOLATION:
+            return False
+        raise
+    return True
+
+
 async def list_account_pillows(db: AsyncClient, contact_id: str) -> list[dict[str, Any]]:
     """Every pillow of every resident the contact looks after, with the resident's name and the role."""
     links = await (

@@ -14,12 +14,15 @@ import { useSwitchScheme } from '@/components/ThemeBubble';
 import { TimeSelect } from '@/components/TimeSelect';
 import { VoicePicker } from '@/components/VoicePicker';
 import { DURATION, EASE } from '@/constants/motion';
-import { CHECKIN_MAX_WAIT, CHECKIN_MIN_WAIT, SAVED_NOTE_MS } from '@/constants/pillow';
+import { ALERT_TEST_BUZZ_MS, CHECKIN_MAX_WAIT, CHECKIN_MIN_WAIT, SAVED_NOTE_MS } from '@/constants/pillow';
+import { buzzFor } from '@/hooks/useAlertBuzz';
+import { setAlertPrefs, useAlertPrefs } from '@/hooks/useAlertPrefs';
 import { type Resident, usePillow } from '@/hooks/usePillow';
 import { usePillowLink } from '@/hooks/usePillowLink';
 import { setResidentPhoto, useResidentPhoto } from '@/hooks/useResidentPhoto';
 import { useSession } from '@/hooks/useSession';
 import { useTheme } from '@/hooks/useTheme';
+import { type AlertPrefsPatch, saveAlertPrefs, sendTestAlert, toE164 } from '@/services/alerts';
 import { api, ApiError } from '@/services/api';
 import { signOut } from '@/services/auth';
 import { isTestAccount, SIMULATED_ALERTS, type SimulatedAlert, simulateAlert } from '@/services/debug';
@@ -432,6 +435,8 @@ export default function SettingsScreen() {
             <StatusLine status={statuses.pause} />
           </View>
 
+          <AlertsSection name={name} />
+
           <AlertDebugSection pillowId={pillowId} />
 
           <Section title="This phone">
@@ -449,6 +454,8 @@ export default function SettingsScreen() {
               <Button fullWidth variant="ghost" title="Log out" onPress={signOut} />
             </View>
           </Section>
+
+          <AlertTestSection />
         </ScrollView>
         <Dialog
           visible={confirm === 'pause'}
@@ -676,6 +683,171 @@ const AlertDebugSection = memo(function AlertDebugSection({ pillowId }: { pillow
             />
           </View>
         ))}
+      </View>
+      <StatusLine status={status} />
+    </Section>
+  );
+});
+
+const PHONE_INVALID = 'Use the full number with its country code';
+const KEEP_ONE_WAY = 'Keep at least one way to reach you on, so an alert always gets through.';
+
+/** The typed mobile as the backend stores it; an empty field removes the number. */
+const parsePhone = (typed: string) => (typed.trim() ? toE164(typed) : '');
+
+/** Why an alert setting didn't save, in words: the backend's own sentence when it gave one. */
+function alertSaveError(e: unknown): string {
+  if (e instanceof ApiError && (e.status === 409 || e.status === 422)) return e.message;
+  return "Couldn't save. Check your connection and try again.";
+}
+
+/**
+ * How this person is reached when someone they look after needs help: the red alert and buzz on this
+ * phone, a text, then a call, and the mobile those go to. The pillow's alerts skip what's off; one
+ * way always stays on (the backend refuses turning off the last one).
+ */
+const AlertsSection = memo(function AlertsSection({ name }: { name: string }) {
+  const { contactId } = usePillowLink();
+  const prefs = useAlertPrefs(contactId);
+  const [status, setStatus] = useState<Status | null>(null);
+  // Only the latest save's answer counts, so a quick on-off-on never ends on a stale "off".
+  const latest = useRef(0);
+
+  useEffect(() => {
+    if (status?.kind !== 'saved') return;
+    const t = setTimeout(() => setStatus(null), SAVED_NOTE_MS);
+    return () => clearTimeout(t);
+  }, [status]);
+
+  const change = useCallback(
+    async (patch: AlertPrefsPatch) => {
+      if (!contactId || !prefs) return;
+      const keys = Object.keys(patch) as (keyof AlertPrefsPatch)[];
+      if (keys.every((k) => prefs[k] === patch[k])) return;
+      const next = { ...prefs, ...patch };
+      if (!next.app && !next.sms && !next.call) {
+        // Refused before the switch moves: the backend would refuse it too.
+        setStatus({ kind: 'error', text: KEEP_ONE_WAY });
+        return;
+      }
+      const turn = ++latest.current;
+      setAlertPrefs(contactId, next);
+      setStatus(null);
+      try {
+        const saved = await saveAlertPrefs(patch);
+        if (turn !== latest.current) return;
+        setAlertPrefs(contactId, saved);
+        setStatus(SAVED);
+      } catch (e) {
+        if (turn !== latest.current) return;
+        setAlertPrefs(contactId, prefs);
+        setStatus({ kind: 'error', text: alertSaveError(e) });
+      }
+    },
+    [contactId, prefs],
+  );
+
+  if (!prefs) return null;
+
+  return (
+    <Section title="Alerts" note={`How you're told when ${name} needs help.`}>
+      <List>
+        <ListRow
+          title="Alert on this phone"
+          meta="Tonight turns red and buzzes until someone is on it."
+          trailing={<Toggle label="Alert on this phone" value={prefs.app} onValueChange={(app) => change({ app })} />}
+        />
+        <ListRow
+          title="Text me"
+          meta={prefs.phone ? `To ${prefs.phone}.` : 'Add your mobile below.'}
+          trailing={<Toggle label="Text me" value={prefs.sms} onValueChange={(sms) => change({ sms })} />}
+        />
+        <ListRow
+          title="Call me"
+          meta="Rest Easy calls you if nobody is on it after the text."
+          trailing={<Toggle label="Call me" value={prefs.call} onValueChange={(call) => change({ call })} />}
+        />
+      </List>
+      <DraftField
+        label="Your mobile"
+        saved={prefs.phone ?? ''}
+        parse={parsePhone}
+        format={String}
+        invalid={PHONE_INVALID}
+        onCommit={(phone) => change({ phone: phone || null })}
+        placeholder="+44 7700 900123"
+        keyboardType="phone-pad"
+        autoCorrect={false}
+        returnKeyType="done"
+        accessibilityHint="With its country code. Texts and calls go to this number."
+      />
+      {prefs.twilio_ready ? null : (
+        <Text className="font-sans text-sm text-ink-muted">Texts and calls aren&apos;t set up on this server yet.</Text>
+      )}
+      <StatusLine status={status} />
+    </Section>
+  );
+});
+
+type AlertTest = 'sms' | 'call' | 'buzz';
+
+/**
+ * Test buttons for every account: a real text or call to your own number now, and this phone's buzz,
+ * so you know an alert will reach you before a night when it matters.
+ */
+const AlertTestSection = memo(function AlertTestSection() {
+  const { contactId } = usePillowLink();
+  const prefs = useAlertPrefs(contactId);
+  const [busy, setBusy] = useState<AlertTest | null>(null);
+  const [status, setStatus] = useState<Status | null>(null);
+
+  if (!prefs) return null;
+
+  const run = async (test: AlertTest) => {
+    setStatus(null);
+    if (test === 'buzz') {
+      buzzFor(ALERT_TEST_BUZZ_MS);
+      setStatus({ kind: 'saved', text: 'Buzzing like an alert for a few seconds.' });
+      return;
+    }
+    setBusy(test);
+    try {
+      const result = await sendTestAlert(test);
+      setStatus(
+        result.sent
+          ? { kind: 'saved', text: test === 'call' ? `Calling ${prefs.phone} now.` : `Test text sent to ${prefs.phone}.` }
+          : { kind: 'error', text: `It didn't go through: ${result.error ?? 'no reason given'}.` },
+      );
+    } catch (e) {
+      setStatus({ kind: 'error', text: e instanceof ApiError ? e.message : "Couldn't reach the server. Try again." });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Section title="Test alerts" note="Check alerts reach you. Nothing is wrong when these go out.">
+      {prefs.phone ? null : (
+        <Text className="font-sans text-sm text-ink-muted">Add your mobile under Alerts to test texts and calls.</Text>
+      )}
+      <View className="gap-2.5">
+        <Button
+          fullWidth
+          variant="secondary"
+          title="Send me a test text"
+          loading={busy === 'sms'}
+          disabled={!prefs.phone || (busy !== null && busy !== 'sms')}
+          onPress={() => run('sms')}
+        />
+        <Button
+          fullWidth
+          variant="secondary"
+          title="Call me as a test"
+          loading={busy === 'call'}
+          disabled={!prefs.phone || (busy !== null && busy !== 'call')}
+          onPress={() => run('call')}
+        />
+        <Button fullWidth variant="ghost" title="Test vibration" onPress={() => run('buzz')} />
       </View>
       <StatusLine status={status} />
     </Section>

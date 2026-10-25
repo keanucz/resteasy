@@ -5,6 +5,7 @@ import { RefreshControl, ScrollView, Text, View } from 'react-native';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { hm, type WeekBar, WeekSleepChart } from '@/components/Charts';
+import { NotificationCard } from '@/components/Feedback';
 import { Hills } from '@/components/Hills';
 import { List, ListRow } from '@/components/List';
 import { NightDetail } from '@/components/NightDetail';
@@ -13,7 +14,9 @@ import { SkyHeader } from '@/components/SkyHeader';
 import { DataTable, StatTile } from '@/components/Stats';
 import { StatusWord } from '@/components/Status';
 import { BellIcon, PhoneIcon, PillIcon } from '@/components/TabIcons';
-import { MONTH_NIGHTS, RIBBON_HOURS, WEEK_NIGHTS } from '@/constants/pillow';
+import { ALERT_ENDED_NOTICE_MS, MONTH_NIGHTS, RIBBON_HOURS, WEEK_NIGHTS } from '@/constants/pillow';
+import { tapAllClear, useAlertBuzz } from '@/hooks/useAlertBuzz';
+import { useAlertPrefs } from '@/hooks/useAlertPrefs';
 import { useDelayedLoading } from '@/hooks/useDelayedLoading';
 import { useGuardedPress } from '@/hooks/useGuardedPress';
 import { useNow, usePillow, usePillowState } from '@/hooks/usePillow';
@@ -55,6 +58,13 @@ const REMINDER_WORD: Record<ReminderToday['status'], { word: string; state?: 'as
 /** How long "I'm on it" waits for the alert to say someone is on it before asking for another tap. */
 const ACK_CONFIRM_MS = 15_000;
 
+/** How an alert ended, as the card on Tonight says it. */
+const ENDED_TITLE: Record<NonNullable<IncidentRow['resolved_reason']>, (name: string) => string> = {
+  fine: (name) => `${name} said "I'm fine"`,
+  back_in_bed: (name) => `${name} is back in bed`,
+  cleared: () => 'The alert is over',
+};
+
 const openNight = (start: number) => router.push({ pathname: '/night/[start]', params: { start: String(start) } });
 
 /**
@@ -72,7 +82,8 @@ function useSameNight(night: NightWindow): NightWindow {
  * sleep charts, and the nights one by one. Tap a night in a chart or the list to open it.
  */
 export default function TonightScreen() {
-  const { pillowId, people } = usePillowLink();
+  const { pillowId, people, contactId } = usePillowLink();
+  const alertPrefs = useAlertPrefs(contactId);
   const pillow = usePillow();
   const { events, incidents } = pillow;
   const [picking, setPicking] = useState(false);
@@ -89,6 +100,32 @@ export default function TonightScreen() {
     [pillow.reminders, pillow.occurrences, now, tz],
   );
   const live = useMemo(() => incidents.find((i) => i.status === 'open' || i.status === 'acknowledged'), [incidents]);
+  // An alert that just ended with a reason worth telling (she said she's fine, she's back in bed),
+  // until it's dismissed or a while has passed.
+  const [dismissed, setDismissed] = useState<ReadonlySet<number>>(() => new Set());
+  const ended = useMemo(
+    () =>
+      live
+        ? undefined
+        : incidents.find(
+            (i) =>
+              i.status === 'resolved' &&
+              i.resolved_reason &&
+              i.resolved_at &&
+              now - Date.parse(i.resolved_at) < ALERT_ENDED_NOTICE_MS &&
+              !dismissed.has(i.id),
+          ),
+    [live, incidents, now, dismissed],
+  );
+  const endedId = ended?.id;
+  useEffect(() => {
+    if (endedId !== undefined) tapAllClear();
+  }, [endedId]);
+  // This phone buzzes while an alert is open, until someone (this person, the moment they tap) is on it.
+  const [tappedOnIt, setTappedOnIt] = useState<number | null>(null);
+  const liveId = live?.id ?? null;
+  const markTapped = useCallback((tapped: boolean) => setTappedOnIt(tapped ? liveId : null), [liveId]);
+  useAlertBuzz(live?.status === 'open' && live.id !== tappedOnIt && (alertPrefs?.app ?? true));
 
   // A quick second tap on a night (or on another one) is dropped, so a night never opens twice.
   const { press: open } = useGuardedPress(openNight);
@@ -148,6 +185,8 @@ export default function TonightScreen() {
         name={name}
         night={night}
         events={events}
+        live={live ?? null}
+        contactId={contactId}
         tz={tz}
         loading={pillow.loading}
         onSwitchPerson={people.length > 1 ? switchPerson : undefined}
@@ -158,7 +197,28 @@ export default function TonightScreen() {
             {pillow.error}
           </Text>
         ) : null}
-        {live && pillowId ? <AlertCard key={live.id} pillowId={pillowId} name={name} incident={live} tz={tz} /> : null}
+        {live && pillowId ? (
+          <AlertCard
+            key={live.id}
+            pillowId={pillowId}
+            name={name}
+            incident={live}
+            tz={tz}
+            onTapped={markTapped}
+          />
+        ) : null}
+        {ended?.resolved_reason && ended.resolved_at ? (
+          // Said out loud too: a screen reader hears that the alert ended without looking for it.
+          <View accessibilityLiveRegion="polite">
+            <NotificationCard
+              initials={name.slice(0, 1)}
+              title={ENDED_TITLE[ended.resolved_reason](name)}
+              detail="Tap to dismiss."
+              time={clockTime(ended.resolved_at, tz)}
+              onPress={() => setDismissed((d) => new Set(d).add(ended.id))}
+            />
+          </View>
+        ) : null}
 
         {reminders.length ? (
           <Section title="Reminders today">
@@ -222,6 +282,8 @@ const TonightSky = memo(function TonightSky({
   name,
   night,
   events,
+  live,
+  contactId,
   tz,
   loading,
   onSwitchPerson,
@@ -231,6 +293,9 @@ const TonightSky = memo(function TonightSky({
   name: string;
   night: NightWindow;
   events: EventRow[];
+  /** The alert in progress: once someone is on it, the sky shows her as up, not alarmed. */
+  live: IncidentRow | null;
+  contactId: string | null;
   tz: string;
   loading: boolean;
   onSwitchPerson?: () => void;
@@ -238,7 +303,8 @@ const TonightSky = memo(function TonightSky({
   const row = usePillowState();
   const now = useNow();
   const photo = useResidentPhoto(residentId);
-  const state = appState(row, events, now);
+  const state = appState(row, events, now, live);
+  const onIt = live?.acked_by && live.acked_by === contactId ? "You're on it." : 'Someone is on it.';
   const ping = usePillowCheck(pillowId, state === 'offline');
   const hour = ribbonNow(night, now);
   return (
@@ -248,7 +314,7 @@ const TonightSky = memo(function TonightSky({
       initials={name.slice(0, 1)}
       photoUri={photo ?? undefined}
       nightProgress={hour === undefined ? undefined : hour / RIBBON_HOURS}
-      detail={loading ? undefined : stateDetail(state, row, events, tz, now, ping)}
+      detail={loading ? undefined : stateDetail(state, row, events, tz, now, ping, onIt)}
       onSwitchPerson={onSwitchPerson}
     />
   );
@@ -260,11 +326,14 @@ function AlertCard({
   name,
   incident,
   tz,
+  onTapped,
 }: {
   pillowId: string;
   name: string;
   incident: IncidentRow;
   tz: string;
+  /** "I'm on it" was tapped (this phone stops buzzing straight away), or it didn't go through (true, false). */
+  onTapped: (tapped: boolean) => void;
 }) {
   const { refresh } = usePillow();
   // Told the pillow: the button keeps spinning until the alert itself says someone is on it.
@@ -278,13 +347,15 @@ function AlertCard({
     if (!sent || acked) return;
     const wait = setTimeout(() => {
       setSent(false);
+      onTapped(false);
       setError(`The pillow didn't confirm. Try again, or call ${name}.`);
     }, ACK_CONFIRM_MS);
     return () => clearTimeout(wait);
-  }, [sent, acked, name]);
+  }, [sent, acked, name, onTapped]);
 
   const ack = async () => {
     setError(null);
+    onTapped(true);
     try {
       const me = await api<{ contact_id: string | null }>('/me');
       if (!me.contact_id) throw new Error(`This login isn't one of ${name}'s contacts yet.`);
@@ -292,6 +363,7 @@ function AlertCard({
       setSent(true);
       void refresh();
     } catch (e) {
+      onTapped(false);
       setError(e instanceof Error ? e.message : `Couldn't tell the pillow. Try again, or call ${name}.`);
     }
   };

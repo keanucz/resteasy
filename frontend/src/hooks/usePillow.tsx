@@ -147,7 +147,7 @@ async function readPillow(pillowId: string) {
     rowsOf<IncidentRow[]>(
       supabase
         .from('incidents')
-        .select('id, kind, status, opened_at, acked_at, resolved_at, summary')
+        .select('id, kind, status, opened_at, acked_at, acked_by, resolved_at, resolved_reason, summary')
         .eq('pillow_id', pillowId)
         .gte('opened_at', since)
         .order('opened_at', { ascending: false }),

@@ -64,7 +64,7 @@ async def list_sendable_notifications(
         db.table(NOTIFICATIONS_TABLE)
         .select(
             "id, incident_id, contact_id, channel, message, created_at, "
-            "contacts(full_name, phone, sms_consent), "
+            "contacts(full_name, phone, sms_consent, call_alerts), "
             "incidents!inner(pillow_id, summary)"
         )
         .eq("status", "queued")

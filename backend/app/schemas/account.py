@@ -1,12 +1,13 @@
 """Schemas for the signed-in app user: who they are, their pillows, voices and settings."""
 
+import re
 from datetime import time
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, PlainSerializer, StringConstraints, field_validator
 
 from app.agents.guardian import CONFIG_BOUNDS
-from app.core.app_constants import RESIDENT_NAME_MAX
+from app.core.app_constants import ALERT_SWITCH_COLUMNS, PHONE_INVALID, PHONE_PATTERN, RESIDENT_NAME_MAX
 from app.core.voice_constants import VOICE_IDS
 
 TIMEOUT_MIN, TIMEOUT_MAX = CONFIG_BOUNDS["checkin_timeout_min"]
@@ -94,3 +95,55 @@ class CheckinWaitUpdate(BaseModel):
     """A new check-in wait from the owner, within the Guardian's bounds."""
 
     checkin_timeout_min: CheckinTimeout
+
+
+class AlertSettings(BaseModel):
+    """How the signed-in person is reached in an alert: the in-app alert, texts and calls, the mobile
+    number they go to, and whether this server can send texts and calls at all."""
+
+    phone: str | None
+    app: bool
+    sms: bool
+    call: bool
+    twilio_ready: bool
+
+
+class AlertSettingsPatch(BaseModel):
+    """Any subset of the alert settings. An empty phone removes the number."""
+
+    phone: str | None = None
+    app: bool | None = None
+    sms: bool | None = None
+    call: bool | None = None
+
+    @field_validator("phone")
+    @classmethod
+    def e164(cls, phone: str | None) -> str | None:
+        """Normalise to E.164 ("+447700900123"): drop spaces, dashes and brackets, "00" means "+"."""
+        if phone is None or not phone.strip():
+            return None
+        number = re.sub(r"[\s\-().]", "", phone)
+        if not number.startswith("+"):
+            number = "+" + number.removeprefix("00")
+        if not re.fullmatch(PHONE_PATTERN, number):
+            raise ValueError(PHONE_INVALID)
+        return number
+
+    def columns(self) -> dict[str, str | bool | None]:
+        """The fields the caller sent, as contacts columns."""
+        names = {"phone": "phone"} | ALERT_SWITCH_COLUMNS
+        return {names[key]: getattr(self, key) for key in self.model_fields_set}
+
+
+class AlertTest(BaseModel):
+    """Which test to send now: a text or a call to the person's own number."""
+
+    channel: Literal["sms", "call"]
+
+
+class AlertTestResult(BaseModel):
+    """How the test went: sent (and how) or not, and why."""
+
+    sent: bool
+    via: str | None = None  # "imessage" / "sms" / "call"
+    error: str | None = None

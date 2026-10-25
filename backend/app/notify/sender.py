@@ -5,8 +5,9 @@
     call  a live call from a Cartesia Line agent that says the alert in the pillow's voice and
           answers their questions (app/notify/line.py); if Line isn't set up or refuses, a Twilio
           call that plays the alert once in the pillow's own voice (Cartesia; Twilio's voice reads
-          it if that can't be made in time). If it's rejected, not answered or goes to voicemail,
-          the same alert follows as a text (the consent rule above still applies).
+          it if that can't be made in time). Never to a contact who turned calls off
+          (contacts.call_alerts). If it's rejected, not answered or goes to voicemail, the same
+          alert follows as a text (the consent rule above still applies).
 
 Night Watch's ladder never waits on this: it queues the row and moves on, and this ticker sends
 what is queued. Only pillows in NOTIFY_PILLOW_IDS reach real phones (test pillows stay queued),
@@ -102,10 +103,25 @@ class NotificationSender:
         if not phone:
             return Delivery(False, error="no phone number on record")
         if row["channel"] == "call":
+            if not contact.get("call_alerts", True):
+                return Delivery(False, error="turned alert calls off (call_alerts)")
             return await self._call(row, phone, text)
         if not contact.get("sms_consent"):
             return Delivery(False, error="has not agreed to texts (sms_consent)")
         return await self._text(phone, text)
+
+    async def send_test(self, channel: str, phone: str, text: str) -> Delivery:
+        """A test text or call from the app's Settings, whatever the contact's switches say. Calls go
+        straight to Twilio, never the Line agent, which would talk about an alert that isn't
+        happening. Never raises."""
+        if channel == "sms":
+            return await self._text(phone, text)
+        if self.twilio is None:
+            return Delivery(False, error="no Twilio configured for calls")
+        try:
+            return Delivery(True, "call", await self.twilio.call(phone, text))
+        except DeliveryError as err:
+            return Delivery(False, error=f"call {err}")
 
     async def _text(self, phone: str, text: str) -> Delivery:
         failures = []

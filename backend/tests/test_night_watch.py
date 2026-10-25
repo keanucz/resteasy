@@ -178,6 +178,14 @@ def test_every_contact_gets_the_app_alert_first_then_sms_and_calls_in_turn():
                      (86, "sms", "Tom"), (88, "call", "Tom")]
 
 
+def test_the_ladder_skips_the_channels_a_contact_turned_off():
+    cfg = NightWatchConfig(contacts=("Sarah", "Tom"),
+                           channels={"Sarah": frozenset({"sms"}), "Tom": frozenset({"app", "call"})})
+    _, log = run(scenario("no_return"), config=cfg)
+    steps = [(round(m), a.channel, a.contact) for m, a in log if isinstance(a, Alert)]
+    assert steps == [(80, "app", "Tom"), (82, "sms", "Sarah"), (84, "call", "Tom")]
+
+
 def feed(nw, start, seconds, head_on, fine=False):
     """One report per second for `seconds` from `start`. Returns (next start, actions)."""
     acts = []

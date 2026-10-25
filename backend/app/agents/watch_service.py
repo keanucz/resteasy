@@ -67,6 +67,11 @@ BASELINE_TOOL = "baseline"  # agent_log tool of the check-in wait notes
 CONFIG_REFRESH_S = 60  # re-read the resident's settings (pause, quiet hours) this often
 # Night Watch's alert channels -> notifications.channel
 CHANNELS = {"app": "app", "sms": "sms", "call": "call"}
+# Each ladder channel and the contacts column that switches it on (Settings > Alerts in the app)
+CHANNEL_SWITCHES = {"app": "app_alerts", "sms": "sms_consent", "call": "call_alerts"}
+# The event that ended an alert -> incidents.resolved_reason, so the app can say "she's fine" or
+# "she's back in bed". Another way for her to say she's fine adds its event here.
+RESOLVED_REASONS = {"key_fine": "fine", "bed_return": "back_in_bed"}
 
 
 @dataclass
@@ -233,6 +238,8 @@ class WatchService:
             quiet_hours=quiet_hours,
             paused=resident["monitoring_paused"],
             step_wait_min=resident["step_wait_min"],
+            channels={name: frozenset(ch for ch, column in CHANNEL_SWITCHES.items() if c.get(column, True))
+                      for name, c in zip(w.contact_ids, contacts, strict=True)},
         )
         consent = {name: bool(c.get("sms_consent", True))
                    for name, c in zip(w.contact_ids, contacts, strict=True)}
@@ -309,8 +316,9 @@ class WatchService:
             await update_incident(db, w.incident_id, {
                 "status": "acknowledged", "acked_by": w.contact_ids.get(e.data["contact"]),
                 "acked_at": _now_iso()})
-        elif w.incident_id is not None and e.type in ("bed_return", "key_fine"):
-            await update_incident(db, w.incident_id, {"status": "resolved", "resolved_at": _now_iso()})
+        elif w.incident_id is not None and e.type in RESOLVED_REASONS:
+            await update_incident(db, w.incident_id, {"status": "resolved", "resolved_at": _now_iso(),
+                                                      "resolved_reason": RESOLVED_REASONS[e.type]})
 
     async def _send_command(self, db: AsyncClient, c: Command) -> str | None:
         """Queue a device command; skip (and say why) if that pillow isn't registered."""

@@ -87,6 +87,14 @@ def test_call_goes_by_twilio_and_needs_no_text_consent():
     assert (result.sent, result.ref) == (True, "CA1") and tw.calls
 
 
+def test_no_call_when_the_contact_turned_calls_off():
+    tw = FakeTwilio()
+    r = row("call")
+    r["contacts"]["call_alerts"] = False
+    result = deliver(NotificationSender(FakeIMessage(), tw, ["mum"]), r)
+    assert not result.sent and "call_alerts" in result.error and not tw.calls
+
+
 def test_call_without_twilio_fails():
     assert not deliver(NotificationSender(FakeIMessage(), None, ["mum"]), row("call")).sent
 

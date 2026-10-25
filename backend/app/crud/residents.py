@@ -20,10 +20,14 @@ async def get_resident(db: AsyncClient, resident_id: str) -> dict[str, Any] | No
 
 
 async def list_contacts_in_order(db: AsyncClient, resident_id: str) -> list[dict[str, Any]]:
-    """Return the resident's contacts (id, name, on_call, quiet hours, SMS consent), first to alert first."""
+    """Return the resident's contacts (id, name, on_call, quiet hours, and how each may be alerted:
+    sms_consent, call_alerts, app_alerts), first to alert first."""
     response = await (
         db.table(RESIDENT_CONTACTS_TABLE)
-        .select("priority, contacts(id, full_name, on_call, quiet_start, quiet_end)")
+        .select(
+            "priority, contacts(id, full_name, on_call, quiet_start, quiet_end, sms_consent, call_alerts, "
+            "app_alerts)"
+        )
         .eq("resident_id", resident_id)
         .order("priority")
         .execute()

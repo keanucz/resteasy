@@ -49,6 +49,7 @@ from app.core.voice_constants import (
 from app.crud.accounts import get_link_for_contact, get_link_for_user
 from app.crud.pillows import get_pillow
 from app.crud.residents import get_resident
+from app.notify.sender import NotificationSender
 from app.schemas.pillow import Pillow
 from app.schemas.resident_photo import PhotoUpload
 from app.schemas.voice import CloneUpload
@@ -99,6 +100,14 @@ def get_night_watch(request: Request) -> WatchService:
 
 
 NightWatchDep = Annotated[WatchService, Depends(get_night_watch)]
+
+
+def get_notifier(request: Request) -> NotificationSender:
+    """Return the process-wide notifications sender (texts and calls; providers may be unset)."""
+    return request.app.state.notifier
+
+
+NotifierDep = Annotated[NotificationSender, Depends(get_notifier)]
 
 
 def get_readings_recorder(request: Request) -> ReadingsRecorder:
