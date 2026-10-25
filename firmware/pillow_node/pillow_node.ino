@@ -16,6 +16,10 @@
 //   PillowBuzz). Our hellos tell the voice unit a buzzer is here, so it doesn't play the same sound
 //   on its speaker too. No buzzer wired: set BUZZER_PIN to -1 and the voice unit plays it instead.
 //
+// Debug LED (optional): LED_PIN -> 220 ohm -> LED -> GND. Lit while the plate reads a head; while a
+//   buzz plays it follows the notes, so a bench with no buzzer still shows the command arrived.
+//   Not a light the server controls (set_light is the voice unit's screen). -1 = none wired.
+//
 // Power: the node on its own USB cable from the power bank outside the pillow (no lithium in bedding).
 //
 // RGB LED: red = looking for the voice unit, green = paired, blue blink = a line sent.
@@ -25,6 +29,8 @@
 //
 // Build: arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc --libraries firmware/libraries firmware/pillow_node
 // The voice unit must be built with PILLOW_LINK=1, and both with the same secrets.h.
+// On the devkit's "COM" socket (the CH343 UART bridge, "USB Single Serial") drop CDCOnBoot=cdc so
+// Serial comes out there; with it, Serial is on the native "USB" socket only.
 
 #include <PillowBuzz.h>
 #include <PillowRadio.h>
@@ -32,6 +38,7 @@
 
 #define PLATE_PIN 4   // <- one foil sheet; the other sheet -> GND
 #define BUZZER_PIN 5  // -> 100 ohm -> passive buzzer; -1 = none wired
+#define LED_PIN 6     // -> 220 ohm -> debug LED -> GND; -1 = none wired
 const uint8_t HELLO_HAS_BUZZER = 2;  // bit in our hellos' app byte (firmware/libraries/PillowRadio)
 
 const uint32_t REPORT_MS = 500;        // the contract's ~2 reports per second
@@ -51,7 +58,10 @@ void showLink() {
 }
 
 // ---------- buzzer ----------
+bool buzzLit = false;  // a note is sounding: the debug LED follows it
+
 void buzzerOut(uint16_t hz) {
+  buzzLit = hz != 0;
 #if BUZZER_PIN >= 0
   if (hz) tone(BUZZER_PIN, hz);
   else noTone(BUZZER_PIN);
@@ -136,6 +146,12 @@ bool headOn = false;  // debounced plate contact
 bool plateRaw = false;
 uint32_t plateSince = 0;
 
+void showLed() {
+#if LED_PIN >= 0
+  digitalWrite(LED_PIN, (buzzer.playing() ? buzzLit : headOn) ? HIGH : LOW);
+#endif
+}
+
 // Returns true when the debounced reading changed.
 bool readPlate(uint32_t now) {
   bool pressed = digitalRead(PLATE_PIN) == LOW;
@@ -181,12 +197,16 @@ void readUsb(String &line, bool &garbled) {
 void setup() {
   Serial.begin(115200);
   pinMode(PLATE_PIN, INPUT_PULLUP);
+#if LED_PIN >= 0
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+#endif
 #if BUZZER_PIN >= 0
   radio::helloApp = HELLO_HAS_BUZZER;
 #endif
   bool ok = radio::begin(LINK_ESPNOW, false, onRadio);
-  Serial.printf("pillow_node: esp-now %s on channel %d, mac %s, plate gpio %d, buzzer gpio %d\n",
-                ok ? "started" : "FAILED", RADIO_CHANNEL, WiFi.macAddress().c_str(), PLATE_PIN, BUZZER_PIN);
+  Serial.printf("pillow_node: esp-now %s on channel %d, mac %s, plate gpio %d, buzzer gpio %d, led gpio %d\n",
+                ok ? "started" : "FAILED", RADIO_CHANNEL, WiFi.macAddress().c_str(), PLATE_PIN, BUZZER_PIN, LED_PIN);
 }
 
 void loop() {
@@ -203,6 +223,7 @@ void loop() {
   readUsb(usbLine, usbGarbled);
   startPendingBuzz();
   buzzer.update();
+  showLed();
   showLink();
   if (now - lastStats >= STATS_MS) {
     lastStats = now;

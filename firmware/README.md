@@ -47,10 +47,12 @@ foil plate ──> N16R8 pillow_node ──ESP-NOW──> Waveshare voice_unit �
 power bank (outside) ──USB──> N16R8                (mic, speaker, screen)
 ```
 
-| Sensor | N16R8 | Note |
+| Part | N16R8 | Note |
 |---|---|---|
 | head switch plate, sheet 1 | GPIO4 (`PLATE_PIN`, `INPUT_PULLUP`) | pressed reads LOW |
 | head switch plate, sheet 2 | GND | |
+| passive buzzer | GPIO5 (`BUZZER_PIN`) → 100 Ω → buzzer +, − → GND | plays the server's `buzz`; `-1` = none |
+| debug LED | GPIO6 (`LED_PIN`) → 220 Ω → LED → GND | lit while a head is on the plate, follows the notes during a `buzz`; not a server-controlled light; `-1` = none |
 
 S3 pins are 3.3 V only: no 5 V sensor outputs straight in (an HC-SR04 echo needs a 1k/2k divider);
 analog only on ADC1 (GPIO1-10); keep off GPIO0/3/45/46 (strapping), 19/20 (USB), 48 (RGB LED).
@@ -63,6 +65,24 @@ arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc $L firmware/voice_u
 arduino-cli compile --fqbn esp32:esp32:esp32s3:CDCOnBoot=cdc --libraries firmware/libraries firmware/pillow_node
 uv run sim/audio_bridge.py --serial <the Waveshare's port> --server https://pillow.keanuc.net
 ```
+
+The N16R8 devkit has two USB-C sockets. `CDCOnBoot=cdc` puts `Serial` on the native "USB" socket;
+on the "COM" socket (the CH343 bridge, shows as "USB Single Serial") build **without** it:
+
+```bash
+arduino-cli compile --fqbn esp32:esp32:esp32s3 --libraries firmware/libraries --build-path firmware/pillow_node/build firmware/pillow_node
+arduino-cli upload  --fqbn esp32:esp32:esp32s3 -p /dev/cu.usbmodemXXXX --input-dir firmware/pillow_node/build firmware/pillow_node
+```
+
+### Bench: the node on the laptop's USB, no voice unit
+
+The same node, its USB on a laptop, reaches the server without the Waveshare:
+`uv run sim/uno_bridge.py --port /dev/cu.usbmodemXXXX --pillow-id test-pillow` posts its lines
+as state and writes the server's `buzz` commands back as `BUZZ chime 1` lines (the node's USB
+protocol, the same text the voice unit sends it over ESP-NOW). The radio keeps running, so the
+Waveshare still pairs and gets the same lines. Use `test-pillow`, never `mum`, from a second laptop:
+two bridges on one pillow would each take half of its commands. Announce bench runs on the bus:
+the backend's live tests wipe `test-pillow`.
 
 The voice unit's audio stays on USB; the radio carries only the pillow's lines (`UNO {...}`, the
 prefix kept from the Uno days) and its talk key (`"talk":1` after `"talk":0`, acked, arrives as

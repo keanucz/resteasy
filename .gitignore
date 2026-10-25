@@ -9,3 +9,4 @@ firmware/**/secrets.h
 coord/.agent
 coord/.bus_polled_*
 droid/workspace/
+firmware/**/build*/

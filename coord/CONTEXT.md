@@ -249,3 +249,15 @@ still open:
   (compose profile `fetch`, Keanu OK'd), Claude stays the model (Fetch doesn't require OpenAI). Contained:
   the backend never calls them; withdraw from the Fetch track by dropping the profile. Reminder steps
   dropped from plans since #52 (reminder writes need a family-app login).
+- Sat 24 Oct: pillow node bench path (Adyan). The N16R8 runs `firmware/pillow_node` on Adyan's Mac
+  (the devkit has two USB-C sockets: build with `CDCOnBoot=cdc` for the native "USB" one, without it
+  for the CH343 "COM" one, see firmware/README.md; the Arduino IDE on the same Mac once re-uploaded
+  the bare test sketch over it, so keep the IDE closed or on another port), with a debug LED on
+  GPIO6 (lit while head on; follows the notes during a `buzz`; not a server light). On USB,
+  `sim/uno_bridge.py` posts its lines to the VPS as `test-pillow` and writes `buzz` commands back as
+  `BUZZ chime 1` lines, so the full loop (plate → Supabase → agents → command → board) runs with no
+  Waveshare. The radio is unchanged: Keanu's Waveshare pairs with the same node and serves `mum`.
+  Bench runs go on the bus (start/stop): the backend's live tests wipe `test-pillow`. The bridge now
+  drains the serial backlog and posts only the newest line (a state POST to the VPS takes 1-3 s,
+  the node prints 2 lines/s) and starts polling after the newest queued command (a restart used
+  to replay every old command).
