@@ -21,6 +21,7 @@ from app.crud.crud_constants import (
     NOTIFICATIONS_TABLE,
     PILLOW_STATE_TABLE,
 )
+from app.notify.notify_constants import AGENT as NOTIFY_AGENT
 from tests.seed_constants import TEST_PILLOW_ID, TEST_USER_ID, UNKNOWN_CONTACT_ID
 
 # 23:00 in the test resident's timezone (the residents default), inside her quiet hours
@@ -92,7 +93,8 @@ def test_a_night_with_no_return_escalates_and_resolves(db: Client, night: TestCl
     assert [n["channel"] for n in notes] == ["app", "sms"]  # the in-app alert, then "back in bed"
 
     log = _rows(db, AGENT_LOG_TABLE, "id, agent, intent")
-    assert all(row["agent"] == "night_watch" for row in log)
+    # Night Watch's decisions, plus the notification sender's delivery notes (app/notify, #53)
+    assert {row["agent"] for row in log} <= {"night_watch", NOTIFY_AGENT}
     assert any(row["intent"] == "check_in -> escalating" for row in log)
 
 
