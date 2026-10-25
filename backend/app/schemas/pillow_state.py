@@ -58,3 +58,21 @@ class PillowState(BaseModel):
     night_state: str
     state_since: datetime
     last_seen_at: datetime
+
+
+class PillowPing(BaseModel):
+    """Whether both boards in the pillow answered a ping (POST /pillows/{id}/ping).
+
+    The pillow node (sensors) sends its lines over ESP-NOW to the voice unit, which hands them to
+    the bridge, which posts them as state. A fresh report means the node answered; a fresh report
+    that also names the bridge's link to the voice unit means the voice unit answered too. When
+    nothing arrives, the backend can't tell which hop broke, so both read false.
+    """
+
+    pillow_id: str
+    active: bool
+    node_alive: bool
+    voice_unit_alive: bool
+    link: Link | None
+    last_seen_at: datetime | None
+    checked_at: datetime

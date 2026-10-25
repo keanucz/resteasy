@@ -1,5 +1,6 @@
 """Tests for the pillow router against the seeded test pillow."""
 
+import time
 from datetime import UTC, datetime
 
 import pytest
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 from supabase import Client
 
 from app.crud.crud_constants import READINGS_TABLE
+from app.routers import pillows
 from tests.seed_constants import TEST_PILLOW_ID, TEST_RESIDENT_ID, UNKNOWN_PILLOW_ID
 
 DEVICE_STATE = {
@@ -96,3 +98,30 @@ def test_state_rejects_bad_loudness_or_link(live_client: TestClient, field: str,
     """Loudness is dBFS (never above 0) and the link is one the bridge knows."""
     response = live_client.post(f"/api/pillows/{TEST_PILLOW_ID}/state", json={**DEVICE_STATE, field: value})
     assert response.status_code == 422
+
+
+def test_ping_after_a_report_through_the_voice_unit_is_active(live_client: TestClient) -> None:
+    """A fresh report through the bridge's link to the voice unit: both boards answered."""
+    report = {**DEVICE_STATE, "ts": time.time(), "link": "hotspot"}
+    assert live_client.post(f"/api/pillows/{TEST_PILLOW_ID}/state", json=report).status_code == 200
+
+    ping = live_client.post(f"/api/pillows/{TEST_PILLOW_ID}/ping").json()
+    assert (ping["active"], ping["node_alive"], ping["voice_unit_alive"]) == (True, True, True)
+    assert ping["link"] == "hotspot"
+
+
+def test_ping_without_the_voice_unit_is_not_active(
+    live_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The node reporting on its own (no link) answers, the voice unit doesn't, so not active."""
+    monkeypatch.setattr(pillows, "PING_WAIT_S", 0)
+    report = {**DEVICE_STATE, "ts": time.time(), "link": None}
+    assert live_client.post(f"/api/pillows/{TEST_PILLOW_ID}/state", json=report).status_code == 200
+
+    ping = live_client.post(f"/api/pillows/{TEST_PILLOW_ID}/ping").json()
+    assert (ping["active"], ping["node_alive"], ping["voice_unit_alive"]) == (False, True, False)
+
+
+def test_ping_unknown_pillow_is_404(live_client: TestClient) -> None:
+    """Only a registered pillow can be pinged."""
+    assert live_client.post(f"/api/pillows/{UNKNOWN_PILLOW_ID}/ping").status_code == 404
