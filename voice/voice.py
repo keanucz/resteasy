@@ -17,6 +17,7 @@ cut off, and silence is recognised as no answer.
 
 Audio goes through the laptop's own speaker and mic by default. PILLOW_AUDIO=pillow uses the voice
 unit inside the pillow instead (firmware/voice_unit, reached through sim/audio_bridge.py).
+PILLOW_SPEAKER=laptop then keeps the pillow's mic but plays through the laptop's default output.
 
 The full check-in conversation lives in voice/checkin.py.
 """
@@ -51,9 +52,14 @@ STT_MODEL = "ink-2"
 VOICE_ID = os.environ.get("PILLOW_VOICE_ID", "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4")
 # "laptop": the laptop's speaker + mic. "pillow": the voice unit, via sim/audio_bridge.py.
 AUDIO = os.environ.get("PILLOW_AUDIO", "laptop")
+# Where she hears it, if not the same place: PILLOW_SPEAKER=laptop keeps the pillow's mic but plays
+# through the laptop's default output, e.g. a Bluetooth speaker by the bed (the ESP32-S3 has no
+# Classic Bluetooth, so it can't stream to one itself)
+SPEAKER = os.environ.get("PILLOW_SPEAKER", AUDIO)
 BRIDGE_HOST, _, BRIDGE_PORT = os.environ.get("PILLOW_AUDIO_BRIDGE", "127.0.0.1:8765").rpartition(":")
 MIC_RATE = 16_000
-TTS_RATE = MIC_RATE if AUDIO == "pillow" else 24_000  # the voice unit plays 16 kHz only
+# 16 kHz everywhere: the voice unit plays nothing else, and settle.py's music is 16 kHz too
+TTS_RATE = MIC_RATE
 CHUNK = MIC_RATE // 10  # 100 ms of audio per frame, as the docs recommend
 # Cartesia's "Patient" turn profile: tolerates pauses mid-sentence from someone half asleep.
 TURN = {
@@ -108,7 +114,7 @@ def tone(freq_hz: float = 660.0, ms: int = 160, volume: float = 0.15) -> np.ndar
 
 def play(audio: np.ndarray) -> None:
     """Play samples from `render` or `tone` and block until they finish."""
-    if AUDIO == "pillow":
+    if SPEAKER == "pillow":
         _play_on_pillow(audio.tobytes())
         return
     sd.play(audio, TTS_RATE)
