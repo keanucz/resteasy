@@ -193,7 +193,7 @@ def test_distress_in_a_checkin_phones_and_texts_everyone_at_once():
     ts, _ = feed(nw, ts, 20 * 60 + 40, False)
     acts = nw.checkin_done(ts, escalate=True, reason='She said: "Help, I have fallen"', distress=True)
     assert [(a.channel, a.contact) for a in acts if isinstance(a, Alert)] == [
-        ("app", "Sarah"), ("app", "Tom"), ("call", "Sarah"), ("sms", "Sarah"), ("sms", "Tom")]  # Tom: no calls
+        ("app", "Sarah"), ("app", "Tom"), ("call", "Sarah"), ("sms", "Sarah"), ("sms", "Tom")]  # no call: Tom
     step = next(a for a in acts if isinstance(a, Event) and a.type == "escalation_step")
     assert step.data["kind"] == "distress"
     call = next(a for a in acts if isinstance(a, Alert) and a.channel == "call")
