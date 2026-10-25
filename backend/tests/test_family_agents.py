@@ -122,7 +122,12 @@ def family_client(db: Client, client: TestClient, tokens: dict) -> Iterator[Test
 def helper(db: Client, tokens: dict) -> Iterator[str]:
     """A plain (not owner) contact of the test resident with a family agent of its own."""
     contact_id = db.table(CONTACTS_TABLE).insert({"full_name": "Agent Helper"}).execute().data[0]["id"]
-    link = {"resident_id": TEST_RESIDENT_ID, "contact_id": contact_id, "priority": TEST_HELPER_PRIORITY}
+    link = {
+        "resident_id": TEST_RESIDENT_ID,
+        "contact_id": contact_id,
+        "priority": TEST_HELPER_PRIORITY,
+        "role": "contact",  # not the owner (the column defaults to owner for the demo)
+    }
     tokens[UUID(contact_id)] = HELPER_AGENT
     try:
         db.table(RESIDENT_CONTACTS_TABLE).insert(link).execute()

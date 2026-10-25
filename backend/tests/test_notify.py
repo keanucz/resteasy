@@ -271,10 +271,11 @@ def test_queues_without_the_words_until_the_column_exists():
 
 class FakeAudio:
     def __init__(self, made=("calls/abc.mp3", "https://x.test/calls/abc.mp3")):
-        self.made, self.scripts, self.forgotten = made, [], []
+        self.made, self.scripts, self.pillows, self.forgotten = made, [], [], []
 
-    async def make(self, text):
+    async def make(self, text, pillow_id=None):
         self.scripts.append(text)
+        self.pillows.append(pillow_id)
         return self.made
 
     async def forget_later(self, path):
@@ -293,6 +294,7 @@ def test_call_plays_the_pillow_voice_and_deletes_it_after():
     assert asyncio.run(go()).sent
     assert tw.calls == [(PHONE, "Margaret hasn't come back to bed.", "https://x.test/calls/abc.mp3")]
     assert audio.scripts == ["Margaret hasn't come back to bed."] and audio.forgotten == ["calls/abc.mp3"]
+    assert audio.pillows == ["mum"]
 
 
 def test_call_falls_back_to_twilio_voice_without_audio():
@@ -326,6 +328,20 @@ def test_call_audio_is_spoken_in_the_pillow_voice_and_stored(monkeypatch):
     assert cartesia.spoken == [(DEFAULT_VOICE_ID, "Hi", "en", 0.95)]
     assert path.startswith("calls/") and path.endswith(".mp3") and len(path) > len("calls/.mp3") + 16
     assert stored == [(path, b"mp3")] and url == f"https://x.test/{path}"
+
+
+def test_call_audio_is_spoken_in_the_voice_chosen_for_the_pillow(monkeypatch):
+    async def store(db, path, mp3):
+        return f"https://x.test/{path}"
+
+    async def chosen(db, pillow_id):
+        return f"voice-of-{pillow_id}"
+
+    monkeypatch.setattr(call_audio, "store_sample", store)
+    monkeypatch.setattr(call_audio, "call_voice", chosen)
+    cartesia = FakeCartesia()
+    assert asyncio.run(CallAudio(cartesia, object()).make("Hi", "mum"))
+    assert cartesia.spoken[0][0] == "voice-of-mum"
 
 
 def test_call_audio_gives_up_on_failure_or_when_slow(monkeypatch):
