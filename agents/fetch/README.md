@@ -11,9 +11,9 @@ them.
 
 | Agent | Name | Address |
 |---|---|---|
-| Pillow coordinator | `pillow-coordinator-mum` | _set at deploy: `coordinator for mum: agent1q...` in its log_ |
-| Sarah's agent | `pillow-family-sarah` | _set at deploy_ |
-| Second family member's agent | `pillow-family-<name>` | _set at deploy_ |
+| Pillow coordinator | `pillow-coordinator-mum` | `agent1qgharmfw5pyftk46gfmfyzqsdn6cqjh3fllnha7al76pyum4zd34zy93xrj` |
+| Sarah's agent | `pillow-family-sarah` | `agent1qfazxg7rlwfwj9z5u2vvan8uk6mcgeecyd7wh49taktaarwjxw5kvatzd7h` |
+| Second family member's agent | `pillow-family-<name>` | `agent1qtjfwjlsagy8jmxp20dx523avn2mmpygrf58hczmd5xsr235cvusjhwhe8d` |
 
 All three are uAgents on Agentverse (Agent Chat Protocol, mailbox), reachable from ASI:One. They use
 Claude (`claude-opus-5-5`) for language, and plain code for every decision that matters.
