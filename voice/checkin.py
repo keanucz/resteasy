@@ -15,7 +15,8 @@ Rules:
 - Silence or speech we can't make out: up to `max_tries` asks, each a little louder.
 - Confused ("where am I?"): reorient her each time; the first time also restarts the tries.
 - Before escalating she is warned and has `cancel_s` to say she's fine; only an explicit "I'm fine"
-  cancels then ("yes" could be agreeing to the call).
+  cancels then ("yes" could be agreeing to the call). After the warning the pillow says nothing
+  more: lying back down (or the "I'm fine" key) ends the alert.
 - Clear "I'm fine" at any point stands down.
 - If the check-in itself fails (no network, no mic, a crash), it escalates: never fail silent.
 - The distress, warning and reorient lines are fixed here; a judge may only word the fine line.
@@ -122,7 +123,6 @@ def run_checkin(
             return fine(v)
         if v.kind is Kind.DISTRESS:
             return distress()
-        speak(f"Okay, I'm letting {contact} know now.", volume=1.3)
         if Kind.CONFUSED in seen:
             return Outcome(True, "She answered but seemed confused about where she was.", heard)
         if Kind.UNCLEAR in seen:
@@ -138,25 +138,6 @@ def run_checkin(
     except Exception as e:  # noqa: BLE001 - speaker, mic, network or judge: fail toward escalation
         log(f"check-in failed: {type(e).__name__}: {e}")
         return Outcome(True, "The pillow's check-in could not run, so we couldn't ask her.", heard)
-
-
-ALERT_ASK_EVERY_S = 30.0  # while family are being alerted, the pillow keeps offering her a way out
-ALERT_LINE = "I've let {contact} know. If you're okay, just say I'm fine."
-ALERT_FINE_LINE = "Okay. I'll tell {contact} you're fine."
-
-
-def ask_after_alert(speak: Speak, listen: Listen, *, contact: str = "your family", no_answer_s: float = 10.0,
-                    log: Callable[[str], None] = lambda _: None) -> bool:
-    """Once the alert has gone out: ask once, and True only for an explicit "I'm fine" (the caller
-    then stops the alert). "Yes", silence, a mumble or distress leave the ladder running."""
-    speak(ALERT_LINE.format(contact=contact), volume=1.6)
-    reply = listen(no_answer_s=no_answer_s)
-    text = getattr(reply, "text", "") or ""
-    log(f"after the alert she said {text!r}" if text else "after the alert: no answer")
-    if not said_fine(text):
-        return False
-    speak(ALERT_FINE_LINE.format(contact=contact))
-    return True
 
 
 def main() -> None:
