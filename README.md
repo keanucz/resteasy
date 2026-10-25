@@ -54,6 +54,16 @@ and sorts it into *fine*, *confused*, *distress* or *unclear*.
 app, then a text, then a phone call, then the next person on the list. Tapping "I'm on it" in the
 app stops it. If she sounds distressed, everyone gets a call straight away.
 
+<p align="center">
+  <img src="docs/images/alert-texts-first.png" alt="Text messages on a family member's phone: two alerts saying Margaret got up at 00:21 and at 00:35, hasn't come back to bed, and the pillow's check-in didn't finish, so please check on her" width="280">
+  <img src="docs/images/alert-texts-later.png" alt="More alert texts: Hello Szymon, this is a message about Margaret. She got out of bed at 00:35 and it has been 18 minutes. Then Margaret is back in bed, and a new alert for 01:10" width="280">
+</p>
+
+These are the texts that reached a family member's phone during our test runs early on Sunday
+morning. Each one says when she got up, how long she's been gone and whether the check-in
+finished. When she gets back into bed, a short "Margaret is back in bed" follows. We cropped the
+sender's number off the top.
+
 **It learns her normal.** For the first week it waits a fixed 20 minutes. After that, the timeout
 follows how long her trips usually take, and the family's night summary points out any trip that
 ran much longer than usual.
@@ -65,6 +75,13 @@ like "take your tablets" or "call your daughter", but it never gives advice abou
 **It speaks in a family voice.** Someone in the family records a short sample in the app.
 Cartesia clones it, so the check-ins and the alert phone calls sound like her own family rather
 than a stranger.
+
+<p align="center">
+  <img src="docs/images/app-family-voice.webp" alt="Screen recording of Add a family voice: a short passage to read aloud, a timer counting up while recording, then Recording ready, 14 seconds" width="260">
+</p>
+
+Recording a family voice in the app. It shows a short passage to read aloud and counts the
+seconds; this take stopped at 14.
 
 **Family can ask an agent about her night.** Each family member gets a Fetch.ai agent on
 Agentverse. In ASI:One they can ask "How was Mum's night?" or tell it "I'm away Thursday to
@@ -88,6 +105,21 @@ setting.
 
 The screenshots on this page come from the app running in a browser with sample data for one
 night, so the times in them are made up.
+
+The three clips below are screen recordings from an iPhone running the app on Sunday morning,
+sped up and trimmed. The resident in them is called Margaret.
+
+<p align="center">
+  <img src="docs/images/app-tonight-live.webp" alt="Screen recording of the Tonight screen changing from Margaret is up to asleep, restless, asleep and up again, ending with: The pillow is checking in" width="240">
+  <img src="docs/images/app-night-summary.webp" alt="Screen recording scrolling through the night: Family were alerted, time asleep and out of bed, bedroom temperature, movement, a log of what the pillow noticed, and four weeks of sleep" width="240">
+  <img src="docs/images/app-add-reminder.webp" alt="Screen recording of adding a reminder to have a glass of water at 11 am every day, showing the question the pillow will ask Margaret first, then Reminder saved" width="240">
+</p>
+
+On the left, the Tonight screen changes as her state does: up, asleep, restless, asleep, then up
+again with "The pillow is checking in" under her name. In the middle is the rest of that
+screen, from the alert card down through temperature, movement and the log of everything the
+pillow noticed overnight. On the right, a family member adds a water reminder. Before it starts,
+the pillow asks Margaret whether that's alright.
 
 ## How it works
 
@@ -201,6 +233,13 @@ There were four of us, and each person worked with their own Claude Code session
 sessions talked to each other over a small message bus we wrote for the weekend, so one person's
 Claude could ask another's about an API change without either of us relaying it by hand.
 `coord/` has the protocol and a few screenshots of it in use.
+
+<p align="center">
+  <a href="docs/images/build-overnight-timelapse.mp4"><img src="docs/images/build-overnight-timelapse.webp" alt="Sped-up timelapse of the team working at our table early on Sunday morning, with the pillow on the table between the laptops" width="640"></a>
+</p>
+
+A timelapse from our table, starting around 4:30 am on Sunday. The pillow sits between the
+laptops. Click it for a sharper mp4 version.
 
 ## Repository
 
