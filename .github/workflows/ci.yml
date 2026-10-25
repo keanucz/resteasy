@@ -1,6 +1,6 @@
 # Every lane's checks on every PR and every push to master. Each job runs only when its folder (or
 # this file) changed; "ci ok" sums them up, so it is the one check branch protection requires.
-# The backend (and the server deploy) is backend.yml.
+# The backend is backend.yml.
 name: ci
 
 on:

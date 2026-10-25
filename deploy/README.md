@@ -1,5 +1,9 @@
 # Deploy: the backend on Keanu's VPS
 
+> **Decommissioned (2026-10-25).** After judging at Cal Hacks 13.0 the pillow stack was removed from the
+> VPS and the deploy job was taken out of `.github/workflows/backend.yml`. What follows describes how it
+> ran during the hackathon.
+
 `https://pillow.keanuc.net` is served by the VPS, not by a laptop. Two containers
 (`compose.yml`): the backend, and `cloudflared` running the `calhacks-pillow` tunnel to it.
 
