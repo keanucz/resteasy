@@ -25,7 +25,8 @@ ACTIONS = {CONFIRM_PLAN, CANCEL_PLAN, SEND_GOODNIGHT, GOODNIGHT_FORM, SHOW_LOG}
 
 
 def reply(text: str, card: tuple[str, dict[str, Any]] | None = None) -> ChatMessage:
-    """One answer: the narration, an optional (card_kind, payload) card, and end-session."""
+    """One answer: the narration and an optional (card_kind, payload) card. A plain answer ends the
+    session; a card leaves it open, or ASI:One shows it as already "Submitted", without its buttons."""
     content: list[Any] = [TextContent(type="text", text=text)]
     if card is not None:
         kind, payload = card
@@ -35,7 +36,8 @@ def reply(text: str, card: tuple[str, dict[str, Any]] | None = None) -> ChatMess
             "card_kind": kind,
             "card_payload": json.dumps(payload),
         }))
-    content.append(EndSessionContent(type="end-session"))
+    if card is None:
+        content.append(EndSessionContent(type="end-session"))
     return ChatMessage(timestamp=datetime.now(UTC), msg_id=uuid4(), content=content)
 
 
@@ -67,8 +69,8 @@ def night_detail(resident: str, summary: dict[str, Any]) -> tuple[str, dict[str,
         ("Asleep", summary.get("asleep") or "not seen"),
         ("Up in the night", f"{len(trips)} time{'s' if len(trips) != 1 else ''}"
          + (f", longest {summary.get('longest_trip_min')} min" if trips else "")),
-        ("Pillow checked in", str(summary.get("checkins", 0))),
-        ("Family alerted", str(summary.get("escalations", 0))),
+        ("Voice check-ins", str(summary.get("checkins", 0))),
+        ("Family alerts", str(summary.get("escalations", 0))),
     ]
     if summary.get("acknowledged_by"):
         rows.append(("Answered by", ", ".join(summary["acknowledged_by"])))

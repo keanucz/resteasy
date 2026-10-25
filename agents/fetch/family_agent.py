@@ -31,6 +31,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -63,6 +64,7 @@ COORDINATOR = os.environ.get("COORDINATOR_ADDRESS", "").strip()
 TZ = ZoneInfo(os.environ.get("RESIDENT_TZ", "America/Los_Angeles"))
 MODEL = "claude-opus-5-5"
 HISTORY_TURNS = 6
+HISTORY_IDLE_S = 15 * 60  # quiet this long and the next message starts a new conversation
 HERE = Path(__file__).resolve().parent
 PORT = int(os.environ.get("AGENT_PORT", "8001"))
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
@@ -494,19 +496,29 @@ def _text(msg: ChatMessage) -> str:
     return " ".join(c.text for c in msg.content if isinstance(c, TextContent)).strip()
 
 
+def history(storage: Any, sender: str) -> list[dict[str, Any]]:
+    """The last few turns of the current conversation: after HISTORY_IDLE_S of silence it is a new
+    conversation (a new ASI:One chat), and the old one must not leak into it."""
+    kept = storage.get(f"history:{sender}")
+    if not isinstance(kept, dict) or time.time() - kept.get("at", 0) > HISTORY_IDLE_S:
+        return []
+    return kept["turns"]
+
+
 def remember(storage: Any, sender: str, said: str, answered: str) -> None:
     """Keep the last few turns as plain text, including card clicks and what a plan did, so Claude
     knows on the next message what is already queued or done."""
-    key = f"history:{sender}"
-    turns = [*(storage.get(key) or []), {"role": "user", "content": said},
+    turns = [*history(storage, sender), {"role": "user", "content": said},
              {"role": "assistant", "content": answered}]
-    storage.set(key, turns[-2 * HISTORY_TURNS:])
+    storage.set(f"history:{sender}", {"at": time.time(), "turns": turns[-2 * HISTORY_TURNS:]})
 
 
 async def respond(ctx: Context, sender: str, text: str) -> ChatMessage:
     """Card clicks and yes/no to a pending plan are handled in plain code; the rest goes to Claude."""
     pending_key = f"plan:{sender}"
     pending = ctx.storage.get(pending_key)
+    if pending and time.time() - pending.get("at", 0) > HISTORY_IDLE_S:
+        pending = None  # a plan from an earlier conversation: a "yes" now must not carry it out
     selection = cards.parse_selection(text)
     action = selection["action"] if selection else None
     if pending and action is None and pending["id"] in text:
@@ -536,11 +548,11 @@ async def respond(ctx: Context, sender: str, text: str) -> ChatMessage:
         remember(ctx.storage, sender, said, done)
         return cards.reply(done)
 
-    turn = await answer(ctx.storage.get(f"history:{sender}") or [], text)
+    turn = await answer(history(ctx.storage, sender), text)
     reply_text = turn.text or "Done."
     if turn.steps:
         plan_id = uuid4().hex[:12]
-        ctx.storage.set(pending_key, {"id": plan_id, "steps": turn.steps})
+        ctx.storage.set(pending_key, {"id": plan_id, "steps": turn.steps, "at": time.time()})
         rows = [describe(s["tool"], s["args"]) for s in turn.steps]
         queued = "; ".join(f"{label}: {value}" for label, value in rows)
         remember(ctx.storage, sender, text, f"{reply_text} [Plan shown for approval, not done yet: {queued}]")
