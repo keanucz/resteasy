@@ -17,8 +17,9 @@ from app.notify.notify_constants import (
     CALL_AUDIO_FOLDER,
     CALL_AUDIO_KEEP_S,
     CALL_AUDIO_LANGUAGE,
+    CALL_AUDIO_SPEED,
 )
-from app.voice.cartesia import Cartesia
+from app.voice.cartesia import Cartesia, Speech
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +37,8 @@ class CallAudio:
         path = f"{CALL_AUDIO_FOLDER}/{uuid4().hex}{SAMPLE_EXTENSION}"
         try:
             async with asyncio.timeout(CALL_AUDIO_BUDGET_S):
-                mp3 = await self.cartesia.speak(DEFAULT_VOICE_ID, text, CALL_AUDIO_LANGUAGE)
+                speech = Speech(speed=CALL_AUDIO_SPEED)
+                mp3 = await self.cartesia.speak(DEFAULT_VOICE_ID, text, CALL_AUDIO_LANGUAGE, speech)
                 return path, await store_sample(self.db, path, mp3)
         except Exception as err:  # Cartesia, Storage or the budget: Twilio's voice reads it instead
             log.warning("Call audio not made (%s); Twilio's voice reads the script", type(err).__name__)

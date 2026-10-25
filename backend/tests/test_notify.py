@@ -301,7 +301,7 @@ class FakeCartesia:
         await asyncio.sleep(self.delay)
         if self.fail:
             raise self.fail
-        self.spoken.append((voice_id, text, language))
+        self.spoken.append((voice_id, text, language, speech.speed))
         return b"mp3"
 
 
@@ -315,7 +315,7 @@ def test_call_audio_is_spoken_in_the_pillow_voice_and_stored(monkeypatch):
     monkeypatch.setattr(call_audio, "store_sample", store)
     cartesia = FakeCartesia()
     path, url = asyncio.run(CallAudio(cartesia, None).make("Hi"))
-    assert cartesia.spoken == [(DEFAULT_VOICE_ID, "Hi", "en")]
+    assert cartesia.spoken == [(DEFAULT_VOICE_ID, "Hi", "en", 0.95)]
     assert path.startswith("calls/") and path.endswith(".mp3") and len(path) > len("calls/.mp3") + 16
     assert stored == [(path, b"mp3")] and url == f"https://x.test/{path}"
 

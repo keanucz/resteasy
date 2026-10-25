@@ -20,6 +20,8 @@ MACHINE_DETECTION_SILENCE_MS = 3000
 CALL_AUDIO_BUDGET_S = 8
 CALL_AUDIO_FOLDER = "calls"
 CALL_AUDIO_LANGUAGE = "en"  # the Liaison writes the family's alerts in English
+# A touch quicker than the pillow's bedside pace (0.85): someone woken at 3 a.m. wants it plainly
+CALL_AUDIO_SPEED = 0.95
 # Then the MP3 is deleted: the script names her and what happened. Long enough for a voicemail,
 # which only plays it after the greeting
 CALL_AUDIO_KEEP_S = 10 * 60
