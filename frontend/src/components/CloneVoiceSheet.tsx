@@ -1,15 +1,15 @@
 import * as DocumentPicker from 'expo-document-picker';
 import {
   type AudioRecorder,
-  IOSOutputFormat,
   RecordingPresets,
   type RecordingOptions,
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
   useAudioRecorder,
 } from 'expo-audio';
+import { File } from 'expo-file-system';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Text, View } from 'react-native';
+import { Platform, Text, View } from 'react-native';
 
 import { Button } from '@/components/Button';
 import { Sheet } from '@/components/Feedback';
@@ -35,27 +35,29 @@ import {
 } from '@/services/voice';
 
 /**
- * Cartesia clones from flac, mp3, ogg, wav or webm, so iPhones record plain wav (an .m4a may be
- * refused). Android has no such encoder and keeps the AAC preset; the web records webm.
+ * Phones record the preset's AAC .m4a and the web records webm; Cartesia clones from both. iPhones
+ * used to record linear PCM wav, but AVAudioRecorder captured nothing with those settings while the
+ * clock still ran, so the copy was never sent.
  */
 const CLONE_RECORDING: RecordingOptions = {
   ...RecordingPresets.HIGH_QUALITY,
-  // One voice needs one channel, and Cartesia clones well from 24 kHz: a 60 s wav is ~2.9 MB
-  // instead of ~10.6 MB at the preset's 44.1 kHz stereo, so it uploads fast and fits the 10 MB cap.
-  sampleRate: 24000,
+  // One voice needs one channel: a 60 s clip is ~0.5 MB, so it uploads fast and fits the 10 MB cap.
   numberOfChannels: 1,
   bitRate: 64000,
-  extension: '.wav',
-  ios: {
-    ...RecordingPresets.HIGH_QUALITY.ios,
-    extension: '.wav',
-    outputFormat: IOSOutputFormat.LINEARPCM,
-    linearPCMBitDepth: 16,
-    linearPCMIsBigEndian: false,
-    linearPCMIsFloat: false,
-  },
-  android: RecordingPresets.HIGH_QUALITY.android,
 };
+
+/** A recording smaller than this has no sound in it (an empty file is a few hundred bytes). */
+const CLIP_MIN_BYTES = 4096;
+
+/** The recording's size in bytes, or null when it can't be read (the web, or a missing file). */
+function clipBytes(uri: string): number | null {
+  if (Platform.OS === 'web') return null;
+  try {
+    return new File(uri).size;
+  } catch {
+    return null;
+  }
+}
 
 /** How often the timer reads the recorder while recording. */
 const TICK_MS = 250;
@@ -170,8 +172,12 @@ export function CloneVoiceSheet({
       if (phaseRef.current !== 'recording' && phaseRef.current !== 'stopping') return;
       setPhase('idle');
       restorePlayback();
-      if (uri)
-        setRecorded({ clip: clipFromRecording(uri), from: 'mic', seconds: (Date.now() - startedAt.current) / 1000 });
+      const bytes = uri ? clipBytes(uri) : null;
+      if (!uri || (bytes !== null && bytes < CLIP_MIN_BYTES)) {
+        setError("The microphone didn't pick anything up. Try again, or choose an audio file instead.");
+        return;
+      }
+      setRecorded({ clip: clipFromRecording(uri), from: 'mic', seconds: (Date.now() - startedAt.current) / 1000 });
     },
     [setPhase],
   );
