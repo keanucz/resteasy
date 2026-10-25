@@ -308,21 +308,21 @@ def test_demo_timings_show_every_state_within_seconds():
     assert nw.state is State.IN_BED
 
 
-def test_demo_alerts_family_30_s_into_an_unanswered_checkin():
+def test_demo_alerts_family_120_s_into_a_checkin_that_never_reports():
     nw = NightWatch(timings=DEMO_TIMINGS)
     play(nw, NIGHT, [True] * 4 + [False] * 20)  # check-in started at 19
-    assert nw.tick(NIGHT + 48) == []
-    acts = nw.tick(NIGHT + 49)
+    assert nw.tick(NIGHT + 138) == []
+    acts = nw.tick(NIGHT + 139)
     assert isinstance(acts[1], CancelCheckin) and nw.state is State.ESCALATING
     assert [a.channel for a in acts if isinstance(a, Alert)] == ["app"]
 
 
-def test_demo_a_spoken_fine_25_s_in_still_counts():
+def test_demo_a_spoken_fine_after_two_asks_still_counts():
     # A spoken answer is heard, judged and posted in well under 30 s; a 10 s limit lost real "I'm fine"s
     nw = NightWatch(timings=DEMO_TIMINGS)
     play(nw, NIGHT, [True] * 4 + [False] * 20)  # check-in started at 19
-    nw.tick(NIGHT + 44)
-    nw.checkin_done(NIGHT + 44, escalate=False, reason="She said she was fine.")
+    nw.tick(NIGHT + 79)
+    nw.checkin_done(NIGHT + 79, escalate=False, reason="She said she was fine.")
     assert nw.state is State.UP
 
 
