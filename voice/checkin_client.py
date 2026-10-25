@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["anthropic>=2.3", "httpx>=0.27", "numpy>=1.26", "sounddevice>=0.4", "websockets>=14"]
+# dependencies = ["anthropic>=2.3", "httpx>=0.27", "numpy>=1.26", "sounddevice>=0.4", "websockets>=14", "evdev>=1.7; sys_platform == 'linux'"]
 # ///
 """The base laptop's side of Night Watch: watch the pillow's night state, speak, run the check-in.
 
