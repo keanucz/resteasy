@@ -299,14 +299,13 @@ def second_of(log, kind):
 
 def test_demo_timings_show_every_state_within_seconds():
     nw = NightWatch(timings=DEMO_TIMINGS)
-    # the second reading that agrees decides: on = in bed; lifted at 10: up at the next reads off,
-    # check-in 15 s after the lift; back on = back in bed
+    # on 2 s = in bed; lifted at 10: up 5 s later, check-in 15 s after the lift; back on 2 s = back in bed
     log = play(nw, NIGHT, [True] * 10 + [False] * 20 + [True] * 5)
-    assert second_of(log, "lay_down") == 1
-    assert second_of(log, "bed_exit") == 12
+    assert second_of(log, "lay_down") == 2
+    assert second_of(log, "bed_exit") == 15
     assert second_of(log, "no_return") == 25
     assert any(isinstance(a, StartCheckin) for s, a in log if s == 25)
-    assert second_of(log, "bed_return") == 31
+    assert second_of(log, "bed_return") == 32
     assert nw.state is State.IN_BED
 
 

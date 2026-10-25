@@ -28,8 +28,8 @@ EDGE_KEYS = ("talk", "family")  # key_fine is Night Watch's (it cancels alerts)
 DEMO_RESTLESS_MOTION = 0.4
 DEMO_RESTLESS_S = 5  # this long at or above DEMO_RESTLESS_MOTION = restless
 DEMO_SETTLED_S = 3  # this long below it = settled
-DEMO_ASLEEP_S = 0.75  # a quarter of the earlier 3 s: Bluetooth readings arrive seconds apart
-DEMO_HEAD_OFF_GRACE_S = 1.25  # Night Watch's demo bed exit: off this long ends the bed session
+DEMO_ASLEEP_S = 3
+DEMO_HEAD_OFF_GRACE_S = 5  # Night Watch's demo bed exit: off this long ends the bed session
 
 
 class SleepTracker:
