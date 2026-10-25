@@ -9,11 +9,14 @@ then alerts her family one after another until someone answers. **These agents a
 side.** Each family member has their own agent, and the pillow has a coordinator that talks to all of
 them.
 
-| Agent | Name | Address |
-|---|---|---|
-| Pillow coordinator | `pillow-coordinator-mum` | `agent1qgharmfw5pyftk46gfmfyzqsdn6cqjh3fllnha7al76pyum4zd34zy93xrj` |
-| Sarah's agent | `pillow-family-sarah` | `agent1qfazxg7rlwfwj9z5u2vvan8uk6mcgeecyd7wh49taktaarwjxw5kvatzd7h` |
-| Second family member's agent | `pillow-family-<name>` | `agent1qtjfwjlsagy8jmxp20dx523avn2mmpygrf58hczmd5xsr235cvusjhwhe8d` |
+| Agent | Name | Handle | Address |
+|---|---|---|---|
+| Pillow coordinator | Pillow Night Coordinator | `@pillow-coordinator` | `agent1qgharmfw5pyftk46gfmfyzqsdn6cqjh3fllnha7al76pyum4zd34zy93xrj` |
+| Sarah's agent | Sarah's Pillow Agent | `@pillow-sarah` | `agent1qfazxg7rlwfwj9z5u2vvan8uk6mcgeecyd7wh49taktaarwjxw5kvatzd7h` |
+| Szymon's agent | Szymon's Pillow Agent | `@pillow-szymon` | `agent1qtjfwjlsagy8jmxp20dx523avn2mmpygrf58hczmd5xsr235cvusjhwhe8d` |
+
+Each agent's Agentverse profile shows its own README (`README_coordinator.md`, `README_family.md`)
+and avatar (served by the backend from `backend/app/static/agents/`).
 
 All three are uAgents on Agentverse (Agent Chat Protocol, mailbox), reachable from ASI:One. They use
 Claude (`claude-opus-5-5`) for language, and plain code for every decision that matters.
@@ -24,7 +27,7 @@ Claude (`claude-opus-5-5`) for language, and plain code for every decision that 
 |---|---|
 | "How was Mum's night?" | last night from the pillow (in bed, asleep, trips, check-ins, alerts, anything unusual), as a card |
 | "Send Mum a goodnight" | a form card; the pillow plays your words when she next lies down |
-| "I'm in Denver Thu to Sun, make sure Mum's covered" | a **plan**: your away nights, a goodnight for each night, maybe a setting, shown as one Confirm / Cancel card |
+| "I'm in Denver Thu to Sun, make sure Mum's covered" | a **plan**: your away nights, a goodnight, maybe a setting, shown as one Confirm / Cancel card |
 | "What's Mum got this week?" | her reminders day by day, with how each went and whether she has agreed to it |
 | "Move her tablets to 9", "skip her walk on Saturday", "drop the call reminder" | a plan that changes, pauses, skips a day of or deletes that reminder; a new time or wording is asked of her again |
 | "Give her 25 minutes before it checks on her" | the same: a plan you confirm. The pillow's Guardian keeps it between 10 and 30 minutes |

@@ -4,10 +4,12 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from supabase import acreate_client
 
 from app.agents.liaison import Liaison
@@ -96,6 +98,8 @@ def create_app() -> FastAPI:
         allow_headers=CORS_ALLOW_HEADERS,
     )
     app.include_router(api_router, prefix=API_PREFIX)
+    # Public images, e.g. the Fetch.ai agents' Agentverse avatars (agents/fetch): /static/agents/*.png
+    app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
     app.add_exception_handler(VoiceServiceError, _voice_service_failed)
     return app
 

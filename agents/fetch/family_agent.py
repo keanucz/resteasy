@@ -68,18 +68,23 @@ PORT = int(os.environ.get("AGENT_PORT", "8001"))
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 AS_CONTACT = {"contact_id": CONTACT_ID}  # it acts as the family member it speaks for
 _slug = re.sub(r"[^a-z0-9]+", "-", CONTACT_NAME.lower()).strip("-") or "family"
+PUBLIC_URL = os.environ.get("PILLOW_PUBLIC_URL", "https://pillow.keanuc.net").rstrip("/")  # avatars
+AVATARS = {"sarah", "szymon"}  # backend/app/static/agents/<slug>.png; anyone else gets family.png
 
 agent = Agent(
-    name=os.environ.get("AGENT_NAME") or f"pillow-family-{_slug}",
+    name=os.environ.get("AGENT_NAME") or f"{CONTACT_NAME}'s Pillow Agent",
+    handle=os.environ.get("AGENT_HANDLE") or f"pillow-{_slug}"[:20],  # Agentverse: unique, <= 20 chars
+    avatar_url=f"{PUBLIC_URL}/static/agents/{_slug if _slug in AVATARS else 'family'}.png",
     seed=os.environ.get("AGENT_SEED") or sys.exit("AGENT_SEED is not set"),
     port=PORT,
     # Agentverse mailbox in production; AGENT_ENDPOINT (http://127.0.0.1:<port>/submit) for local tests
     mailbox=not os.environ.get("AGENT_ENDPOINT"),
     endpoint=[os.environ["AGENT_ENDPOINT"]] if os.environ.get("AGENT_ENDPOINT") else None,
     publish_agent_details=True,
-    readme_path=str(HERE / "README.md"),
-    description=f"{CONTACT_NAME}'s agent for {RESIDENT}'s bedside pillow: how her night went, goodnight "
-    "messages, settings, and whether they can be called first tonight.",
+    readme_path=str(HERE / "README_family.md"),
+    description=f"{CONTACT_NAME}'s agent for {RESIDENT}'s bedside pillow (an older parent who lives alone): "
+    "how her night went, goodnight messages, reminders, and plans like \"I'm away Thu-Sun, make sure Mum's "
+    "covered\" that you confirm before anything changes.",
 )
 chat = Protocol(spec=chat_protocol_spec)
 roster = roster_protocol()

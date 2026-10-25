@@ -58,16 +58,20 @@ PORT = int(os.environ.get("AGENT_PORT", "8010"))
 RUN_NOW = re.compile(r"\b(plan|roster|run|ask|tonight|who.{0,20}call)\b", re.I)
 
 agent = Agent(
-    name=os.environ.get("AGENT_NAME") or f"pillow-coordinator-{PILLOW_ID}",
+    name=os.environ.get("AGENT_NAME") or "Pillow Night Coordinator",
+    handle=os.environ.get("AGENT_HANDLE") or "pillow-coordinator",  # Agentverse: unique, <= 20 chars
+    avatar_url=os.environ.get("PILLOW_PUBLIC_URL", "https://pillow.keanuc.net").rstrip("/")
+    + "/static/agents/coordinator.png",
     seed=os.environ.get("AGENT_SEED") or sys.exit("AGENT_SEED is not set"),
     port=PORT,
     # Agentverse mailbox in production; AGENT_ENDPOINT (http://127.0.0.1:<port>/submit) for local tests
     mailbox=not os.environ.get("AGENT_ENDPOINT"),
     endpoint=[os.environ["AGENT_ENDPOINT"]] if os.environ.get("AGENT_ENDPOINT") else None,
     publish_agent_details=True,
-    readme_path=str(HERE / "README.md"),
-    description="The bedside pillow's coordinator: each evening it asks every family member's agent who "
-    "can be called first tonight and sets the on-call roster. Ask it what's happening with the pillow.",
+    readme_path=str(HERE / "README_coordinator.md"),
+    description="Plans who gets called first tonight for an older parent who lives alone: at 9pm it asks "
+    "every family member's agent at once and sets the on-call order for her bedside pillow's alerts. Ask "
+    "\"plan tonight\" or \"what's happening with Mum's pillow?\"",
 )
 chat = Protocol(spec=chat_protocol_spec)
 roster = roster_protocol()
