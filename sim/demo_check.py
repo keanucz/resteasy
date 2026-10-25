@@ -49,7 +49,8 @@ TUNNEL = "5a23a49f-52a1-426d-a08c-03c21a1a9be6"  # calhacks-pillow; by id, the n
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12} ")
 BRIDGE_DEFAULT = "127.0.0.1:8765"
 SPEECH = "Good morning. This is the pillow's check before the demo."
-PLATE_WAIT_S = 15  # to press, then to let go; state arrives every ~0.5-1.5 s over USB or the hotspot
+PLATE_WAIT_S = {"usb": 15, "hotspot": 15}  # to press, then to let go; state every ~0.5-1.5 s on these
+PLATE_WAIT_BLE_S = 45  # Bluetooth state can lag by tens of seconds: wait longer rather than fail a good plate
 CHIME_WAIT_S = 4  # the bridge polls every 0.5 s; ~1.5 s from POST to sound through the VPS
 
 results: list[tuple[str, bool | None, str]] = []  # (step, passed or None = skipped, detail)
@@ -128,24 +129,25 @@ def check_bridge(bridge: str) -> bool:
         return False
 
 
-def check_hardware(server: str, pillow_id: str) -> bool:
+def check_hardware(server: str, pillow_id: str) -> str | None:
+    """The link the boards answer on, or None if one of them is silent."""
     try:
         r = httpx.post(f"{server}/api/pillows/{pillow_id}/ping", timeout=15)  # waits ~4 s for fresh state
         r.raise_for_status()
         ping = r.json()
     except (httpx.HTTPError, json.JSONDecodeError) as err:
         record("hardware", False, f"POST /ping: {err}")
-        return False
+        return None
     link = ping.get("link")
     if not ping.get("voice_unit_alive"):
         record("hardware", False, "no fresh state from the voice unit: is the bridge connected to it?")
-        return False
+        return None
     if not ping.get("node_alive"):
         record("hardware", False, f"voice unit on {link}, but the pillow node is silent: power it, it pairs by itself")
-        return False
-    note = " (slow state updates: plug the voice unit into USB)" if link == "ble" else ""
+        return None
+    note = " (slow state updates: bring the hotspot back or plug in USB)" if link == "ble" else ""
     record("hardware", True, f"pillow node and voice unit both answer, link {link}{note}")
-    return True
+    return link or "unknown"
 
 
 def read_state(server: str, pillow_id: str) -> dict:
@@ -167,8 +169,8 @@ def check_sensors(server: str, pillow_id: str) -> None:
         record("sensors", True, f"{t} C, {h}% humidity, motion {state.get('motion')}")
 
 
-def wait_head(server: str, pillow_id: str, want: bool) -> bool:
-    deadline = time.monotonic() + PLATE_WAIT_S
+def wait_head(server: str, pillow_id: str, want: bool, wait_s: int) -> bool:
+    deadline = time.monotonic() + wait_s
     while time.monotonic() < deadline:
         try:
             if read_state(server, pillow_id).get("head_on") is want:
@@ -179,16 +181,17 @@ def wait_head(server: str, pillow_id: str, want: bool) -> bool:
     return False
 
 
-def check_plate(server: str, pillow_id: str, assume_yes: bool) -> None:
+def check_plate(server: str, pillow_id: str, link: str, assume_yes: bool) -> None:
+    wait_s = PLATE_WAIT_S.get(link, PLATE_WAIT_BLE_S)
     if assume_yes:
         record("plate", None, "skipped with --yes (it needs a hand on the pillow)")
         return
     input("      press the head plate (a hand on the pillow), then press Enter ")
-    if not wait_head(server, pillow_id, True):
-        record("plate", False, f"head_on stayed false for {PLATE_WAIT_S} s: check the foil sheets and GPIO4/GND")
+    if not wait_head(server, pillow_id, True, wait_s):
+        record("plate", False, f"head_on stayed false for {wait_s} s over {link}: check the foil sheets")
         return
     print("      head_on true. Now let go...", flush=True)
-    ok = wait_head(server, pillow_id, False)
+    ok = wait_head(server, pillow_id, False, wait_s)
     record("plate", ok, "head_on went true, then false" if ok else "head_on stuck true: the foil sheets touch")
 
 
@@ -239,9 +242,10 @@ def main() -> None:
         check_watch(server, args.pillow_id)
     check_tunnel()
     if check_bridge(args.bridge):
-        if server_ok and check_hardware(server, args.pillow_id):
+        link = check_hardware(server, args.pillow_id) if server_ok else None
+        if link:
             check_sensors(server, args.pillow_id)
-            check_plate(server, args.pillow_id, args.yes)
+            check_plate(server, args.pillow_id, link, args.yes)
         if server_ok:
             check_chime(server, args.pillow_id, args.yes)
         check_speech(args.yes)
