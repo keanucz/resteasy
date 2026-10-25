@@ -1,11 +1,17 @@
 """Account API: the app's own login, offline checks, then a round trip against live Supabase."""
 
+from collections.abc import Iterator
+
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
+from supabase import Client
 
 from app.core.voice_constants import DEFAULT_VOICE_ID, VOICE_IDS
+from app.crud.crud_constants import CONTACTS_TABLE
+from app.routers import account as account_router
 from app.schemas.account import PreferencesPatch
+from tests.conftest import _throwaway_login
 from tests.seed_constants import TEST_PILLOW_ID, TEST_USER_ID
 
 PREFS_URL = f"/api/pillows/{TEST_PILLOW_ID}/preferences"
@@ -63,3 +69,30 @@ def test_a_login_cannot_touch_a_pillow_it_does_not_look_after(client: TestClient
         ).status_code
         == 403
     )
+
+
+@pytest.fixture
+def fresh_signup(db: Client, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    """A login that looks after nobody, with the demo pillow pointed at the test pillow; the contact
+    it gets on joining is removed afterwards (deleting the login alone would leave it behind)."""
+    monkeypatch.setattr(account_router, "DEMO_PILLOW_ID", TEST_PILLOW_ID)
+    with _throwaway_login(db) as (user_id, token):
+        try:
+            yield token
+        finally:
+            db.table(CONTACTS_TABLE).delete().eq("user_id", user_id).execute()  # cascades to the link
+
+
+def test_a_fresh_signup_joins_the_demo_household_once(client: TestClient, fresh_signup: str):
+    auth = {"Authorization": f"Bearer {fresh_signup}"}
+    assert client.get("/api/me", headers=auth).json()["pillows"] == []
+
+    joined = client.post("/api/me/join-demo", headers=auth)
+    assert joined.status_code == 200
+    me = joined.json()
+    assert me["contact_id"] and me["full_name"].startswith("account-test-")
+    assert [(p["pillow_id"], p["role"]) for p in me["pillows"]] == [(TEST_PILLOW_ID, "contact")]
+
+    again = client.post("/api/me/join-demo", headers=auth).json()
+    assert again["contact_id"] == me["contact_id"] and len(again["pillows"]) == 1
+    assert client.get(PREFS_URL, headers=auth).status_code == 200

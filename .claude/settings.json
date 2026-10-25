@@ -1,10 +1,10 @@
 {
   "hooks": {
     "UserPromptSubmit": [
-      {"hooks": [{"type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/coord/bus.py\" inbox --hook", "timeout": 10}]}
+      {"hooks": [{"type": "command", "command": "if python3 -c '' 2>/dev/null; then py=python3; else py=python; fi; $py \"$CLAUDE_PROJECT_DIR/coord/bus.py\" inbox --hook", "timeout": 10}]}
     ],
     "PostToolUse": [
-      {"matcher": "*", "hooks": [{"type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/coord/bus.py\" inbox --hook", "timeout": 10}]}
+      {"matcher": "*", "hooks": [{"type": "command", "command": "if python3 -c '' 2>/dev/null; then py=python3; else py=python; fi; $py \"$CLAUDE_PROJECT_DIR/coord/bus.py\" inbox --hook", "timeout": 10}]}
     ]
   }
 }

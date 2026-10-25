@@ -27,6 +27,14 @@ const STAR_COLS = 9;
 const STAR_ROWS = 6;
 /** Stars stop this far above the highest point of the edge, so they never trace the curve. */
 const STAR_CLEARANCE = 24;
+/**
+ * The stars turn slowly around a pole this far above the top of the screen, like the night sky
+ * around the pole star: one turn every few minutes, so it is felt more than seen.
+ */
+const STAR_POLE_ABOVE = 120;
+const STAR_TURN_MS = 5 * 60 * 1000;
+/** Smallest star cell, so a shallow sky never asks for thousands of rows. */
+const STAR_MIN_CELL = 12;
 /** The hedgehog that walks the arch through the night, and how far from each end it starts and stops. */
 const HEDGEHOG_SIZE = 68;
 const HEDGEHOG_HEIGHT = (HEDGEHOG_SIZE * 38) / 56;
@@ -133,23 +141,7 @@ export function SkyBackdrop({
       };
     });
     const ceiling = Math.max(1, Math.min(...edge.map(([, y]) => y)) - STAR_CLEARANCE);
-    const rnd = seeded(7);
-    const stars: { x: number; y: number; r: number; o: number }[] = [];
-    for (let r = 0; r < STAR_ROWS; r++) {
-      for (let c = 0; c < STAR_COLS; c++) {
-        if (rnd() < 0.35) continue; // gaps, so it never reads as a grid
-        const x = ((c + 0.1 + rnd() * 0.8) / STAR_COLS) * width;
-        const y = ((r + 0.1 + rnd() * 0.8) / STAR_ROWS) * ceiling;
-        const big = rnd() < 0.12;
-        stars.push({
-          x,
-          y,
-          r: big ? 1.4 : 0.5 + rnd() * 0.6,
-          o: (big ? 0.95 : 0.3 + rnd() * 0.5) * (1 - smoothstep(y / ceiling) * 0.85),
-        });
-      }
-    }
-    return { sky, bands, stars, edge };
+    return { sky, bands, ceiling, edge };
   }, [width, horizon]);
 
   const showStars = SKY.stars && scheme === 'dark' && STARRY_STATES.includes(state);
@@ -186,16 +178,90 @@ export function SkyBackdrop({
             <Rect x="0" y="0" width={width} height={height} fill={`url(#${id}-fill)`} />
             {look.glow ? <Rect x="0" y="0" width={width} height={height} fill={`url(#${id}-glow)`} /> : null}
           </G>
-          {showStars
-            ? shapes.stars.map((s, i) => <Circle key={i} cx={s.x} cy={s.y} r={s.r} fill="#FFFFFF" opacity={s.o} />)
-            : null}
         </Svg>
       ) : null}
+      {shapes && showStars ? <StarField width={width} ceiling={shapes.ceiling} /> : null}
       <View style={{ paddingTop: insets.top }}>{children}</View>
       {shapes && traveller !== undefined ? (
         <Traveller edge={shapes.edge} width={width} progress={traveller} mood={mood} ink={SKY_DETAIL[scheme]} />
       ) : null}
       {shapes && perch ? <Perch edge={shapes.edge} x={perch.at * width} {...perch} /> : null}
+    </View>
+  );
+}
+
+/**
+ * The stars, turning slowly around the pole above the screen, kept to the sky above the edge.
+ * Under reduced motion they hold still.
+ */
+function StarField({
+  width,
+  ceiling,
+}: {
+  width: number;
+  /** How far down the sky the stars may show. */
+  ceiling: number;
+}) {
+  const reduced = useReducedMotion();
+  // A disc of stars around the pole, big enough that the sky is covered at every angle of the turn.
+  // Its middle (nearer the pole than the top of the screen) is never seen, so it stays empty.
+  const { list, reach } = useMemo(() => {
+    const reach = Math.ceil(Math.hypot(width / 2, ceiling + STAR_POLE_ABOVE));
+    const cellW = width / STAR_COLS;
+    const cellH = Math.max(ceiling / STAR_ROWS, STAR_MIN_CELL);
+    const rnd = seeded(7);
+    const list: { x: number; y: number; r: number; o: number }[] = [];
+    for (let r = 0; r < Math.ceil((reach * 2) / cellH); r++) {
+      for (let c = 0; c < Math.ceil((reach * 2) / cellW); c++) {
+        if (rnd() < 0.35) continue; // gaps, so it never reads as a grid
+        const x = (c + 0.1 + rnd() * 0.8) * cellW;
+        const y = (r + 0.1 + rnd() * 0.8) * cellH;
+        const big = rnd() < 0.12;
+        const size = big ? 1.4 : 0.5 + rnd() * 0.6;
+        const glow = big ? 0.95 : 0.3 + rnd() * 0.5;
+        // How far below the top of the sky this star passes at its lowest: fainter towards the horizon.
+        const depth = Math.hypot(x - reach, y - reach) - STAR_POLE_ABOVE;
+        if (depth < 0 || depth > reach) continue;
+        list.push({ x, y, r: size, o: glow * (1 - smoothstep(depth / ceiling) * 0.85) });
+      }
+    }
+    return { list, reach };
+  }, [width, ceiling]);
+  const turn = useSharedValue(0);
+
+  useEffect(() => {
+    turn.set(0);
+    if (reduced) return;
+    // Anticlockwise, the way the sky turns around the pole star.
+    turn.set(withRepeat(withTiming(-360, { duration: STAR_TURN_MS, easing: Easing.linear }), -1, false));
+    return () => cancelAnimation(turn);
+  }, [reduced, turn]);
+
+  const style = useAnimatedStyle(() => ({ transform: [{ rotate: `${turn.get()}deg` }] }));
+
+  return (
+    <View
+      pointerEvents="none"
+      style={{ position: 'absolute', left: 0, top: 0, width, height: ceiling, overflow: 'hidden' }}
+    >
+      <Animated.View
+        style={[
+          {
+            position: 'absolute',
+            left: width / 2 - reach,
+            top: -STAR_POLE_ABOVE - reach,
+            width: reach * 2,
+            height: reach * 2,
+          },
+          style,
+        ]}
+      >
+        <Svg width={reach * 2} height={reach * 2} accessible={false}>
+          {list.map((s, i) => (
+            <Circle key={i} cx={s.x} cy={s.y} r={s.r} fill="#FFFFFF" opacity={s.o} />
+          ))}
+        </Svg>
+      </Animated.View>
     </View>
   );
 }
@@ -250,8 +316,8 @@ function Perch({
 /**
  * The hedgehog on the arch. Up and about, it hops left to right with a light, even bounce, off the
  * right edge and back in from the left, setting out from its place in the night. In bed it stays
- * curled up mid-arch: snoring little z's while asleep, fidgeting while restless. Under reduced
- * motion it sits still.
+ * curled up mid-arch: breathing slowly and snoring little z's while asleep, fidgeting while
+ * restless. Under reduced motion it sits still.
  */
 function Traveller({
   edge,
@@ -314,7 +380,7 @@ function Traveller({
       {mood === 'asleep' && !reduced
         ? Array.from({ length: SNORE_LETTERS }, (_, i) => <Snore key={i} index={i} color={ink} />)
         : null}
-      <Hedgehog size={HEDGEHOG_SIZE} mood={mood} />
+      <Hedgehog size={HEDGEHOG_SIZE} mood={mood} breathing />
     </Animated.View>
   );
 }

@@ -51,3 +51,6 @@ RESIDENT_PHOTOS_BUCKET = "resident-photos"
 PHOTO_FILE = "photo.jpg"
 # Query parameter on the photo's public link: when it last changed (ms since epoch), to bust caches
 PHOTO_VERSION_PARAM = "v"
+
+# Tries at the next free alert priority before giving up, in case two sign-ups join at once
+JOIN_PRIORITY_TRIES = 3

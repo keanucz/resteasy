@@ -112,10 +112,10 @@ def test_watch_hours_with_a_bad_time_is_422(client: TestClient, db: Client, owne
 
 
 @pytest.mark.parametrize("url", [WATCH_URL, WAIT_URL])
-def test_a_plain_contact_reads_but_cannot_change(client: TestClient, contact_token: str, url: str):
+def test_a_plain_contact_reads_and_changes(client: TestClient, contact_token: str, url: str):
     assert client.get(url, headers=_bearer(contact_token)).status_code == 200
     body = NEW_HOURS if url == WATCH_URL else {"checkin_timeout_min": 25}
-    assert client.put(url, json=body, headers=_bearer(contact_token)).status_code == 403
+    assert client.put(url, json=body, headers=_bearer(contact_token)).status_code == 200
 
 
 @pytest.mark.parametrize("url", [WATCH_URL, WAIT_URL])

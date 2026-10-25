@@ -20,9 +20,11 @@ VOICES: tuple[tuple[str, str, str], ...] = (
 
 VOICE_IDS = frozenset(voice_id for voice_id, _, _ in VOICES)
 
-# Where a voice in the app's picker comes from: the list above, or a clone made in the app
+# Where a voice in the app's picker comes from: the list above, a clone made in the app, or a copy
+# of either with another accent (Cartesia's localize). The last two are voice_clones rows (`kind`).
 STOCK_SOURCE = "stock"
 CLONE_SOURCE = "clone"
+ACCENT_SOURCE = "accent"
 
 # Cartesia's REST API, the same version and model the laptop speaks with (voice/voice.py)
 CARTESIA_API = "https://api.cartesia.ai"
@@ -38,6 +40,37 @@ PREVIEW_EMOTION = "calm"
 PREVIEW_TEXT_MAX = 200
 # What a preview says when the app sends no text, with her preferred name
 PREVIEW_TEXT = "Hello {name}, it's time to take your heart tablets."
+
+# How the pillow speaks to her, set by the owner (residents.voice_speed, voice_volume, voice_emotion).
+# Bounds are Cartesia's own for sonic-3 (generation_config); the defaults are how it always spoke.
+SPEED_MIN, SPEED_MAX = 0.6, 1.5
+VOLUME_MIN, VOLUME_MAX = 0.5, 2.0
+DEFAULT_SPEED = PREVIEW_SPEED
+DEFAULT_VOLUME = 1.0
+DEFAULT_EMOTION = PREVIEW_EMOTION
+# The tones offered: gentle ones from Cartesia's emotion list (no angry, scared or sad at her bedside)
+EMOTIONS = ("calm", "peaceful", "content", "affectionate", "sympathetic", "neutral", "happy")
+# Cartesia's emotions only work in English; other languages are spoken without one
+EMOTION_LANGUAGE = "en"
+
+# One short line per voice, spoken once and kept in Supabase Storage, so Play in the app is instant
+# and never asks Cartesia again. Casual and the same for everyone, so a stock voice's sample is shared.
+SAMPLE_TEXT = "Hi, this is the voice your pillow will use."
+SAMPLE_SPEED = 1.0
+SAMPLE_EMOTION = "content"
+SAMPLES_BUCKET = "voice-samples"
+# Stock voices' samples sit in one shared folder; a resident's own voices in a folder of hers
+STOCK_SAMPLES_FOLDER = "stock"
+SAMPLE_EXTENSION = ".mp3"
+# Enough to list every sample in one folder (the stock voices, or a resident's own voices)
+SAMPLES_LIST_LIMIT = 1000
+
+# Words the pillow says her way (a Cartesia pronunciation dictionary per resident, synced on change)
+PRONUNCIATION_WORD_MAX = 60
+SOUNDS_LIKE_MAX = 120
+PRONUNCIATIONS_MAX = 100
+# The dictionary's name at Cartesia, so it can be told apart in the dashboard
+PRONUNCIATION_DICT_NAME = "pillow-{resident_id}"
 
 # A recording to clone: Cartesia takes up to 16 MB; about 10 seconds is enough, up to 60 keeps the
 # accent. Cartesia lists flac, mp3, ogg, wav and webm; m4a and aac are passed on as they are.
@@ -61,6 +94,10 @@ CLIP_CONTENT_TYPES = frozenset(
     }
 )
 CLONE_NAME_MAX = 40
+# How an accent copy is named in the picker ("Skylar, British"), cut to CLONE_NAME_MAX
+ACCENT_COPY_NAME = "{name}, {accent}"
+# Accent names arrive as "British English"; the picker only needs "British"
+ACCENT_NAME_SUFFIX = " English"
 # The consent form field must be exactly this: the person recorded agreed to having their voice cloned
 CONSENT_GIVEN = "true"
 
@@ -79,3 +116,18 @@ CONSENT_MISSING = "The person recorded must agree to having their voice cloned"
 PREVIEW_FAILED = "The voice service could not make this preview. Try again in a moment."
 CLONE_FAILED = "The voice service could not clone this recording. Try a clear 10 to 60 second clip."
 DELETE_FAILED = "The voice service could not remove this voice. Try again in a moment."
+ACCENTS_FAILED = "The voice service could not list accents. Try again in a moment."
+ACCENT_FAILED = "The voice service could not make this accent. Try again in a moment."
+UNKNOWN_ACCENT = "That accent is not offered for her language"
+PRONUNCIATION_FAILED = "The voice service could not save how to say this. Try again in a moment."
+PRONUNCIATION_EXISTS = "There is already a pronunciation for that word"
+PRONUNCIATIONS_FULL = "That's the most words the pillow can keep. Remove one first."
+UNKNOWN_PRONUNCIATION = "That word is not in her list"
+NOT_PRONUNCIATION_CREATOR = "Only whoever added this word, or the owner, can remove it"
+UNKNOWN_EMOTION = "That tone is not offered"
+
+# Tables and columns the voice features use
+PRONUNCIATIONS_TABLE = "pronunciations"
+PRONUNCIATION_COLUMNS = "*, creator:contacts(full_name)"
+# The resident's columns that say how the pillow speaks
+STYLE_COLUMNS = ("voice_speed", "voice_volume", "voice_emotion")

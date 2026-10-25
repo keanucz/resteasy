@@ -277,7 +277,7 @@ export function MovementChart({ rows, window, tz, height = 96 }: SeriesProps) {
   const level = (v: number) => (v < 0.12 ? 'Still' : v < 0.3 ? 'Shifting' : 'Restless');
   const readout = scrubbed
     ? `${clock(scrubbed.t, tz)}  ${onPillowAt(scrubbed.t) ? level(scrubbed.v as number) : 'Off the pillow'}`
-    : `On the pillow ${Math.round(spans.reduce((m, s) => m + (s.to - s.from), 0) / 60_000 / 6) / 10}h`;
+    : `On the pillow ${hm(spans.reduce((m, s) => m + (s.to - s.from), 0) / 60_000)}`;
 
   return (
     <ChartCard
@@ -329,9 +329,15 @@ export function MovementChart({ rows, window, tz, height = 96 }: SeriesProps) {
           <Empty text="No movement readings for this night." />
         )}
       </View>
-      <View className="mt-1 flex-row items-center gap-1.5">
-        <View className="h-2 w-4 rounded-full" style={{ backgroundColor: colors['chart-asleep'] }} />
-        <Text className="font-sans text-xs text-ink-muted">Head on the pillow</Text>
+      <View className="mt-1 flex-row flex-wrap items-center gap-x-4 gap-y-1">
+        <View className="flex-row items-center gap-1.5">
+          <View className="h-0.5 w-4 rounded-full" style={{ backgroundColor: colors['chart-restless'] }} />
+          <Text className="font-sans text-xs text-ink-muted">How much she moved, low is still</Text>
+        </View>
+        <View className="flex-row items-center gap-1.5">
+          <View className="h-2 w-4 rounded-full" style={{ backgroundColor: colors['chart-asleep'] }} />
+          <Text className="font-sans text-xs text-ink-muted">Head on the pillow</Text>
+        </View>
       </View>
     </ChartCard>
   );
@@ -358,7 +364,8 @@ function Empty({ text }: { text: string }) {
 // ---------- how the night was spent ----------
 
 const SHARE_KINDS = [
-  { key: 'asleep', label: 'Asleep', token: 'chart-asleep' },
+  // Lying calmly in bed, from lying down: so it can run longer than "Slept for", which starts at sleep.
+  { key: 'asleep', label: 'Settled', token: 'chart-asleep' },
   { key: 'restless', label: 'Restless', token: 'chart-restless' },
   { key: 'up', label: 'Out of bed', token: 'chart-up' },
 ] as const;
@@ -405,7 +412,7 @@ export function NightShareChart({ segments }: { segments: readonly RibbonSegment
     <View
       className="gap-3 rounded-card bg-surface p-[18px]"
       accessible
-      accessibilityLabel={`How the night was spent: asleep ${hm(share.asleep)}, restless ${hm(share.restless)}, out of bed ${hm(share.up)}.`}
+      accessibilityLabel={`How the night was spent: settled in bed ${hm(share.asleep)}, restless ${hm(share.restless)}, out of bed ${hm(share.up)}.`}
     >
       <Text className="font-display text-lg text-ink">How the night was spent</Text>
       {total ? (
@@ -420,7 +427,7 @@ export function NightShareChart({ segments }: { segments: readonly RibbonSegment
             </Svg>
             <View className="absolute inset-0 items-center justify-center">
               <Text className="font-sans-semibold text-2xl text-ink">{asleepPct}%</Text>
-              <Text className="font-sans text-xs text-ink-muted">asleep</Text>
+              <Text className="font-sans text-xs text-ink-muted">settled</Text>
             </View>
           </View>
           <View className="flex-1 gap-3">
@@ -442,6 +449,9 @@ export function NightShareChart({ segments }: { segments: readonly RibbonSegment
 
 // ---------- the week at a glance ----------
 
+/** Room for a date ("22 Oct") under a month's column, centred on it. */
+const DENSE_LABEL_W = 48;
+
 export type WeekBar = {
   key: number;
   /** Shown under the column; may be empty on a dense chart. */
@@ -454,8 +464,9 @@ export type WeekBar = {
 };
 
 /**
- * Hours asleep per night as columns, oldest on the left; a night with an alert gets the amber cap. Tap one to open
- * it. `dense` draws thin columns for a month, labelling only the bars that carry a label.
+ * Hours asleep per night as columns, oldest on the left; a flagged night (family alerted, or the room too cold or
+ * hot) gets the orange cap, explained in a key under the columns when the chart has one. Tap a column to open
+ * that night. `dense` draws thin columns for a month, labelling only the bars that carry a label.
  */
 export function WeekSleepChart({
   bars,
@@ -477,7 +488,7 @@ export function WeekSleepChart({
         <Text className="font-display text-lg text-ink">{title}</Text>
         {mean !== null ? <Text className="font-sans text-sm text-ink-muted">Average {hm(mean * 60)}</Text> : null}
       </View>
-      <View className="flex-row items-end justify-between" style={{ height: height + 22 }}>
+      <View className="flex-row items-end justify-between" style={{ height: dense ? height : height + 22 }}>
         {bars.map((b) => {
           const h = b.hours === null ? 0 : Math.max(6, (b.hours / max) * height);
           return (
@@ -485,7 +496,7 @@ export function WeekSleepChart({
               key={b.key}
               onPress={b.onPress}
               accessibilityRole="button"
-              accessibilityLabel={`${b.name ?? b.label}: ${b.hours === null ? 'no reading' : `${hm(b.hours * 60)} asleep`}${b.flagged ? ', family alerted' : ''}`}
+              accessibilityLabel={`${b.name ?? b.label}: ${b.hours === null ? 'no reading' : `${hm(b.hours * 60)} asleep`}${b.flagged ? ', family alerted or the room too cold or hot' : ''}`}
               className="flex-1 items-center gap-1.5"
               hitSlop={dense ? 0 : 4}
             >
@@ -500,7 +511,7 @@ export function WeekSleepChart({
                     className={`overflow-hidden ${dense ? 'w-1.5 rounded-t-[3px]' : 'w-5 rounded-t-[4px]'}`}
                     style={{ height: h, backgroundColor: colors['chart-asleep'] }}
                   >
-                    {b.flagged ? <View style={{ height: dense ? 5 : 6, backgroundColor: colors['chart-up'] }} /> : null}
+                    {b.flagged ? <View style={{ height: 6, backgroundColor: colors['chart-up'] }} /> : null}
                   </View>
                 )}
               </View>
@@ -510,15 +521,61 @@ export function WeekSleepChart({
         })}
       </View>
       {dense ? (
-        // A month's columns are too thin to label one by one: a date for each week instead.
-        <View className="-mt-5 flex-row justify-between">
-          {bars
-            .filter((b) => b.label)
-            .map((b) => (
-              <Text key={b.key} className="font-sans text-xs text-ink-muted">
+        // A month's columns are too thin to label one by one: a date for each week instead, centred
+        // under the column it names.
+        <View className="-mt-1.5 h-4">
+          {bars.map((b, i) =>
+            b.label ? (
+              <Text
+                key={b.key}
+                className="absolute text-center font-sans text-xs text-ink-muted"
+                style={{
+                  left: `${((i + 0.5) / bars.length) * 100}%`,
+                  width: DENSE_LABEL_W,
+                  marginLeft: -DENSE_LABEL_W / 2,
+                }}
+              >
                 {b.label}
               </Text>
-            ))}
+            ) : null,
+          )}
+        </View>
+      ) : null}
+      <SleepKey flagged={bars.some((b) => b.flagged)} missing={bars.some((b) => b.hours === null)} />
+    </View>
+  );
+}
+
+/**
+ * What the chart's looks mean, in words beside a small copy of each, like the Reminders key. Only the
+ * looks this chart has are listed, so a calm week has no key at all.
+ */
+function SleepKey({ flagged, missing }: { flagged: boolean; missing: boolean }) {
+  const { colors } = useTheme();
+  if (!flagged && !missing) return null;
+  return (
+    <View className="gap-2.5 border-t border-hairline pt-3">
+      {flagged ? (
+        <View className="flex-row items-center gap-3">
+          <View className="w-[30px] items-center">
+            <View
+              className="h-[22px] w-2.5 overflow-hidden rounded-t-[3px]"
+              style={{ backgroundColor: colors['chart-asleep'] }}
+            >
+              <View style={{ height: 6, backgroundColor: colors['chart-up'] }} />
+            </View>
+          </View>
+          <Text className="flex-1 font-sans text-sm text-ink">
+            Orange top: the family was alerted, or the room was too cold or hot that night.
+          </Text>
+        </View>
+      ) : null}
+      {missing ? (
+        <View className="flex-row items-center gap-3">
+          <View className="w-[30px] items-center">
+            <View className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: colors.hairline }} />
+          </View>
+          <Text className="flex-1 font-sans text-sm text-ink">Dot: nothing from the pillow that night.</Text>
         </View>
       ) : null}
     </View>

@@ -282,6 +282,17 @@ export function ribbonNow(w: NightWindow, now: number): number | undefined {
   return w.over || h < 0 || h > RIBBON_HOURS ? undefined : h;
 }
 
+/**
+ * Minutes asleep in a night, restless spells included: the in-bed span on the ribbon. Restless bars
+ * sit on top of the in-bed bar they interrupt, so they only count where they outlast it.
+ */
+export function sleptMinutes(all: EventRow[], w: NightWindow): number {
+  const segments = ribbonSegments(all, w, w.end);
+  const hours = (kind: RibbonSegment['kind']) =>
+    segments.filter((s) => s.kind === kind).reduce((h, s) => h + s.to - s.from, 0);
+  return Math.max(hours('bed'), hours('restless')) * 60;
+}
+
 const TIMES = ['None', 'Once', 'Twice'];
 
 /** The two stat tiles: time asleep, and how often she got up. */
@@ -310,6 +321,9 @@ export type NightSummary = {
   /** The night itself, for the week table and the night screen. */
   window: NightWindow;
 };
+
+/** A night the sleep charts mark with the orange cap: family were alerted, or the room got too cold or hot. */
+export const isFlagged = (tone: NightTone) => tone === 'alerted' || tone === 'cold' || tone === 'hot';
 
 const WORDS = ['no', 'once', 'twice'];
 

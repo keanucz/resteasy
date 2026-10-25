@@ -4,29 +4,19 @@ import { RefreshControl, ScrollView, Text, View } from 'react-native';
 
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
-import {
-  hm,
-  MovementChart,
-  nightShare,
-  nightWindow,
-  TemperatureChart,
-  type WeekBar,
-  WeekSleepChart,
-} from '@/components/Charts';
+import { hm, type WeekBar, WeekSleepChart } from '@/components/Charts';
+import { Hills } from '@/components/Hills';
 import { List, ListRow } from '@/components/List';
-import { NightHeading } from '@/components/NightHeading';
-import { NightRibbon } from '@/components/NightRibbon';
+import { NightDetail } from '@/components/NightDetail';
 import { PeopleSheet } from '@/components/PeoplePicker';
-import { SkeletonGroup, StatTileSkeleton, SummaryCardSkeleton } from '@/components/Skeleton';
 import { SkyHeader } from '@/components/SkyHeader';
-import { DataTable, StatTile, SummaryCard } from '@/components/Stats';
+import { DataTable, StatTile } from '@/components/Stats';
 import { StatusWord } from '@/components/Status';
 import { BellIcon, PhoneIcon, PillIcon } from '@/components/TabIcons';
 import { MONTH_NIGHTS, RIBBON_HOURS, WEEK_NIGHTS } from '@/constants/pillow';
 import { useDelayedLoading } from '@/hooks/useDelayedLoading';
 import { useNow, usePillow } from '@/hooks/usePillow';
 import { usePillowLink } from '@/hooks/usePillowLink';
-import { useReadings } from '@/hooks/useReadings';
 import { useResidentPhoto } from '@/hooks/useResidentPhoto';
 import { useTheme } from '@/hooks/useTheme';
 import { api } from '@/services/api';
@@ -34,19 +24,18 @@ import {
   appState,
   clockTime,
   type IncidentRow,
+  isFlagged,
   latestNight,
   nightFacts,
-  nightStats,
+  nightTitle,
   ribbonNow,
-  ribbonSegments,
   type ReminderToday,
   shortDay,
+  sleptMinutes,
   stateDetail,
-  summariseNight,
   todaysReminders,
   weekSummaries,
 } from '@/services/night';
-import { nightClimate, signedDegrees } from '@/services/readings';
 
 /** What happened to today's reminder: a word, coloured only when it went well or needs a look. */
 const REMINDER_WORD: Record<ReminderToday['status'], { word: string; state?: 'asleep' | 'up' }> = {
@@ -59,9 +48,9 @@ const REMINDER_WORD: Record<ReminderToday['status'], { word: string; state?: 'as
 };
 
 /**
- * Tonight: the sky says how she is (and the hedgehog walks the arch while she sleeps), the summary
- * and charts say how the night is going, then anything that needs you, today's reminders and the
- * week. Tap a night in the week to open it.
+ * Tonight: the sky says how she is (and the hedgehog keeps her company on the arch), then anything
+ * that needs you and today's reminders, then the latest night in full, the week and the month as
+ * sleep charts, and the nights one by one. Tap a night in a chart or the list to open it.
  */
 export default function TonightScreen() {
   const { pillowId, people } = usePillowLink();
@@ -74,29 +63,21 @@ export default function TonightScreen() {
   const photo = useResidentPhoto(pillow.resident?.id ?? null);
 
   const night = latestNight(pillow.events, now, tz);
-  const window = useMemo(() => nightWindow(night.ribbonStart), [night.ribbonStart]);
-  const readings = useReadings(pillowId, window.start - 60 * 60 * 1000, window.end, !night.over);
-  const climate = nightClimate(readings.rows);
-
+  const title = nightTitle(night, now, tz);
   const state = appState(pillow.state, pillow.events, now);
-  const stats = nightStats(pillow.events, night, now);
-  const segments = ribbonSegments(pillow.events, night, now);
-  const summary = summariseNight(pillow.events, pillow.incidents, night, night.over ? 'Last night' : 'Tonight', name);
   const week = weekSummaries(pillow.events, pillow.incidents, night, WEEK_NIGHTS, tz, name);
   const reminders = todaysReminders(pillow.reminders, pillow.occurrences, now, tz);
   const live = pillow.incidents.find((i) => i.status === 'open' || i.status === 'acknowledged');
   const hour = ribbonNow(night, now);
 
   const open = (start: number) => router.push({ pathname: '/night/[start]', params: { start: String(start) } });
-  const oldestFirst = [...week].reverse();
-  const bars: WeekBar[] = oldestFirst.map((n) => {
-    const share = nightShare(ribbonSegments(pillow.events, n.window, n.window.end));
-    const minutes = share.asleep + share.restless;
+  const bars: WeekBar[] = [...week].reverse().map((n) => {
+    const minutes = sleptMinutes(pillow.events, n.window);
     return {
       key: n.key,
       label: shortDay(n.window, tz),
       hours: minutes ? minutes / 60 : null,
-      flagged: n.tone === 'alerted' || n.tone === 'cold' || n.tone === 'hot',
+      flagged: isFlagged(n.tone),
       onPress: () => open(n.key),
     };
   });
@@ -111,7 +92,6 @@ export default function TonightScreen() {
   return (
     <ScrollView
       className="flex-1 bg-canvas"
-      contentContainerClassName="pb-12"
       refreshControl={<RefreshControl refreshing={false} onRefresh={pillow.refresh} />}
     >
       <SkyHeader
@@ -126,37 +106,6 @@ export default function TonightScreen() {
       <View className="-mt-2 gap-8 px-4">
         {pillow.error ? <Text className="font-sans text-sm text-danger-text">{pillow.error}</Text> : null}
         {live && pillowId ? <AlertCard pillowId={pillowId} name={name} incident={live} tz={tz} /> : null}
-
-        {showSkeleton ? (
-          <SkeletonGroup>
-            <View className="gap-2.5">
-              <SummaryCardSkeleton />
-              <View className="flex-row gap-2.5">
-                <StatTileSkeleton />
-                <StatTileSkeleton />
-                <StatTileSkeleton />
-              </View>
-            </View>
-          </SkeletonGroup>
-        ) : (
-          <View className="gap-2.5">
-            <SummaryCard heading={<NightHeading tone={summary.tone} soFar={!night.over} />} body={summary.line} />
-            <Card>
-              <NightRibbon segments={segments} now={hour} />
-            </Card>
-            <View className="flex-row gap-2.5">
-              <StatTile label={stats.asleepLabel} value={stats.asleepValue} />
-              <StatTile label="Out of bed" value={stats.tripsValue} />
-              <StatTile
-                label="Bedroom"
-                value={climate ? `${climate.end.toFixed(1)}°C` : '–'}
-                detail={climate ? `${signedDegrees(climate.end - climate.start)} since bed` : undefined}
-              />
-            </View>
-            <TemperatureChart rows={readings.rows} window={window} tz={tz} />
-            <MovementChart rows={readings.rows} window={window} tz={tz} />
-          </View>
-        )}
 
         {reminders.length ? (
           <Section title="Reminders today">
@@ -174,6 +123,14 @@ export default function TonightScreen() {
           </Section>
         ) : null}
 
+        <Section title={title}>
+          <NightDetail night={night} title={title} showSkeleton={showSkeleton} />
+        </Section>
+
+        <Section title={night.over ? 'Earlier this week' : 'This week'}>
+          <WeekSleepChart title="Sleep each night" bars={bars} />
+        </Section>
+
         <Section title="Past four weeks">
           <View className="flex-row gap-2.5">
             <StatTile label="Average sleep" value={month.averageSleep} />
@@ -187,16 +144,20 @@ export default function TonightScreen() {
           />
         </Section>
 
-        <Section title={night.over ? 'Earlier this week' : 'This week'}>
-          <WeekSleepChart bars={bars} />
+        <Section title="Night by night">
           <DataTable
             columns={['Night', 'In bed', 'Got up', 'Woke']}
             rows={week.map((n, i) => [
               shortDay(n.window, tz),
               facts[i].inBed ?? '–',
-              facts[i].trips ? (
+              // Getting up once is ordinary: the word only turns amber on a night the charts flag.
+              facts[i].trips && isFlagged(n.tone) ? (
                 <Text key="up" className="text-sm">
                   <StatusWord state="up">{facts[i].tripsWord}</StatusWord>
+                </Text>
+              ) : facts[i].trips ? (
+                <Text key="up" className="font-sans text-sm text-ink">
+                  {facts[i].tripsWord}
                 </Text>
               ) : (
                 <Text key="no" className="font-sans text-sm text-ink-muted">
@@ -209,6 +170,9 @@ export default function TonightScreen() {
             rowLabel={(i) => `${week[i].title}: ${week[i].line} Open the night.`}
           />
         </Section>
+      </View>
+      <View className="mt-12">
+        <Hills />
       </View>
       <PeopleSheet visible={picking} onClose={() => setPicking(false)} />
     </ScrollView>
@@ -267,6 +231,7 @@ function AlertCard({
   );
 }
 
+/** A titled part of the page. */
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <View className="gap-3">
@@ -301,7 +266,7 @@ function ReminderIcon({ kind }: { kind: ReminderToday['kind'] }) {
 }
 
 /**
- * The last four weeks at a glance: a thin column per night (sleep, amber cap on an alert night), and
+ * The last four weeks at a glance: a thin column per night (sleep, orange cap on a flagged night), and
  * three numbers: average sleep, how often she gets up a night, and how many alerts there were.
  */
 function monthOverview(
@@ -318,14 +283,13 @@ function monthOverview(
   let trips = 0;
   let alerts = 0;
   const bars = nights.map((n, i) => {
-    const share = nightShare(ribbonSegments(events, n.window, n.window.end));
-    const minutes = share.asleep + share.restless;
+    const minutes = sleptMinutes(events, n.window);
     if (minutes) {
       slept += minutes;
       sleptNights += 1;
     }
     trips += nightFacts(events, n.window, tz).trips;
-    const flagged = n.tone === 'alerted' || n.tone === 'cold' || n.tone === 'hot';
+    const flagged = isFlagged(n.tone);
     if (flagged) alerts += 1;
     const date = dayMonth.format(new Date(n.window.start));
     return {

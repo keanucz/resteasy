@@ -10,6 +10,7 @@ from app.routers import (
     family,
     health,
     items,
+    pillow_voice,
     pillows,
     reminders,
     residents,
@@ -28,3 +29,4 @@ api_router.include_router(reminders.router)
 api_router.include_router(account.router)
 api_router.include_router(residents.router)
 api_router.include_router(voice.router)
+api_router.include_router(pillow_voice.router)

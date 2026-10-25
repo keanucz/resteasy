@@ -17,16 +17,19 @@ import { phaseOf, PlayButton, previewError } from '@/components/PlayButton';
 import { Checkbox } from '@/components/Selection';
 import { MicIcon, StopIcon } from '@/components/TabIcons';
 import { TextField } from '@/components/TextField';
+import { Disclosure } from '@/components/voice/Disclosure';
+import { RadioList } from '@/components/voice/RadioList';
 import type { VoicePlayer } from '@/hooks/useVoicePlayer';
 import { useTheme } from '@/hooks/useTheme';
 import { ApiError } from '@/services/api';
 import {
+  type Accent,
   CLIP_MAX_S,
   CLIP_MIN_S,
   type Clip,
   clipFromRecording,
   cloneVoice,
-  previewVoice,
+  sampleUri,
   type Voice,
   VOICE_NAME_MAX,
 } from '@/services/voice';
@@ -65,9 +68,10 @@ const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.fl
 function uploadError(e: unknown, name: string): string {
   if (e instanceof ApiError && e.status === 404) return 'Adding a family voice comes with the next pillow update.';
   if (e instanceof ApiError && e.status === 403) return `Only people in ${name}'s care circle can add a voice.`;
-  if (e instanceof ApiError && e.status === 413) return 'That recording is too long. Keep it under 30 seconds.';
+  if (e instanceof ApiError && e.status === 413)
+    return `That recording is too large. Keep it under ${CLIP_MAX_S} seconds.`;
   if (e instanceof ApiError && (e.status === 400 || e.status === 415 || e.status === 422))
-    return "The pillow couldn't use that recording. Try 10 to 30 seconds of clear speech in a quiet room.";
+    return `The pillow couldn't use that recording. Try ${CLIP_MIN_S} to ${CLIP_MAX_S} seconds of clear speech in a quiet room.`;
   return "Couldn't send the recording. Check your connection and try again.";
 }
 
@@ -80,6 +84,10 @@ type CloneVoiceSheetProps = {
   residentId: string;
   /** The screen's player, so a voice in the list and a recording here never play over each other. */
   player: VoicePlayer;
+  /** Accents the speaker may have, so the copy keeps theirs; none hides the choice. */
+  accents?: Accent[];
+  /** Only the owner can make the new voice the one she hears. */
+  canUse?: boolean;
   onClose: () => void;
   onAdded: (voice: Voice) => void;
   onUse: (voiceId: string) => void;
@@ -89,10 +97,22 @@ type CloneVoiceSheetProps = {
  * Copy a family voice: read a short passage into the mic (or pick a recording), name it, say the
  * speaker agreed, and send it. Then hear the new voice and use it for her pillow.
  */
-export function CloneVoiceSheet({ visible, name, residentId, player, onClose, onAdded, onUse }: CloneVoiceSheetProps) {
+export function CloneVoiceSheet({
+  visible,
+  name,
+  residentId,
+  player,
+  accents = [],
+  canUse = true,
+  onClose,
+  onAdded,
+  onUse,
+}: CloneVoiceSheetProps) {
   const { colors } = useTheme();
   const [recorded, setRecorded] = useState<Recorded | null>(null);
   const [voiceName, setVoiceName] = useState('');
+  // '' is "not sure": the copy then keeps whatever accent it hears
+  const [accent, setAccent] = useState('');
   const [consent, setConsent] = useState(false);
   const [micDenied, setMicDenied] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -166,6 +186,7 @@ export function CloneVoiceSheet({ visible, name, residentId, player, onClose, on
     // Start fresh next time.
     setRecorded(null);
     setVoiceName('');
+    setAccent('');
     setConsent(false);
     setMicDenied(false);
     setError(null);
@@ -185,7 +206,7 @@ export function CloneVoiceSheet({ visible, name, residentId, player, onClose, on
     setBusy(true);
     setError(null);
     try {
-      const voice = await cloneVoice(residentId, recorded.clip, voiceName);
+      const voice = await cloneVoice(residentId, recorded.clip, voiceName, accent || undefined);
       onAdded(voice);
       setMade(voice);
     } catch (e) {
@@ -200,15 +221,17 @@ export function CloneVoiceSheet({ visible, name, residentId, player, onClose, on
 
   const footer = made ? (
     <>
-      <Button
-        fullWidth
-        title={`Use for ${name}'s pillow`}
-        onPress={() => {
-          onUse(made.id);
-          close();
-        }}
-      />
-      <Button fullWidth variant="ghost" title="Done" onPress={close} />
+      {canUse ? (
+        <Button
+          fullWidth
+          title={`Use for ${name}'s pillow`}
+          onPress={() => {
+            onUse(made.id);
+            close();
+          }}
+        />
+      ) : null}
+      <Button fullWidth variant={canUse ? 'ghost' : 'primary'} title="Done" onPress={close} />
     </>
   ) : (
     <>
@@ -243,7 +266,7 @@ export function CloneVoiceSheet({ visible, name, residentId, player, onClose, on
             title="Hear it"
             what={`${made.name}'s voice`}
             state={phaseOf(player.playing, made.id)}
-            onPress={() => listen(made.id, () => previewVoice(residentId, made.id))}
+            onPress={() => listen(made.id, () => sampleUri(residentId, made))}
           />
           <Text className="font-sans text-sm text-ink-muted">
             If it doesn&apos;t sound like them, remove it from the list and record again somewhere quiet.
@@ -340,6 +363,18 @@ export function CloneVoiceSheet({ visible, name, residentId, player, onClose, on
             />
             <Text className="font-sans text-[13px] text-ink-muted">Shown in the list of voices.</Text>
           </View>
+
+          {accents.length ? (
+            <Disclosure title="Their accent" value={accents.find((a) => a.id === accent)?.name ?? 'Not sure'}>
+              <Text className="font-sans text-[13px] text-ink-muted">Helps the copy keep the way they speak.</Text>
+              <RadioList
+                label="Their accent"
+                options={[{ value: '', label: 'Not sure' }, ...accents.map((a) => ({ value: a.id, label: a.name }))]}
+                value={accent}
+                onChange={setAccent}
+              />
+            </Disclosure>
+          ) : null}
 
           <Checkbox
             label="The person recording agreed to have their voice copied for this pillow"

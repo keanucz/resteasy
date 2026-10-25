@@ -1,3 +1,13 @@
+import { useEffect } from 'react';
+import Animated, {
+  cancelAnimation,
+  Easing,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
 import Svg, { Circle, Ellipse, G, Path } from 'react-native-svg';
 
 import { logoColors } from '@/constants/theme';
@@ -15,6 +25,10 @@ const SPINES = (() => {
   return `M${steps.join(' L')} Z`;
 })();
 
+/** One slow breath, in and out, and how much it swells the hedgehog at the top of it. */
+const BREATH_MS = 4000;
+const BREATH_SWELL = 0.05;
+
 /** How the hedgehog feels: curled up asleep, fidgety and worried, or up and about. */
 export type HedgehogMood = 'asleep' | 'restless' | 'awake';
 
@@ -22,11 +36,59 @@ export type HedgehogMood = 'asleep' | 'restless' | 'awake';
  * The logo's hedgehog on its own, in its nightcap: spines, face and an eye that says its mood. The same `logo-*`
  * colours as the mark, so it reads as the same character in either mode.
  */
-export function Hedgehog({ size = 44, mood = 'asleep' }: { size?: number; mood?: HedgehogMood }) {
+export function Hedgehog({
+  size = 44,
+  mood = 'asleep',
+  breathing = false,
+}: {
+  size?: number;
+  mood?: HedgehogMood;
+  /** Asleep, it breathes slowly: its back rises and falls while it sits where it is. Still under reduced motion. */
+  breathing?: boolean;
+}) {
   const ink = logoColors['logo-ink'];
   const spines = logoColors['logo-spines'];
+  const height = (size * 38) / 56;
+  const reduced = useReducedMotion();
+  const breathes = breathing && mood === 'asleep' && !reduced;
+  const breath = useSharedValue(0);
+
+  useEffect(() => {
+    breath.set(0);
+    if (!breathes) return;
+    breath.set(withRepeat(withTiming(1, { duration: BREATH_MS / 2, easing: Easing.inOut(Easing.sin) }), -1, true));
+    return () => cancelAnimation(breath);
+  }, [breathes, breath]);
+
+  const style = useAnimatedStyle(() => {
+    const swell = breath.get() * BREATH_SWELL;
+    // Scaled about its middle, then shifted up by half the growth, so it swells from where it sits.
+    return { transform: [{ translateY: (-height * swell) / 2 }, { scaleY: 1 + swell }, { scaleX: 1 + swell / 4 }] };
+  });
+
   return (
-    <Svg width={size} height={(size * 38) / 56} viewBox="0 0 56 38" accessible={false}>
+    <Animated.View style={style}>
+      <HedgehogArt size={size} height={height} mood={mood} ink={ink} spines={spines} />
+    </Animated.View>
+  );
+}
+
+/** The drawing itself, in the logo's colours. */
+function HedgehogArt({
+  size,
+  height,
+  mood,
+  ink,
+  spines,
+}: {
+  size: number;
+  height: number;
+  mood: HedgehogMood;
+  ink: string;
+  spines: string;
+}) {
+  return (
+    <Svg width={size} height={height} viewBox="0 0 56 38" accessible={false}>
       {mood === 'awake' ? (
         // Up and about: little feet under it.
         <G fill={spines}>

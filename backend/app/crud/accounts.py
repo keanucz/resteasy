@@ -2,9 +2,15 @@
 
 from typing import Any
 
+from postgrest.exceptions import APIError
 from supabase import AsyncClient
 
-from app.crud.crud_constants import CONTACTS_TABLE, PILLOWS_TABLE, RESIDENT_CONTACTS_TABLE
+from app.crud.crud_constants import (
+    CONTACTS_TABLE,
+    JOIN_PRIORITY_TRIES,
+    PILLOWS_TABLE,
+    RESIDENT_CONTACTS_TABLE,
+)
 from app.crud.supabase_query import fetch_one
 
 
@@ -62,3 +68,31 @@ async def get_link_for_contact(db: AsyncClient, contact_id: str, resident_id: st
         .eq("resident_id", resident_id)
         .eq("contact_id", contact_id)
     )
+
+
+async def join_household(db: AsyncClient, user_id: str, full_name: str, resident_id: str) -> None:
+    """Make the login a plain contact of the resident: its own contact row if it has none, then a
+    link at the next free priority. Off call, so it never gets the real alerts. Already linked: no-op."""
+    contact = await get_contact_for_user(db, user_id)
+    if contact is None:
+        row = {"full_name": full_name, "user_id": user_id, "on_call": False}
+        contact = (await db.table(CONTACTS_TABLE).insert(row).execute()).data[0]
+    if await get_link_for_contact(db, contact["id"], resident_id):
+        return
+    for attempt in range(JOIN_PRIORITY_TRIES):
+        last = await (
+            db.table(RESIDENT_CONTACTS_TABLE)
+            .select("priority")
+            .eq("resident_id", resident_id)
+            .order("priority", desc=True)
+            .limit(1)
+            .execute()
+        )
+        priority = (last.data[0]["priority"] if last.data else 0) + 1
+        link = {"resident_id": resident_id, "contact_id": contact["id"], "priority": priority}
+        try:
+            await db.table(RESIDENT_CONTACTS_TABLE).insert(link).execute()
+            return
+        except APIError:  # another sign-up took that priority first
+            if attempt == JOIN_PRIORITY_TRIES - 1:
+                raise

@@ -7,6 +7,7 @@ import { BellHedgehog, bellHedgehogBox } from '@/components/BellHedgehog';
 import { Button, IconButton } from '@/components/Button';
 import { Toast, UndoToast } from '@/components/Feedback';
 import { Hedgehog } from '@/components/Hedgehog';
+import { Hills } from '@/components/Hills';
 import { List, ListRow } from '@/components/List';
 import { ReminderForm, SpokenLine } from '@/components/ReminderForm';
 import { SegmentedTabs } from '@/components/Selection';
@@ -237,7 +238,6 @@ export default function RemindersScreen() {
       <Animated.ScrollView
         ref={scrollRef}
         className="flex-1"
-        contentContainerClassName="pb-28"
         scrollEnabled={dragTarget === null}
         refreshControl={<RefreshControl refreshing={false} onRefresh={data.refresh} />}
       >
@@ -310,6 +310,10 @@ export default function RemindersScreen() {
               </View>
             </>
           )}
+        </View>
+        {/* As much room under the last card as before, now with the hills in it, clear of the toast. */}
+        <View className="mt-14">
+          <Hills />
         </View>
       </Animated.ScrollView>
 

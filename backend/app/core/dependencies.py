@@ -282,7 +282,9 @@ async def clone_upload(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=CONSENT_MISSING)
     if not name.strip():
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=CLONE_NAME_MISSING)
-    if clip.content_type not in CLIP_CONTENT_TYPES:
+    # Browsers type a recording "audio/webm;codecs=opus"; only the bare type is checked and sent on
+    content_type = (clip.content_type or "").partition(";")[0].strip().lower()
+    if content_type not in CLIP_CONTENT_TYPES:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=CLIP_WRONG_TYPE)
     content = await clip.read(CLIP_MAX_BYTES + 1)
     if not content:
@@ -290,7 +292,7 @@ async def clone_upload(
     if len(content) > CLIP_MAX_BYTES:
         raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, detail=CLIP_TOO_LARGE)
     return CloneUpload(
-        clip=content, filename=clip.filename or "clip", content_type=clip.content_type, name=name.strip()
+        clip=content, filename=clip.filename or "clip", content_type=content_type, name=name.strip()
     )
 
 

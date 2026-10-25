@@ -38,6 +38,13 @@ NOTIFY_TICK_S = 5
 # The one real pillow whose alerts go to real phones (NOTIFY_PILLOW_IDS overrides)
 DEFAULT_NOTIFY_PILLOW_IDS = ["mum"]
 
+# The demo household's pillow (Margaret's); a fresh sign-up joins it as a plain contact on connect
+DEMO_PILLOW_ID = "mum"
+# A fresh sign-up's name when their email gives none to borrow
+NEW_HELPER_NAME = "Family helper"
+# Detail returned with a 404 when the demo pillow (or its resident) is missing from the database
+DEMO_PILLOW_MISSING = "The demo pillow is not set up"
+
 # Detail returned with a 503 when CHECKIN_TOKEN is not set (POST /checkin fails closed)
 CHECKIN_TOKEN_NOT_CONFIGURED = "CHECKIN_TOKEN is not configured on this server"
 

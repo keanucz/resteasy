@@ -1,8 +1,9 @@
 """Residents router: what lives on the resident, so it works before any pillow exists.
 
 "When it watches" is her quiet hours, "before telling family" is the check-in wait, and her photo
-is the face the app shows. Any login that looks after her reads them; only the owner's login
-changes them, and each change shows in the agent log of her pillows. Requests carry the app's
+is the face the app shows. Any login that looks after her reads them and may change the watch hours
+and check-in wait; only the owner's login changes her photo. Each change shows in the agent log of
+her pillows. Requests carry the app's
 Supabase access token, like the account router.
 """
 
@@ -35,8 +36,8 @@ async def read_watch_hours(resident: ViewedResidentDep) -> WatchHours:
 
 
 @router.put("/watch-hours")
-async def update_watch_hours(resident: OwnedResidentDep, hours: WatchHours, db: SupabaseDep) -> WatchHours:
-    """Set when the pillow watches her; equal start and end times watch all day. Owner only."""
+async def update_watch_hours(resident: ViewedResidentDep, hours: WatchHours, db: SupabaseDep) -> WatchHours:
+    """Anyone in her care circle sets when the pillow watches her; equal start and end times watch all day."""
     await _save(db, resident, WATCH_HOURS_TOOL, hours)
     return hours
 
@@ -49,9 +50,9 @@ async def read_checkin_wait(resident: ViewedResidentDep) -> CheckinWait:
 
 @router.put("/checkin-wait")
 async def update_checkin_wait(
-    resident: OwnedResidentDep, wait: CheckinWaitUpdate, db: SupabaseDep
+    resident: ViewedResidentDep, wait: CheckinWaitUpdate, db: SupabaseDep
 ) -> CheckinWait:
-    """Set the check-in wait, within the Guardian's bounds (422 outside them). Owner only."""
+    """Anyone in her care circle sets the check-in wait, within the Guardian's bounds (422 outside them)."""
     await _save(db, resident, CHECKIN_WAIT_TOOL, wait)
     return CheckinWait.model_validate(wait.model_dump())
 
@@ -85,7 +86,7 @@ async def _save(db: SupabaseDep, resident: dict[str, Any], tool: str, settings: 
 
 
 async def _log(db: SupabaseDep, resident: dict[str, Any], tool: str, args: dict[str, Any]) -> None:
-    """Note a change the owner made from the app in her pillows' agent log."""
+    """Note a change made from the app in her pillows' agent log."""
     await log_resident_action(
         db, resident["id"], FAMILY_APP_AGENT, SETTINGS_CHANGE_INTENT, tool=tool, args=args
     )
