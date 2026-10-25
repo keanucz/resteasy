@@ -99,7 +99,15 @@ export default function TonightScreen() {
     () => todaysReminders(pillow.reminders, pillow.occurrences, now, tz),
     [pillow.reminders, pillow.occurrences, now, tz],
   );
-  const live = useMemo(() => incidents.find((i) => i.status === 'open' || i.status === 'acknowledged'), [incidents]);
+  // Only the newest alert can be in progress: an older one still marked open lost its ladder (the
+  // backend now clears those, this guards rows left from before).
+  const live = useMemo(() => {
+    const newest = incidents.reduce<IncidentRow | undefined>(
+      (best, i) => (!best || Date.parse(i.opened_at) > Date.parse(best.opened_at) ? i : best),
+      undefined,
+    );
+    return newest && (newest.status === 'open' || newest.status === 'acknowledged') ? newest : undefined;
+  }, [incidents]);
   // An alert that just ended with a reason worth telling (she said she's fine, she's back in bed),
   // until it's dismissed or a while has passed.
   const [dismissed, setDismissed] = useState<ReadonlySet<number>>(() => new Set());

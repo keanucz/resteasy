@@ -20,14 +20,16 @@ from app.crud.crud_constants import (
     INCIDENTS_TABLE,
     NOTIFICATIONS_TABLE,
     PILLOW_STATE_TABLE,
+    RESIDENTS_TABLE,
 )
 from app.notify.notify_constants import AGENT as NOTIFY_AGENT
-from tests.seed_constants import TEST_PILLOW_ID, TEST_USER_ID, UNKNOWN_CONTACT_ID
+from tests.seed_constants import TEST_PILLOW_ID, TEST_RESIDENT_ID, TEST_USER_ID, UNKNOWN_CONTACT_ID
 
 # 23:00 in the test resident's timezone (the residents default), inside her quiet hours
 NIGHT = datetime(2026, 10, 24, 23, 0, tzinfo=ZoneInfo("America/Los_Angeles")).timestamp()
 STATE_URL = f"/api/pillows/{TEST_PILLOW_ID}/state"
 CHECKIN_TOKEN = "test-checkin-token"
+CHECKIN_WAIT_MIN = 20  # what these nights assume; the shared test resident may have been changed
 
 
 def _clean(db: Client) -> None:
@@ -41,9 +43,15 @@ def _clean(db: Client) -> None:
 def night(db: Client, live_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     """A live client with the test pillow's night history cleared before and after."""
     monkeypatch.setattr(get_settings(), "checkin_token", CHECKIN_TOKEN)
+    monkeypatch.setattr(get_settings(), "pillow_demo_timings", False)  # real timings, whatever .env says
+    resident = db.table(RESIDENTS_TABLE).select("checkin_timeout_min").eq("id", TEST_RESIDENT_ID)
+    saved = resident.execute().data[0]
+    pinned = {"checkin_timeout_min": CHECKIN_WAIT_MIN}
+    db.table(RESIDENTS_TABLE).update(pinned).eq("id", TEST_RESIDENT_ID).execute()
     _clean(db)
     yield live_client
     _clean(db)
+    db.table(RESIDENTS_TABLE).update(saved).eq("id", TEST_RESIDENT_ID).execute()
 
 
 def _report(client: TestClient, seconds: float, head_on: bool) -> None:
@@ -70,6 +78,19 @@ def _escalate(client: TestClient) -> None:
     assert client.post(checkin_url, json=result).status_code == 401  # only the base laptop may
     escalated = client.post(checkin_url, json=result, headers={"Authorization": f"Bearer {CHECKIN_TOKEN}"})
     assert escalated.json() == {"night_state": "escalating"}
+
+
+def test_an_alert_left_open_by_an_earlier_run_is_cleared(db: Client, night: TestClient) -> None:
+    """An incident still open from before a restart has no ladder behind it: the app must stop
+    showing it, and the next alert is the only one in progress."""
+    stale = db.table(INCIDENTS_TABLE).insert(
+        {"pillow_id": TEST_PILLOW_ID, "kind": "no_return", "summary": "left open by a restart"}
+    ).execute().data[0]["id"]
+    _escalate(night)
+
+    old, new = _rows(db, INCIDENTS_TABLE)
+    assert old["id"] == stale and old["status"] == "resolved" and old["resolved_reason"] == "cleared"
+    assert new["status"] == "open" and new["step"] == 1
 
 
 def test_a_night_with_no_return_escalates_and_resolves(db: Client, night: TestClient) -> None:

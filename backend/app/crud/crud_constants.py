@@ -9,6 +9,10 @@ RESIDENTS_TABLE = "residents"
 EVENTS_TABLE = "events"
 NIGHT_TRIPS_VIEW = "night_trips"  # each bed_exit paired with the next bed_return
 INCIDENTS_TABLE = "incidents"
+# An incident still showing in the app as an alert in progress
+LIVE_INCIDENT_STATUSES = ("open", "acknowledged")
+# incidents.resolved_reason when the alert ended without a fine or a bed return (or its ladder was lost)
+CLEARED_REASON = "cleared"
 NOTIFICATIONS_TABLE = "notifications"
 # PostgREST's error code for a column the schema cache does not know (a migration not applied yet)
 MISSING_COLUMN = "PGRST204"

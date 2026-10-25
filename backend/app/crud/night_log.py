@@ -8,8 +8,10 @@ from supabase import AsyncClient
 
 from app.crud.crud_constants import (
     AGENT_LOG_TABLE,
+    CLEARED_REASON,
     EVENTS_TABLE,
     INCIDENTS_TABLE,
+    LIVE_INCIDENT_STATUSES,
     MISSING_COLUMN,
     NIGHT_TRIPS_VIEW,
     NOTIFICATIONS_TABLE,
@@ -38,6 +40,25 @@ async def open_incident(db: AsyncClient, pillow_id: str, kind: str, summary: str
 async def update_incident(db: AsyncClient, incident_id: int, fields: dict[str, Any]) -> None:
     """Update an incident's step or status."""
     await db.table(INCIDENTS_TABLE).update(fields).eq("id", incident_id).execute()
+
+
+def _cleared() -> dict[str, Any]:
+    """Resolved, now, as "cleared"."""
+    now = datetime.now(UTC).isoformat()
+    return {"status": "resolved", "resolved_at": now, "resolved_reason": CLEARED_REASON}
+
+
+async def clear_incident(db: AsyncClient, incident_id: int) -> None:
+    """Resolve the incident as "cleared" if it is still live; one already resolved keeps its reason."""
+    await (db.table(INCIDENTS_TABLE).update(_cleared()).eq("id", incident_id)
+           .in_("status", list(LIVE_INCIDENT_STATUSES)).execute())
+
+
+async def clear_live_incidents(db: AsyncClient, pillow_id: str) -> None:
+    """Resolve every live incident of the pillow as "cleared": the ladder that owned them is gone
+    (a restart forgets it), so the app must stop showing them as alerts in progress."""
+    await (db.table(INCIDENTS_TABLE).update(_cleared()).eq("pillow_id", pillow_id)
+           .in_("status", list(LIVE_INCIDENT_STATUSES)).execute())
 
 
 async def add_notification(

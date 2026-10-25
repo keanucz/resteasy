@@ -47,6 +47,8 @@ from app.crud.commands import queue_command
 from app.crud.night_log import (
     add_event,
     add_notification,
+    clear_incident,
+    clear_live_incidents,
     latest_log_row,
     list_trips_between,
     log_action,
@@ -198,6 +200,9 @@ class WatchService:
                     w = _Watch(NightWatch(timings=DEMO_TIMINGS if demo else None),
                                sleep=SleepTracker(demo=demo))
                     await self._load_settings(db, pillow, w, ts)
+                    # Incidents left open by a previous run have lost their ladder: clear them, and
+                    # a check-in or alert in flight restarts below and opens a fresh one if needed.
+                    await clear_live_incidents(db, pillow.id)
                     saved = await get_state(db, pillow.id)
                     if saved and saved.night_state != State.AWAKE:
                         w.nw.resume(State(saved.night_state), saved.state_since.timestamp())
@@ -287,6 +292,8 @@ class WatchService:
             await log_action(db, pillow_id, AGENT, intent=f"{before} -> {w.nw.state}",
                              incident_id=w.incident_id)
             if w.nw.state is not State.ESCALATING:
+                if w.incident_id is not None:  # ended another way (asleep, awake, distress -> check-in)
+                    await clear_incident(db, w.incident_id)
                 w.incident_id, w.incident_step = None, 0
 
     async def _word(self, w: _Watch, actions: list[Action]) -> list[Action]:
@@ -309,6 +316,7 @@ class WatchService:
                 who = w.nw.cfg.resident
                 summary = (f"{who} said something that sounds like she needs help." if kind == "distress"
                            else f"{who} got up and hasn't come back to bed.")
+                await clear_live_incidents(db, pillow_id)  # one alert at a time in the app
                 w.incident_id = await open_incident(db, pillow_id, kind, summary)
             w.incident_step += 1
             await update_incident(db, w.incident_id, {"step": w.incident_step})
