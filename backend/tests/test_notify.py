@@ -31,8 +31,9 @@ class FakeIMessage:
 
 
 class FakeTwilio:
-    def __init__(self, fail: str | None = None):
+    def __init__(self, fail: str | None = None, outcome=(("completed", "human"),)):
         self.fail, self.texts, self.calls = fail, [], []
+        self.outcome = list(outcome)  # what call_status answers, one per check; the last repeats
 
     async def sms(self, to, body):
         if self.fail:
@@ -45,6 +46,9 @@ class FakeTwilio:
             raise DeliveryError(self.fail)
         self.calls.append((to, say))
         return "CA1"
+
+    async def call_status(self, sid):
+        return self.outcome.pop(0) if len(self.outcome) > 1 else self.outcome[0]
 
 
 def deliver(sender, r):
@@ -133,6 +137,45 @@ def test_tick_records_each_row_and_logs_it(monkeypatch):
                       ("mum", "Could not call Sarah: no phone number on record")]
 
 
+# ---------- a call that doesn't reach a person ----------
+
+def follow(monkeypatch, tw, r):
+    logged = []
+
+    async def fake_log(db, pillow_id, agent, intent, **kw):
+        logged.append((pillow_id, intent))
+
+    monkeypatch.setattr(sender_module, "log_action", fake_log)
+    monkeypatch.setattr(sender_module, "CALL_POLL_S", 0)
+    asyncio.run(NotificationSender(FakeIMessage("down"), tw, ["mum"]).follow_call(None, r, "CA1"))
+    return logged
+
+
+def test_rejected_call_is_followed_by_a_text(monkeypatch):
+    tw = FakeTwilio(outcome=[("ringing", None), ("busy", None)])
+    logged = follow(monkeypatch, tw, row("call"))
+    assert tw.texts == [(PHONE, "Margaret hasn't come back to bed.")]
+    assert logged == [("mum", "Sarah rejected the call, so texted them (SMS)")]
+
+
+def test_voicemail_counts_as_not_reached(monkeypatch):
+    tw = FakeTwilio(outcome=[("in-progress", "machine_start")])
+    logged = follow(monkeypatch, tw, row("call"))
+    assert logged == [("mum", "Sarah didn't pick up (voicemail), so texted them (SMS)")]
+
+
+def test_unanswered_call_without_text_consent_says_so(monkeypatch):
+    tw = FakeTwilio(outcome=[("no-answer", None)])
+    logged = follow(monkeypatch, tw, row("call", consent=False))
+    assert tw.texts == []
+    assert logged == [("mum", "Sarah didn't answer; no text either (has not agreed to texts)")]
+
+
+def test_answered_call_sends_nothing_more(monkeypatch):
+    tw = FakeTwilio(outcome=[("ringing", None), ("in-progress", "human")])
+    assert follow(monkeypatch, tw, row("call")) == [] and tw.texts == []
+
+
 # ---------- the HTTP clients ----------
 
 def test_twilio_sms_and_call_requests():
@@ -148,6 +191,16 @@ def test_twilio_sms_and_call_requests():
     assert seen[0] == ("/2010-04-01/Accounts/AC1/Messages.json",
                        {"To": [PHONE], "From": ["+15550000000"], "Body": ["hi"]})
     assert seen[1][0].endswith("/Calls.json") and "Mum &amp; Dad &lt;now&gt;" in seen[1][1]["Twiml"][0]
+    assert seen[1][1]["MachineDetection"] == ["Enable"] and seen[1][1]["Timeout"] == ["25"]
+
+
+def test_twilio_call_status():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/2010-04-01/Accounts/AC1/Calls/CA9.json"
+        return httpx.Response(200, json={"sid": "CA9", "status": "busy", "answered_by": None})
+
+    tw = Twilio("AC1", "tok", "+15550000000", http=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    assert asyncio.run(tw.call_status("CA9")) == ("busy", None)
 
 
 def test_twilio_error_becomes_delivery_error():

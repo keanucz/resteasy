@@ -8,7 +8,7 @@ from xml.sax.saxutils import escape
 import httpx
 
 from app.core.config import Settings
-from app.notify.notify_constants import HTTP_TIMEOUT_S, TWILIO_API, TWILIO_VOICE
+from app.notify.notify_constants import CALL_RING_S, HTTP_TIMEOUT_S, TWILIO_API, TWILIO_VOICE
 
 
 class DeliveryError(Exception):
@@ -68,7 +68,21 @@ class Twilio:
         # Said twice: the first time is often lost while the phone is lifted
         line = f'<Say voice="{TWILIO_VOICE}">{escape(say)}</Say>'
         twiml = f'<Response>{line}<Pause length="1"/>{line}</Response>'
-        return await self._create("Calls.json", {"To": to, "From": self.from_number, "Twiml": twiml})
+        form = {"To": to, "From": self.from_number, "Twiml": twiml,
+                "Timeout": str(CALL_RING_S), "MachineDetection": "Enable"}
+        return await self._create("Calls.json", form)
+
+    async def call_status(self, sid: str) -> tuple[str, str | None]:
+        """How call `sid` is going: Twilio's status ("ringing", "in-progress", "completed", "busy",
+        "no-answer", ...) and who answered ("human", "machine_start", ..., None until known)."""
+        try:
+            response = await self.http.get(f"{self.base}/Calls/{sid}.json")
+        except httpx.HTTPError as err:
+            raise DeliveryError(f"Twilio unreachable ({type(err).__name__})") from err
+        if response.status_code != 200:
+            raise DeliveryError(_reason(response))
+        call = response.json()
+        return call["status"], call.get("answered_by")
 
     async def _create(self, resource: str, form: dict[str, str]) -> str:
         try:

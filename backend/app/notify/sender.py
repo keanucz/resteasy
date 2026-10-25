@@ -2,13 +2,15 @@
 
     sms   iMessage through the Photon sidecar; if that fails or isn't set up, Twilio SMS.
           Only to contacts who agreed to texts (contacts.sms_consent).
-    call  a Twilio call that reads the alert aloud.
+    call  a Twilio call that reads the alert aloud. If it's rejected, not answered or goes to
+          voicemail, the same alert follows as a text (the consent rule above still applies).
 
 Night Watch's ladder never waits on this: it queues the row and moves on, and this ticker sends
 what is queued. Only pillows in NOTIFY_PILLOW_IDS reach real phones (test pillows stay queued),
 and nothing older than MAX_AGE_S is sent.
 """
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -18,7 +20,15 @@ from supabase import AsyncClient
 
 from app.core.config import Settings
 from app.crud.night_log import finish_notification, list_sendable_notifications, log_action
-from app.notify.notify_constants import AGENT, FALLBACK_TEXT, MAX_AGE_S, SENT_CHANNELS
+from app.notify.notify_constants import (
+    AGENT,
+    CALL_MISSED,
+    CALL_POLL_S,
+    CALL_WATCH_S,
+    FALLBACK_TEXT,
+    MAX_AGE_S,
+    SENT_CHANNELS,
+)
 from app.notify.transports import DeliveryError, IMessage, Twilio
 
 log = logging.getLogger(__name__)
@@ -41,6 +51,7 @@ class NotificationSender:
         self.imessage = imessage
         self.twilio = twilio
         self.pillow_ids = pillow_ids
+        self._followups: set[asyncio.Task] = set()  # calls being checked (kept so they aren't collected)
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "NotificationSender":
@@ -59,6 +70,10 @@ class NotificationSender:
             status = "sent" if result.sent else "failed"
             await finish_notification(db, row["id"], status, result.ref, result.error)
             await self._log(db, row, result)
+            if result.sent and result.via == "call":
+                task = asyncio.create_task(self.follow_call(db, row, result.ref))
+                self._followups.add(task)
+                task.add_done_callback(self._followups.discard)
 
     async def deliver(self, row: dict[str, Any]) -> Delivery:
         """Send one row; never raises."""
@@ -95,6 +110,48 @@ class NotificationSender:
             return Delivery(True, "call", await self.twilio.call(phone, text))
         except DeliveryError as err:
             return Delivery(False, error=f"call {err}")
+
+    async def follow_call(self, db: AsyncClient, row: dict[str, Any], sid: str) -> None:
+        """Wait to see whether alert call `sid` reached a person; if not, text the alert instead.
+        Never raises."""
+        try:
+            missed = await self._missed(sid)
+        except DeliveryError as err:
+            log.warning("Could not check call %s: %s", sid, err)
+            return
+        if missed is None:
+            return
+        contact = row.get("contacts") or {}
+        name = (contact.get("full_name") or "family").split()[0]
+        if not contact.get("sms_consent"):
+            intent = f"{name} {missed}; no text either (has not agreed to texts)"
+            via = "call"
+        else:
+            text = row.get("message") or (row.get("incidents") or {}).get("summary") or FALLBACK_TEXT
+            result = await self._text(contact["phone"], text)
+            how = {"imessage": "iMessage", "sms": "SMS"}.get(result.via or "")
+            intent = (f"{name} {missed}, so texted them ({how})" if result.sent
+                      else f"{name} {missed}, and the text failed too: {result.error}")
+            via = result.via or "sms"
+        log.info("Call %s: %s", sid, intent)
+        await log_action(db, (row.get("incidents") or {}).get("pillow_id"), AGENT, intent=intent, tool=via,
+                         args={"notification_id": row["id"], "call": sid}, incident_id=row.get("incident_id"))
+
+    async def _missed(self, sid: str) -> str | None:
+        """Why the call didn't reach a person ("rejected the call", ...), or None if it did (or we
+        stopped watching: no news after CALL_WATCH_S counts as reached)."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + CALL_WATCH_S
+        while loop.time() < deadline:
+            status, answered_by = await self.twilio.call_status(sid)
+            if answered_by and answered_by.startswith(("machine", "fax")):
+                return "didn't pick up (voicemail)"
+            if status in CALL_MISSED:
+                return CALL_MISSED[status]
+            if status == "completed" or answered_by == "human":
+                return None
+            await asyncio.sleep(CALL_POLL_S)
+        return None
 
     async def _log(self, db: AsyncClient, row: dict[str, Any], result: Delivery) -> None:
         """A line in the family app's live log: who was reached, and how, or why not."""
