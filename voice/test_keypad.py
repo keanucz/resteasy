@@ -10,7 +10,9 @@ from keypad import (
     TALK_GO,
     TALK_READY,
     KeyPresses,
+    PadKeys,
     parse_keymap,
+    vk_name,
 )
 
 
@@ -56,3 +58,23 @@ def test_keymap():
         "KEY_F13": "talk", "KEY_F14": "fine", "KEY_F15": "family"}
     with pytest.raises(ValueError):
         parse_keymap("KEY_A=dance")
+
+
+def test_pad_keys_drop_auto_repeat_and_keys_outside_the_keymap():
+    events = []
+    pad = PadKeys(parse_keymap("KEY_F13=talk,KEY_F14=fine"), events.append)
+    assert pad.edge(["KEY_A"], True, 0.0) is False  # not the pad's: left to type as usual
+    assert pad.edge(["KEY_F14"], True, 0.0) is True
+    assert pad.edge(["KEY_F14"], True, 0.5) is True  # Windows auto-repeat: still swallowed, no 2nd fine
+    assert pad.edge(["KEY_F14"], False, 0.6) is True
+    assert pad.edge(["KEY_F13"], False, 0.7) is True  # an up whose down came before we started
+    pad.edge(["KEY_F13"], True, 1.0)
+    pad.tick(1.0 + HOLD_S)
+    pad.edge(["KEY_F13"], False, 1.0 + HOLD_S + 0.2)
+    assert events == [FINE, TALK_ARM, TALK_READY, TALK_GO]
+
+
+def test_windows_key_names_match_evdev():
+    assert vk_name(0x7C) == "KEY_F13" and vk_name(0x7E) == "KEY_F15"
+    assert vk_name(0x41) == "KEY_A" and vk_name(0xAF) == "KEY_VOLUMEUP"
+    assert vk_name(0xFF) == "VK_255"

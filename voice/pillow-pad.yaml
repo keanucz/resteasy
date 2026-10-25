@@ -1,0 +1,19 @@
+# The pillow's 3-key + knob pad (USB 1189:8890), for ch57x-keyboard-tool.
+# Flash: ch57x-keyboard-tool upload voice/pillow-pad.yaml  (github.com/kriomant/ch57x-keyboard-tool; Windows needs UsbDk)
+# Keys send F13 / F14 / F15 (HID usages 104-106), which no other keyboard sends, so
+# voice/keypad.py can swallow them without touching normal typing.
+# Knob: laptop volume (the pillow speaker), press = mute; keypad.py leaves these alone.
+model: ch57x-2   # 1189:8890, checked with `validate` (tool v1.7.0)
+orientation: normal
+rows: 1
+columns: 3
+knobs: 1
+layers:
+  - buttons:
+      # this pad sends its buttons right to left, so the list is reversed: from the left the keys
+      # are talk (F13), "I'm fine" (F14), call family (F15)
+      - ["<106>", "<105>", "<104>"]
+    knobs:
+      - ccw: "volumedown"
+        press: "mute"
+        cw: "volumeup"

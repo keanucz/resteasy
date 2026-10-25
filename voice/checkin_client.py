@@ -27,7 +27,7 @@ The pillow never needs a key to hear her: whenever it asks something, it listens
     uv run voice/checkin_client.py --server http://localhost:8000 --pillow-id test-pillow --contact Sarah
     uv run voice/checkin_client.py --keywords                     # judge replies by keywords, not Claude
     uv run voice/checkin_client.py --text                         # type her replies instead of mic + speaker
-    uv run voice/checkin_client.py --keys pad                     # the macro pad (Linux, evdev)
+    uv run voice/checkin_client.py --keys pad                     # the macro pad (Linux evdev, Windows hook)
 
 The check-in itself (tries, timings, when to escalate) is in checkin.py; this file only decides when
 to run it and reports the outcome. If the server can't be reached the client keeps polling; if the
