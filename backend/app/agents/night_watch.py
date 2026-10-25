@@ -208,12 +208,15 @@ class NightWatch:
         """The "I'm fine" key on the bedside pad (POST /keys): the same as the pillow's fine key."""
         return self._tapped_fine(ts)
 
-    def checkin_done(self, ts: float, escalate: bool, reason: str) -> list[Action]:
-        """Result of the voice check-in: escalate, or she said she's fine."""
+    def checkin_done(self, ts: float, escalate: bool, reason: str, distress: bool = False) -> list[Action]:
+        """Result of the voice check-in: escalate, or she said she's fine. `distress`: she said
+        something alarming ("help, I've fallen"), so family are phoned at once, not after the ladder."""
         if self.state is not State.CHECK_IN:
             return []  # cancelled meanwhile (back in bed, or tapped)
-        out: list[Action] = [Event(ts, "checkin_result", {"escalate": escalate, "reason": reason})]
-        return out + (self._escalate(ts, reason) if escalate else self._said_fine(ts))
+        distress = escalate and distress
+        out: list[Action] = [Event(ts, "checkin_result",
+                                   {"escalate": escalate, "reason": reason, "distress": distress})]
+        return out + (self._escalate(ts, reason, distress=distress) if escalate else self._said_fine(ts))
 
     def distress_heard(self, ts: float, reason: str) -> list[Action]:
         """She said something alarming outside a check-in (answering a reminder, say): escalate now,
@@ -323,10 +326,17 @@ class NightWatch:
         self._acked = False
         self._distress = distress
         # Least intrusive first: an in-app alert to every contact at once, then SMS and a call to
-        # each contact in turn, skipping the channels a contact turned off.
-        ladder = [[("app", c) for c in self.cfg.contacts if self._allows(c, "app")]]
-        for contact in self.cfg.contacts:
-            ladder += [[(channel, contact)] for channel in ("sms", "call") if self._allows(contact, channel)]
+        # each contact in turn, skipping the channels a contact turned off. Distress (she asked for
+        # help, or said she's fallen) is critical: the first step also phones every contact who takes
+        # calls, all at once, and texts follow one by one.
+        first = [("app", c) for c in self.cfg.contacts if self._allows(c, "app")]
+        if distress:
+            first += [("call", c) for c in self.cfg.contacts if self._allows(c, "call")]
+            ladder = [first] + [[("sms", c)] for c in self.cfg.contacts if self._allows(c, "sms")]
+        else:
+            ladder = [first]
+            for contact in self.cfg.contacts:
+                ladder += [[(ch, contact)] for ch in ("sms", "call") if self._allows(contact, ch)]
         self._ladder = [step for step in ladder if step]
         self._reason = reason
         return self._next_step(ts)

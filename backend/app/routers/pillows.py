@@ -87,7 +87,7 @@ async def report_checkin(
     pillow: PillowDep, result: CheckinResult, db: SupabaseDep, night_watch: NightWatchDep
 ) -> NightStatus:
     """The base laptop's voice check-in finished: escalate to family, or she said she's fine."""
-    night_state = await night_watch.checkin_done(db, pillow, result.escalate, result.reason)
+    night_state = await night_watch.checkin_done(db, pillow, result.escalate, result.reason, result.distress)
     return NightStatus(night_state=night_state)
 
 

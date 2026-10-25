@@ -186,6 +186,27 @@ def test_the_ladder_skips_the_channels_a_contact_turned_off():
     assert steps == [(80, "app", "Tom"), (82, "sms", "Sarah"), (84, "call", "Tom")]
 
 
+def test_distress_in_a_checkin_phones_everyone_at_once_then_texts():
+    nw = NightWatch(NightWatchConfig(contacts=("Sarah", "Tom"), channels={"Tom": frozenset({"app", "sms"})}))
+    ts, _ = feed(nw, NIGHT, 10, True)
+    ts, _ = feed(nw, ts, 20 * 60 + 40, False)
+    acts = nw.checkin_done(ts, escalate=True, reason='She said: "Help, I have fallen"', distress=True)
+    assert [(a.channel, a.contact) for a in acts if isinstance(a, Alert)] == [
+        ("app", "Sarah"), ("app", "Tom"), ("call", "Sarah")]  # Tom takes no calls
+    step = next(a for a in acts if isinstance(a, Event) and a.type == "escalation_step")
+    assert step.data["kind"] == "distress"
+    later = nw.observe({"ts": ts + 2 * 60 + 1, "head_on": False, "keys": {"fine": False}})
+    assert [(a.channel, a.contact) for a in later if isinstance(a, Alert)] == [("sms", "Sarah")]
+
+
+def test_a_silent_checkin_keeps_the_gentle_ladder_even_if_distress_is_sent():
+    nw = NightWatch(NightWatchConfig(contacts=("Sarah",)))
+    ts, _ = feed(nw, NIGHT, 10, True)
+    ts, _ = feed(nw, ts, 20 * 60 + 40, False)
+    acts = nw.checkin_done(ts, escalate=True, reason="She didn't answer.")
+    assert [a.channel for a in acts if isinstance(a, Alert)] == ["app"]
+
+
 def feed(nw, start, seconds, head_on, fine=False):
     """One report per second for `seconds` from `start`. Returns (next start, actions)."""
     acts = []

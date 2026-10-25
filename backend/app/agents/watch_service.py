@@ -134,12 +134,14 @@ class WatchService:
             await self._apply(db, pillow.id, w, actions, before, w.last_ts)
             return str(w.nw.state)
 
-    async def checkin_done(self, db: AsyncClient, pillow: Pillow, escalate: bool, reason: str) -> str:
+    async def checkin_done(
+        self, db: AsyncClient, pillow: Pillow, escalate: bool, reason: str, distress: bool = False
+    ) -> str:
         """Pass the base laptop's check-in result to Night Watch; return the new night state."""
         w = await self._watch(db, pillow)
         async with w.lock:
             before = w.nw.state
-            actions = w.nw.checkin_done(w.last_ts, escalate, reason)
+            actions = w.nw.checkin_done(w.last_ts, escalate, reason, distress)
             await self._apply(db, pillow.id, w, actions, before, w.last_ts)
             return str(w.nw.state)
 

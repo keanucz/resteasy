@@ -11,6 +11,8 @@ class CheckinResult(BaseModel):
 
     escalate: bool
     reason: str = Field(max_length=300)
+    # She said something alarming ("help", "I've fallen"): phone family at once (older clients omit it)
+    distress: bool = False
 
 
 class Acknowledgement(BaseModel):
