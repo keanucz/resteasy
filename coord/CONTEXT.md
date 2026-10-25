@@ -83,7 +83,8 @@ agents), Factory Droid (trigger you designed, limited access, visible plans/diff
   the Waveshare voice unit (mic, speaker, screen) on the laptop's USB. Power dangles outside the
   pillow: a USB power bank on one cable into the N16R8 (see decisions log, PR #36).
   No LiPo or heater inside bedding. 3D printers (4, queued) for a vented sensor pod.
-- Keypad: key 1 hold-to-talk, key 2 "I'm fine" (cancels escalation), key 3 call family.
+- Keypad: a 3-key USB-C macro pad on the base laptop (Keanu's, Fedora/Wayland, read with evdev) replaces
+  the pillow squeeze: key 1 talk (hold 2 s, let go, speak), key 2 "I'm fine", key 3 call family.
 - Lane split for hardware resolved Fri 23 Oct: see the decisions log.
 
 ## Agents lane: status (Sat 24 Oct 13:15 PT, Adam)
@@ -261,3 +262,18 @@ still open:
   drains the serial backlog and posts only the newest line (a state POST to the VPS takes 1-3 s,
   the node prints 2 lines/s) and starts polling after the newest queued command (a restart used
   to replay every old command).
+- Sat 24 Oct: talk to the pillow (Adam). A 3-key macro pad on the base laptop replaces the squeeze
+  (`voice/keypad.py`, evdev, grabbed). Talk = hold 2 s (the voice side starts during the hold: mic,
+  Cartesia socket, Claude connection), let go, "I'm listening" (pre-rendered), then she asks: set a
+  reminder ("remind me to take my tablets tomorrow morning" -> read back -> yes -> saved, her yes is
+  her consent) or hear her reminders ("what have I got tomorrow?"). `voice/talk.py`; Claude only
+  parses the request, plain code reads back, judges yes/no and calls `POST|GET .../reminders?as=resident`
+  (agent token, created_by null, consent agreed, agent_log `pillow_voice`). Fine and family keys post
+  `POST /api/pillows/{id}/keys` at once (fine stops a check-in or alert, family starts the ladder via
+  `distress_heard`). The pillow never needs a key to hear her answer: check-ins, reminders and
+  read-backs listen right after they speak. Cartesia never listens on its own (no wake word): our
+  code opens Ink-2's turn socket on demand. Measured (Sat 24 Oct, synthesized speech into Ink-2, real
+  Claude): socket open 0.2-0.3 s warm (1.5 s cold; the 2 s hold hides both), end of speech -> turn.end
+  0.9-1.2 s (eager_end ~0.6 s), transcript word-perfect, Claude request parse 1.9-2.4 s, Sonic full
+  render ~1.1 s per line. End of her sentence -> read-back starts ~4.3 s, covered by a "got it" chime;
+  a plain yes/no is decided by keywords (Claude only when unclear, saves ~1.5 s).

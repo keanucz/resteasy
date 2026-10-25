@@ -112,3 +112,17 @@ def test_im_on_it_in_the_app_acknowledges_and_stops_the_alerts(db: Client, night
     assert [n["channel"] for n in notes] == ["app"]
     said = [r["intent"] for r in _rows(db, AGENT_LOG_TABLE, "id, intent")]
     assert "Test knows, and is checking on you." in said
+
+
+def test_the_bedside_pad_keys(db: Client, night: TestClient) -> None:
+    """POST /keys from the base laptop: fine stops an alert, family starts one, talk is logged."""
+    keys_url = f"/api/pillows/{TEST_PILLOW_ID}/keys"
+    auth = {"Authorization": f"Bearer {CHECKIN_TOKEN}"}
+    assert night.post(keys_url, json={"key": "fine"}).status_code == 401  # only the base laptop may
+    assert night.post(keys_url, json={"key": "dance"}, headers=auth).status_code == 422
+    _escalate(night)
+    assert night.post(keys_url, json={"key": "fine"}, headers=auth).json() == {"night_state": "up"}
+    assert night.post(keys_url, json={"key": "family"}, headers=auth).json() == {"night_state": "escalating"}
+    assert night.post(keys_url, json={"key": "talk"}, headers=auth).status_code == 200
+    kinds = [e["event_type"] for e in _rows(db, EVENTS_TABLE, "event_type")]
+    assert {"key_fine", "distress_heard", "key_talk"} <= set(kinds)

@@ -1,5 +1,6 @@
 """Schemas for the voice check-in result the base laptop reports back."""
 
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -22,3 +23,9 @@ class NightStatus(BaseModel):
     """Night Watch's state for the pillow after taking the result."""
 
     night_state: str
+
+
+class KeyPress(BaseModel):
+    """A key on the bedside pad, sent by the base laptop (POST /keys)."""
+
+    key: Literal["fine", "family", "talk"]

@@ -179,6 +179,10 @@ class NightWatch:
         self._last_ts = ts
         return self._tick(ts)
 
+    def fine_pressed(self, ts: float) -> list[Action]:
+        """The "I'm fine" key on the bedside pad (POST /keys): the same as the pillow's fine key."""
+        return self._tapped_fine(ts)
+
     def checkin_done(self, ts: float, escalate: bool, reason: str) -> list[Action]:
         """Result of the voice check-in: escalate, or she said she's fine."""
         if self.state is not State.CHECK_IN:

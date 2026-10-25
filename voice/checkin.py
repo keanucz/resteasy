@@ -49,6 +49,13 @@ def _usable(say: str | None) -> str | None:
     return say.strip() if say and say.strip() and len(say) <= _MAX_SAY else None
 
 
+STOPPED_REASON = "She pressed I'm fine."
+
+
+class _Stopped(Exception):
+    """She pressed "I'm fine" during the check-in."""
+
+
 def run_checkin(
     speak: Speak,
     listen: Listen,
@@ -59,12 +66,17 @@ def run_checkin(
     no_answer_s: float = 8.0,
     cancel_s: float = 15.0,
     log: Callable[[str], None] = lambda _: None,
+    should_stop: Callable[[], bool] = lambda: False,
 ) -> Outcome:
+    """`should_stop`: she pressed "I'm fine" on the pad (the server already knows); checked before
+    each question, so the pillow stops asking."""
     heard: list[str] = []
     seen: set[Kind] = set()
     reoriented = False
 
     def ask(prompt: str, volume: float, wait_s: float) -> Verdict:
+        if should_stop():
+            raise _Stopped
         speak(prompt, volume=volume)
         reply = listen(no_answer_s=wait_s)
         if reply.text:
@@ -118,6 +130,10 @@ def run_checkin(
 
     try:
         return conversation()
+    except _Stopped:
+        log("stopped: she pressed I'm fine")
+        speak("Okay. Glad you're okay.")
+        return Outcome(False, STOPPED_REASON, heard)
     except Exception as e:  # noqa: BLE001 - speaker, mic, network or judge: fail toward escalation
         log(f"check-in failed: {type(e).__name__}: {e}")
         return Outcome(True, "The pillow's check-in could not run, so we couldn't ask her.", heard)

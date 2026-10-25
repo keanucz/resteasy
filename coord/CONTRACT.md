@@ -31,6 +31,11 @@ the backend stores them in Supabase but the HTTP endpoints and message shapes st
 Unknown or missing sensors are `null`, never omitted. The server derives events from changes;
 the device does not decide what anything means.
 
+The bedside macro pad (on the base laptop, `voice/keypad.py`) does not send state: the laptop posts
+each press as `POST /api/pillows/{id}/keys {"key": "fine" | "family" | "talk"}` with the agent token.
+`fine` acts like `keys.fine` (stops a check-in or alert), `family` starts the alert ladder, `talk`
+is logged as `key_talk`. The `keys` object above stays for a keypad wired to the pillow node.
+
 ## 2. Cloud-side events (derived by the state machine, not sent by the device)
 
 | Event | Rule (defaults; thresholds live in config, not in the LLM) |

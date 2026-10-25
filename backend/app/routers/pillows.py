@@ -14,7 +14,7 @@ from app.core.dependencies import (
 )
 from app.crud.pillow_state import get_state, save_state
 from app.crud.readings import upsert_reading
-from app.schemas.checkin import Acknowledgement, CheckinResult, NightStatus
+from app.schemas.checkin import Acknowledgement, CheckinResult, KeyPress, NightStatus
 from app.schemas.pillow import Pillow
 from app.schemas.pillow_state import DeviceState, PillowState
 
@@ -80,3 +80,12 @@ async def acknowledge_alert(
         detail = f"Contact {ack.contact_id} does not look after pillow {pillow.id}"
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     return NightStatus(night_state=night_state)
+
+
+@router.post("/keys", dependencies=[Depends(require_checkin_token)])
+async def press_key(
+    pillow: PillowDep, press: KeyPress, db: SupabaseDep, night_watch: NightWatchDep
+) -> NightStatus:
+    """A key on the bedside pad, from the base laptop: "fine" stops a check-in or an alert,
+    "family" starts the alert ladder, "talk" is only logged (the laptop runs the conversation)."""
+    return NightStatus(night_state=await night_watch.press_key(db, pillow, press.key))

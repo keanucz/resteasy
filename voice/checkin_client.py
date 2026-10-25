@@ -14,11 +14,18 @@ and mic) can. It polls GET /api/pillows/{id}/state about once a second and react
     awake       -> every 10 s, say any due reminder (GET /reminders/due, voice/reminder.py), then
                    POST /reminders/{occurrence_id}/result
 
+With --keys pad (the 3-key macro pad, voice/keypad.py) or --keys stdin (t / f / c lines):
+    talk    hold 2 s, let go, then she speaks: set or hear her reminders (voice/talk.py)
+    fine    POST /keys "fine" at once: stops a check-in or an alert
+    family  POST /keys "family" at once: starts the alert ladder
+The pillow never needs a key to hear her: whenever it asks something, it listens straight away.
+
     export CARTESIA_API_KEY=sk_car_...  ANTHROPIC_API_KEY=sk-ant-...  CHECKIN_TOKEN=<same as the server>
     uv run voice/checkin_client.py                                # mum on https://pillow.keanuc.net
     uv run voice/checkin_client.py --server http://localhost:8000 --pillow-id test-pillow --contact Sarah
     uv run voice/checkin_client.py --keywords                     # judge replies by keywords, not Claude
     uv run voice/checkin_client.py --text                         # type her replies instead of mic + speaker
+    uv run voice/checkin_client.py --keys pad                     # the macro pad (Linux, evdev)
 
 The check-in itself (tries, timings, when to escalate) is in checkin.py; this file only decides when
 to run it and reports the outcome. If the server can't be reached the client keeps polling; if the
@@ -29,8 +36,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import queue
 import sys
+import threading
 import time
+from zoneinfo import ZoneInfo
 
 DEFAULT_SERVER = "https://pillow.keanuc.net"
 POLL_S = 1.0
@@ -90,6 +100,9 @@ def main() -> None:
     parser.add_argument("--contact", default="your family", help="who she's told will be alerted, e.g. Sarah")
     parser.add_argument("--keywords", action="store_true", help="judge replies by keywords, not Claude")
     parser.add_argument("--text", action="store_true", help="type replies and print speech (no audio needed)")
+    parser.add_argument("--keys", choices=("none", "pad", "stdin"), default=os.environ.get("PILLOW_KEYS", "none"),
+                        help="the bedside keys: the macro pad, or t/f/c lines on stdin")
+    parser.add_argument("--tz", default=os.environ.get("PILLOW_TZ", "America/Los_Angeles"), help="her timezone")
     args = parser.parse_args()
 
     token = os.environ.get("CHECKIN_TOKEN", "").strip()
@@ -138,6 +151,77 @@ def main() -> None:
                 time.sleep(2)
         return None
 
+    events: queue.Queue[str] = queue.Queue()
+    stop_checkin = threading.Event()
+    talk_session = None
+
+    def post_key(key: str) -> None:
+        """POST /keys now, from the keypad thread: "I'm fine" must not wait behind speech."""
+        try:
+            with httpx.Client(timeout=10, headers=_headers()) as h:
+                r = h.post(f"{base}/keys", json={"key": key}, headers=auth)
+                r.raise_for_status()
+                print(f"{time.strftime('%H:%M:%S')}  key      {key} -> {r.json()}", flush=True)
+        except httpx.HTTPError as err:
+            print(f"[client] key {key} failed: {err}", file=sys.stderr, flush=True)
+
+    if args.keys != "none":
+        import keypad
+        import talk
+
+        if args.text:
+            sys.exit("--keys needs real audio: rehearse talking with voice/talk.py --text instead")
+
+        def on_key(event: str) -> None:
+            if event in (keypad.FINE, keypad.FAMILY):
+                if event == keypad.FINE:
+                    stop_checkin.set()
+                threading.Thread(target=post_key, args=(event,), daemon=True).start()
+            events.put(event)
+
+        talk_session = talk.TalkSession(
+            talk.live_voice(talk.Pillow(args.server, args.pillow_id, token), lambda _reason: post_key("family"),
+                            keywords=args.keywords),
+            talk.Ears(), ZoneInfo(args.tz))
+        keypad.start(on_key, args.keys)
+
+    def handle_key(event: str) -> None:
+        """Talk events, on the main thread (one conversation at a time; never during a check-in)."""
+        import keypad
+
+        if talk_session is None or event in (keypad.FINE, keypad.FAMILY):
+            return
+        if watcher.state == "check_in":
+            talk_session.cancel()  # the check-in is already listening to her
+            return
+        if event == keypad.TALK_ARM:
+            talk_session.arm()
+        elif event == keypad.TALK_READY:
+            talk_session.ready()
+        elif event == keypad.TALK_CANCEL:
+            talk_session.cancel()
+        elif event == keypad.TALK_GO:
+            threading.Thread(target=post_key, args=("talk",), daemon=True).start()
+            print(f"{time.strftime('%H:%M:%S')}  talk     listening", flush=True)
+            talk_session.go()
+
+    def wait_for_keys(seconds: float) -> None:
+        """Sleep between polls, but act on a key press the moment it comes."""
+        deadline = time.monotonic() + seconds
+        while (left := deadline - time.monotonic()) > 0:
+            try:
+                event = events.get(timeout=left)
+            except queue.Empty:
+                return
+            handle_key(event)
+
+    def drop_stale_talk() -> None:
+        """Talk presses made while the pillow was busy (a check-in, a reminder) are dropped."""
+        while not events.empty():
+            events.get_nowait()
+        if talk_session is not None:
+            talk_session.cancel()
+
     print(f"watching {base}/state (night_state) ...", flush=True)
     with httpx.Client(timeout=10, headers=_headers()) as http:
         while True:
@@ -171,8 +255,14 @@ def main() -> None:
                 else:
                     print(f"{stamp}  check-in starting", flush=True)
                     judge.warm_up_in_background()
+                    stop_checkin.clear()
                     out = checkin.run_checkin(speak, listen, judge=judge_fn, contact=args.contact,
-                                              log=lambda m: print(f"          {m}", flush=True))
+                                              log=lambda m: print(f"          {m}", flush=True),
+                                              should_stop=stop_checkin.is_set)
+                    drop_stale_talk()
+                    if out.reason == checkin.STOPPED_REASON:
+                        print(f"{stamp}  check-in stopped: she pressed I'm fine (the server knows)", flush=True)
+                        continue
                     body = {"escalate": out.escalate, "reason": out.reason[:300]}
                     resp = post_result(http, f"{base}/checkin", body)
                     print(f"{stamp}  check-in {'ESCALATE' if out.escalate else 'STAND DOWN'}: "
@@ -193,7 +283,9 @@ def main() -> None:
                     resp = post_result(http, f"{base}/reminders/{item['occurrence_id']}/result",
                                        {"outcome": out.outcome, "reply": out.reply})
                     print(f"{stamp}  reminder {out.outcome} -> {resp}", flush=True)
-            time.sleep(POLL_S)
+                if due:
+                    drop_stale_talk()
+            wait_for_keys(POLL_S)
 
 
 if __name__ == "__main__":

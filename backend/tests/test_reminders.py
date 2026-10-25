@@ -23,7 +23,12 @@ from app.agents.reminders import (
     slot_today,
     spoken_line,
 )
-from app.core.app_constants import AGENT_CONTACT_MISSING, AGENT_CONTACT_NOT_LINKED, FAMILY_AGENT
+from app.core.app_constants import (
+    AGENT_CONTACT_MISSING,
+    AGENT_CONTACT_NOT_LINKED,
+    FAMILY_AGENT,
+    PILLOW_VOICE_AGENT,
+)
 from app.core.config import get_settings
 from app.crud.crud_constants import (
     AGENT_LOG_TABLE,
@@ -208,7 +213,7 @@ def reminders_client(db: Client, live_client: TestClient):
     yield live_client
     db.table(REMINDERS_TABLE).delete().eq("resident_id", TEST_RESIDENT_ID).execute()
     db.table(AGENT_LOG_TABLE).delete().eq("pillow_id", TEST_PILLOW_ID).in_(
-        "agent", [AGENT, FAMILY_AGENT]
+        "agent", [AGENT, FAMILY_AGENT, PILLOW_VOICE_AGENT]
     ).gte("ts", started).execute()
 
 
@@ -573,3 +578,27 @@ def test_family_agent_only_acts_for_her_contacts_and_labels_are_screened(
     response = reminders_client.post(f"{BASE}?contact_id={TEST_USER_ID}", json=medical, headers=checkin_auth)
     assert response.status_code == 422
     assert reminders_client.get(BASE).json()[0]["active"]  # the stranger changed nothing
+
+
+def test_she_sets_a_reminder_by_voice_and_her_yes_is_her_consent(
+    reminders_client: TestClient, db: Client, checkin_auth: dict
+):
+    """The base laptop, for her (the talk key): `as=resident`, no contact. Agreed at once, logged."""
+    tablets = {"label": "take your tablets", "time_of_day": "08:00", "on_date": "2026-11-02", "kind": "meds"}
+    made = reminders_client.post(f"{BASE}?as=resident", json=tablets, headers=checkin_auth)
+    assert made.status_code == 201
+    stored = db.table(REMINDERS_TABLE).select("consent, created_by").eq("id", made.json()["id"])
+    assert stored.single().execute().data == {"consent": "agreed", "created_by": None}
+    log = db.table(AGENT_LOG_TABLE).select("intent").eq("pillow_id", TEST_PILLOW_ID)
+    intents = [r["intent"] for r in log.eq("agent", PILLOW_VOICE_AGENT).execute().data]
+    assert any("by voice: take your tablets" in i for i in intents)
+    one_day = f"{BASE}/calendar?as=resident&start=2026-11-02&end=2026-11-02"
+    days = reminders_client.get(one_day, headers=checkin_auth)
+    assert [e["label"] for e in days.json()] == ["take your tablets"]
+    dose = dict(tablets, label="take double your dose")
+    assert reminders_client.post(f"{BASE}?as=resident", json=dose, headers=checkin_auth).status_code == 422
+
+
+def test_as_resident_needs_the_agent_token(offline_client: TestClient):
+    response = offline_client.post(f"{BASE}?as=resident", json=NEW, headers=_bearer("not-a-real-token"))
+    assert response.status_code == 401

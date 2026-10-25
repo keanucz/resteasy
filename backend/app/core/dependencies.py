@@ -16,6 +16,7 @@ from app.core.app_constants import (
     AGENT_CONTACT_MISSING,
     AGENT_CONTACT_NOT_LINKED,
     AGENT_OWN_TOKEN,
+    AS_RESIDENT,
     CHECKIN_TOKEN_NOT_CONFIGURED,
     FAMILY_AGENT,
     NOT_AN_AGENT,
@@ -28,6 +29,7 @@ from app.core.app_constants import (
     PHOTO_MAX_BYTES,
     PHOTO_TOO_LARGE,
     PHOTO_WRONG_TYPE,
+    PILLOW_VOICE_AGENT,
     SUPABASE_NOT_CONFIGURED,
 )
 from app.core.config import get_settings
@@ -296,11 +298,13 @@ CloneUploadDep = Annotated[CloneUpload, Depends(clone_upload)]
 
 @dataclass(frozen=True)
 class Caller:
-    """Who calls, before the pillow is read: a login (`user_id`), or the family agent with the
-    agent token speaking for `contact_id`."""
+    """Who calls, before the pillow is read: a login (`user_id`), the family agent with the
+    agent token speaking for `contact_id`, or the base laptop with the agent token speaking for
+    her (`resident`, the talk key)."""
 
     user_id: str | None = None
     contact_id: str | None = None
+    resident: bool = False
 
 
 async def care_caller(
@@ -309,17 +313,23 @@ async def care_caller(
     contact_id: Annotated[
         UUID | None, Query(description="With the agent token: the contact it acts for")
     ] = None,
+    as_: Annotated[
+        Literal["resident"] | None, Query(alias="as", description="With the agent token: act for her")
+    ] = None,
 ) -> Caller:
     """A family agent with its own token, for its own contact (403 if `contact_id` names another);
-    until the family agents have their own tokens, the shared agent token for the `contact_id` it
-    names (422 without one). Anyone else is the app's login, 401 without a valid one. A login's
-    `contact_id` is ignored."""
+    the shared agent token with `?as=resident` for her (the base laptop's talk key); until the
+    family agents have their own tokens, the shared agent token for the `contact_id` it names (422
+    without one). Anyone else is the app's login, 401 without a valid one. A login's `contact_id`
+    is ignored."""
     token = agent_token(authorization)
     if token is not None and token.kind == FAMILY:
         if contact_id is not None and str(contact_id) != token.contact_id:
             raise HTTPException(status.HTTP_403_FORBIDDEN, detail=AGENT_CONTACT_MISMATCH)
         return Caller(contact_id=token.contact_id)
     if token is not None and token.kind == LAPTOP:
+        if as_ == AS_RESIDENT:
+            return Caller(resident=True)
         if get_settings().family_agent_tokens:
             raise HTTPException(status.HTTP_403_FORBIDDEN, detail=AGENT_OWN_TOKEN)
         if contact_id is None:
@@ -334,7 +344,7 @@ class CareActor:
     the agent acting for them (with `contact_name`, for its log), None when they signed in."""
 
     resident: dict[str, Any]
-    contact_id: str
+    contact_id: str | None  # None: she asked herself (the talk key)
     agent: str | None = None
     contact_name: str | None = None
 
@@ -344,6 +354,9 @@ async def pillow_care_actor(
 ) -> CareActor:
     """Who acts on the resident of the pillow in the path: a login that looks after her (owner or
     contact), or the family agent for a contact of hers. 403 when they don't look after her."""
+    if caller.resident:
+        return CareActor(resident=resident, contact_id=None, agent=PILLOW_VOICE_AGENT,
+                         contact_name=resident["preferred_name"])
     if caller.user_id is not None:
         link = await require_role(db, caller.user_id, resident["id"], owner=False)
         return CareActor(resident=resident, contact_id=link["contact_id"])

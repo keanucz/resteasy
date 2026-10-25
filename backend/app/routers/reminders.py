@@ -2,13 +2,14 @@
 
 Setting a reminder up, changing or deleting it, and the calendar take the app's Supabase login of
 anyone who looks after her (owner or contact), or the shared agent token of the Fetch.ai family
-agents with the `contact_id` of the family member they act for; each agent write lands in
+agents with the `contact_id` of the family member they act for, or that token with `as=resident`
+when she asks the pillow herself (the talk key on the base laptop); each agent write lands in
 `agent_log`. The lists the laptop and the app already poll stay open like the rest of the pillow
 API. A label is spoken to her, so it passes the Guardian's text check. Only the laptop, with the
 shared agent token, may report how a reminder went.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
@@ -17,7 +18,7 @@ from supabase import AsyncClient
 
 from app.agents.guardian import Guardian
 from app.agents.reminders import due_reminders, reminder_calendar
-from app.core.app_constants import REMIND_PURPOSE, REMINDERS_TOOL
+from app.core.app_constants import CONSENT_AGREED, REMIND_PURPOSE, REMINDERS_TOOL
 from app.core.dependencies import (
     CareActor,
     CareActorDep,
@@ -63,7 +64,10 @@ async def _log_agent(
     if actor.agent is None:
         return
     args = {"contact_id": actor.contact_id, "reminder_id": row["id"], "fields": fields or {}}
-    intent = f"{done} for {actor.contact_name}: {row['label']}"
+    if actor.contact_id is None:  # she asked the pillow herself
+        intent = f"{actor.contact_name} {done} by voice: {row['label']}"
+    else:
+        intent = f"{done} for {actor.contact_name}: {row['label']}"
     await log_action(db, pillow_id, actor.agent, intent, tool=REMINDERS_TOOL, args=args)
 
 
@@ -78,9 +82,12 @@ async def create_reminder(
     pillow_id: str, reminder: ReminderCreate, actor: CareActorDep, db: SupabaseDep
 ) -> Reminder:
     """Set up a reminder, spoken as "<name>, it's time to <label>." on `on_date` or on the chosen
-    days, once she agrees: the pillow asks her first (consent "pending")."""
+    days, once she agrees: the pillow asks her first (consent "pending"). When she asked for it
+    herself (`as=resident`) and said yes to the pillow's read-back, that is her consent."""
     _screen(reminder.label)
     fields = reminder.to_fields(created_by=actor.contact_id)
+    if actor.contact_id is None:
+        fields |= {"consent": CONSENT_AGREED, "consent_at": datetime.now(UTC).isoformat()}
     row = await crud.create_reminder(db, actor.resident["id"], fields)
     await _log_agent(db, pillow_id, actor, "set up a reminder", row, fields)
     return Reminder.from_row(row)

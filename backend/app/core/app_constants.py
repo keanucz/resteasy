@@ -53,6 +53,8 @@ OWNER_ROLE = "owner"
 FAMILY_APP_AGENT = "family_app"
 # agent_log.agent for the Fetch.ai family agents, which act with their own token (FAMILY_AGENT_TOKENS)
 FAMILY_AGENT = "family_agent"
+PILLOW_VOICE_AGENT = "pillow_voice"  # she asked the pillow herself (talk key), via the base laptop
+AS_RESIDENT = "resident"  # ?as=resident: the agent token acting for her, not for a contact
 # Details returned when the agent token changes a reminder without naming a contact of hers
 AGENT_CONTACT_MISSING = "Say which contact the agent acts for: the contact_id query parameter"
 AGENT_CONTACT_NOT_LINKED = "This contact does not look after them"

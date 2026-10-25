@@ -4,6 +4,7 @@ Offline: who may call what, before the database is read. Live: the writes on the
 her test pillow only, never `mum`, with every change put back afterwards.
 """
 
+import asyncio
 from collections.abc import Iterator
 from contextlib import suppress
 from uuid import UUID
@@ -20,6 +21,7 @@ from app.core.app_constants import (
     FAMILY_AGENT,
 )
 from app.core.config import get_settings
+from app.core.dependencies import Caller, care_caller
 from app.crud.crud_constants import (
     AGENT_LOG_TABLE,
     CONTACT_AWAY_TABLE,
@@ -82,6 +84,11 @@ def test_the_shared_token_stops_acting_for_family_once_they_have_their_own(
 ):
     response = offline_client.get(f"{BASE}/away?contact_id={TEST_USER_ID}", headers=_bearer(SHARED))
     assert (response.status_code, response.json()["detail"]) == (403, AGENT_OWN_TOKEN)
+
+
+def test_the_base_laptop_still_speaks_for_her_once_family_have_their_own(tokens: dict):
+    caller = asyncio.run(care_caller(None, authorization=f"Bearer {SHARED}", contact_id=None, as_="resident"))
+    assert caller == Caller(resident=True)
 
 
 def test_only_the_coordinator_sets_the_roster(offline_client: TestClient, tokens: dict):

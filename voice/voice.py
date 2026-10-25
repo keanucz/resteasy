@@ -29,6 +29,7 @@ import json
 import os
 import socket
 import sys
+import threading
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from urllib.parse import urlencode
@@ -77,6 +78,12 @@ def speak(text: str, *, speed: float = 0.85, emotion: str = "calm", volume: floa
     is applied here, not by Cartesia: its own control barely changes loudness because speech already
     peaks near full scale. 1.0 plays 12 dB under full scale (gentle at night), 2.0 at full scale.
     """
+    play(render(text, speed=speed, emotion=emotion, volume=volume))
+
+
+def render(text: str, *, speed: float = 0.85, emotion: str = "calm", volume: float = 1.0) -> np.ndarray:
+    """`text` as speech samples, ready for `play`: fixed lines can be rendered once at start-up and
+    played instantly later (a Cartesia round trip is about a second)."""
     body = {
         "model_id": TTS_MODEL,
         "transcript": text,
@@ -89,7 +96,18 @@ def speak(text: str, *, speed: float = 0.85, emotion: str = "calm", volume: floa
     r = httpx.post(f"{API}/tts/bytes", headers=headers, json=body, timeout=30)
     r.raise_for_status()
     gain = 10 ** ((min(max(volume, 0.5), 2.0) - 2.0) * 12 / 20)  # 1.0 -> -12 dB, 2.0 -> 0 dB
-    audio = (np.frombuffer(r.content, dtype=np.int16) * gain).astype(np.int16)
+    return (np.frombuffer(r.content, dtype=np.int16) * gain).astype(np.int16)
+
+
+def tone(freq_hz: float = 660.0, ms: int = 160, volume: float = 0.15) -> np.ndarray:
+    """A soft beep, made locally (no network): instant feedback that a key press was heard."""
+    t = np.arange(int(TTS_RATE * ms / 1000)) / TTS_RATE
+    fade = np.minimum(1.0, np.minimum(t, t[-1] - t) / 0.02)  # 20 ms fade in and out: no click
+    return (np.sin(2 * np.pi * freq_hz * t) * fade * volume * 32767).astype(np.int16)
+
+
+def play(audio: np.ndarray) -> None:
+    """Play samples from `render` or `tone` and block until they finish."""
     if AUDIO == "pillow":
         _play_on_pillow(audio.tobytes())
         return
@@ -147,15 +165,18 @@ class Reply:
 
 
 async def transcribe_turn(
-    audio: AsyncIterator[bytes], *, no_answer_s: float, max_s: float, debug: bool = False
+    audio: AsyncIterator[bytes], *, no_answer_s: float, max_s: float, debug: bool = False,
+    turn: dict | None = None, listen_from: threading.Event | None = None,
 ) -> Reply:
     """Stream `audio` to Ink-2 and return her first complete turn.
 
     `audio` must keep producing frames (silence included): the server waits for audio rather than
-    assuming silence, so a turn only ends while frames keep arriving.
+    assuming silence, so a turn only ends while frames keep arriving. `turn` overrides the turn
+    settings (default: the Patient profile, `TURN`). With `listen_from`, the socket can be opened
+    early (while she holds the talk key) and `no_answer_s` only starts counting once it is set.
     """
     params = urlencode({"model": STT_MODEL, "encoding": "pcm_s16le", "sample_rate": MIC_RATE,
-                        "cartesia_version": VERSION, **TURN})
+                        "cartesia_version": VERSION, **(turn or TURN)})
     async with websockets.connect(f"{STT_WS}?{params}", additional_headers={"X-API-Key": _key()}) as ws:
 
         async def send() -> None:
@@ -175,9 +196,15 @@ async def transcribe_turn(
             loop = asyncio.get_running_loop()
             deadline = loop.time() + no_answer_s
             while True:
+                waiting = listen_from is not None and not listen_from.is_set() and not started
+                if waiting:
+                    deadline = loop.time() + no_answer_s  # the clock starts when we go live
                 try:
-                    msg = await asyncio.wait_for(ws.recv(), max(0.0, deadline - loop.time()))
+                    timeout = 0.1 if waiting else max(0.0, deadline - loop.time())
+                    msg = await asyncio.wait_for(ws.recv(), timeout)
                 except TimeoutError:
+                    if waiting:
+                        continue
                     return Reply(heard.strip(), started)
                 event = json.loads(msg)
                 kind = event["type"]

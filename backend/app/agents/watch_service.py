@@ -143,6 +143,23 @@ class WatchService:
             await self._apply(db, pillow.id, w, actions, before, ts)
             return str(w.nw.state)
 
+    async def press_key(self, db: AsyncClient, pillow: Pillow, key: str) -> str:
+        """A key on the bedside pad (the laptop's POST /keys), which can't ride in POST /state:
+        "fine" stops a check-in or an alert, "family" starts the alert ladder, "talk" is logged.
+        Return the new night state."""
+        w = await self._watch(db, pillow)
+        async with w.lock:
+            before = w.nw.state
+            ts = w.last_ts + (clock.monotonic() - w.last_seen) if w.last_seen else clock.time()
+            if key == "fine":
+                actions = w.nw.fine_pressed(ts)
+            elif key == "family":
+                actions = w.nw.distress_heard(ts, f"{w.nw.cfg.resident} pressed the call-family key.")
+            else:
+                actions = [Event(ts, f"key_{key}", {"source": "pad"})]
+            await self._apply(db, pillow.id, w, actions, before, ts)
+            return str(w.nw.state)
+
     async def tick_all(self, db: AsyncClient) -> None:
         """Run every watch's due timers, so a silent pillow or a check-in that never reports back
         still moves the ladder. Device time is extrapolated from each pillow's last report."""
