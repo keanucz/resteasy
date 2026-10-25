@@ -123,6 +123,14 @@ the pillow asks Margaret whether that's alright.
 
 ## How it works
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/system-flow-dark.png">
+  <img src="docs/images/diagrams/system-flow-light.png" alt="How Rest Easy fits together: the foil head plate and pillow node in the bedroom, the voice unit and laptop at the bedside, the backend's Night Watch, Family Liaison, Guardian and Notify, and the family app" width="100%">
+</picture>
+
+<details>
+<summary>Mermaid source for the system diagram</summary>
+
 ```mermaid
 flowchart LR
   subgraph Bedroom
@@ -162,6 +170,8 @@ flowchart LR
   fetch["Fetch.ai agents<br/>(Agentverse / ASI:One)"] <--> nw
 ```
 
+</details>
+
 The pillow node sends its state over ESP-NOW to the voice unit by the bed, which passes it to a
 laptop over USB. The laptop forwards state changes to the backend and runs the voice check-in.
 
@@ -174,6 +184,14 @@ first. It limits alerts during quiet hours, caps how many alerts one person can 
 and blocks medical claims and raw audio.
 
 ### Night Watch
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/night-watch-dark.png">
+  <img src="docs/images/diagrams/night-watch-light.png" alt="Night Watch states: Awake, In bed, Up, Check-in and Escalating, and what moves her between them" width="100%">
+</picture>
+
+<details>
+<summary>Mermaid source for the state diagram</summary>
 
 ```mermaid
 stateDiagram-v2
@@ -190,10 +208,20 @@ stateDiagram-v2
   Escalating --> Up: she says "I'm fine"
 ```
 
+</details>
+
 When she says she's fine, the pillow believes her but asks again a bit later. If she says "I'm
 fine" twice during the same trip, the family get a heads-up for information, not an alarm.
 
 ### A check-in that needs family
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/diagrams/checkin-sequence-dark.png">
+  <img src="docs/images/diagrams/checkin-sequence-light.png" alt="A check-in that needs family, step by step, from the pillow to Night Watch, the voice check-in, Claude, the Family Liaison and Guardian, and the family" width="100%">
+</picture>
+
+<details>
+<summary>Mermaid source for the sequence diagram</summary>
 
 ```mermaid
 sequenceDiagram
@@ -221,6 +249,8 @@ sequenceDiagram
   F-->>NW: "I'm on it"
   NW-->>L: stop the ladder
 ```
+
+</details>
 
 ## Building it
 
