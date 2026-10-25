@@ -5,39 +5,89 @@
 <h1 align="center">Rest Easy</h1>
 
 <p align="center"><b>Not a monitor. A goodnight.</b><br>
-An agentic pillow that watches over an older parent at night, so the family can sleep too.</p>
+A pillow that notices when an older parent gets up in the night and doesn't come back, asks if
+they're okay, and tells the family if they aren't.</p>
 
-<p align="center">Built in one weekend at <b>Cal Hacks 13.0</b> (San Francisco, October 2026).</p>
+<p align="center">Built in one weekend at <b>Cal Hacks 13.0</b> in San Francisco, October 2026.</p>
+
+<p align="center">
+  <img src="docs/images/app-asleep-dark.png" alt="The app at night: Mum is asleep, in bed since 10:42 pm" width="200">
+  <img src="docs/images/app-up-light.png" alt="The app in light mode: Mum is up, out of bed since 2:14 am" width="200">
+  <img src="docs/images/app-alert-dark.png" alt="The app on an alert: Mum hasn't come back, up for 9 minutes and she didn't answer the pillow" width="200">
+</p>
 
 ---
 
-## Why
+## Why we built it
 
-About a quarter of falls in older adults happen overnight, and two or more bathroom trips a night
-more than double the risk of a fall or fracture (NIH StatPearls, *Nocturia*). The usual answer is a
-medical alert pendant, but only 9% of people over 65 use one, and only 18% of those wear it all the
-time (The Senior List, 2026).
+About a quarter of falls in older adults happen at night, and people who get up to use the
+bathroom two or more times a night have more than double the risk of a fall or fracture (NIH
+StatPearls, *Nocturia*). The usual fix is a medical alert pendant. Only 9% of people over 65 use
+one, and only 18% of those wear it all the time (The Senior List, 2026). A pendant on the bedside
+table doesn't help anyone.
 
-Rest Easy is for an older adult who lives alone, isn't bedridden, and gets up in the night, and for
-the adult child who worries about them. She wears nothing and needs no screen: **the pillow feels
-her get up**. If she doesn't come back to bed, the pillow asks her, in a familiar voice, whether
-she's okay. If she doesn't answer, or says she isn't, it tells her family, least intrusive first.
-It never calls emergency services on its own.
+So we started from the thing everyone already uses every night. Rest Easy is for an older adult
+who lives alone, isn't bedridden and gets up in the night, and for the son or daughter who lies
+awake wondering whether she's alright. She doesn't wear anything or look at a screen. The pillow
+knows when her head is on it. If she gets up and is gone for longer than her usual trip, the pillow
+asks her, in a voice she knows, whether she's okay. If she doesn't answer, or says she needs help,
+it tells her family, starting with the gentlest option. It never calls emergency services by
+itself.
 
 ## What it does
 
-| | |
-|---|---|
-| **Feels the night** | A foil switch plate in the pillow knows when her head is on it. In bed, up, back again: no camera, no wearable, no raw audio stored. |
-| **Checks in by voice** | When she's been up longer than her usual trip, the bedside speaker asks if she's okay, up to three times and louder each time. Claude judges each reply as *fine*, *confused*, *distress* or *unclear*. |
-| **Escalates gently** | No answer, or a call for help, starts the family ladder: app alert, then a text, then a phone call, then the next person. "I'm on it" in the app stops it. Distress phones everyone at once. |
-| **Learns her normal** | Week one uses a fixed 20 minute timeout. After that the timeout follows her usual trip length, and unusually long trips are called out in the family's night summary. |
-| **Settles her back to sleep** | "I can't sleep" plays ten minutes of quiet music or rain through the pillow; a key, a check-in or getting up stops it. Reminders (meds, call family) play by voice and never advise on dosing. |
-| **Speaks in a voice she knows** | Family record a short sample in the app; Cartesia clones it, so the pillow and the alert calls speak in the family's own voice. |
-| **Talks to family agents** | Each family member has a Fetch.ai agent on Agentverse. Ask it in ASI:One "How was Mum's night?" or "I'm away Thursday to Sunday, make sure Mum's covered." |
+**It feels when she's in bed.** Inside the pillowcase there's a plate made of two sheets of
+kitchen foil on cardboard. When her head presses down, the sheets touch and pull a pin on the
+ESP32-S3 low. That's all the sensing there is: no camera, nothing to wear, and no audio is ever
+stored.
 
-The resident has **no app and no login**. She consents at setup and talks to the pillow, or uses
-a three-key pad by the bed: *talk*, *I'm fine*, *call family*.
+<p align="center">
+  <img src="docs/images/build-foil-plate-open.jpg" alt="The foil head plate opened up on the table next to the ESP32 breadboards" width="420">
+  <img src="docs/images/build-foil-plate-pressed.jpg" alt="A hand pressing the closed plate, as a head would" width="420">
+</p>
+
+**It checks in by voice.** Once she's been up longer than her usual trip, the bedside speaker asks
+whether she's okay. It tries up to three times, a little louder each time. Claude reads each reply
+and sorts it into *fine*, *confused*, *distress* or *unclear*.
+
+**It tells the family, gently first.** Silence or a call for help starts a ladder: an alert in the
+app, then a text, then a phone call, then the next person on the list. Tapping "I'm on it" in the
+app stops it. If she sounds distressed, everyone gets a call straight away.
+
+**It learns her normal.** For the first week it waits a fixed 20 minutes. After that, the timeout
+follows how long her trips usually take, and the family's night summary points out any trip that
+ran much longer than usual.
+
+**It helps her get back to sleep.** If she says "I can't sleep", the pillow plays ten minutes of
+quiet music or rain. A key press, a check-in or getting up stops it. It also reads out reminders
+like "take your tablets" or "call your daughter", but it never gives advice about doses.
+
+**It speaks in a family voice.** Someone in the family records a short sample in the app.
+Cartesia clones it, so the check-ins and the alert phone calls sound like her own family rather
+than a stranger.
+
+**Family can ask an agent about her night.** Each family member gets a Fetch.ai agent on
+Agentverse. In ASI:One they can ask "How was Mum's night?" or tell it "I'm away Thursday to
+Sunday, make sure Mum's covered."
+
+The resident herself never needs an app or a login. She agrees to it at setup, and after that she
+either talks to the pillow or uses a small three-key pad by the bed with *talk*, *I'm fine* and
+*call family*.
+
+## The app
+
+The family app is built with Expo and runs on iOS and Android. Its main screen says what's
+happening in plain words ("Mum is asleep", "Mum hasn't come back") and doesn't rely on colour
+alone, because it's meant to be read half awake at 2 am. Below that is a ribbon showing the night
+so far and a short summary of last night. It opens in dark mode by default, and light mode is a
+setting.
+
+<p align="center">
+  <img src="docs/images/app-login.png" alt="Rest Easy login screen: Sleep tight. We'll keep watch." width="200">
+</p>
+
+The screenshots on this page come from the app running in a browser with sample data for one
+night, so the times in them are made up.
 
 ## How it works
 
@@ -80,11 +130,16 @@ flowchart LR
   fetch["Fetch.ai agents<br/>(Agentverse / ASI:One)"] <--> nw
 ```
 
-**Plain code decides; the model talks.** Timers, thresholds and the escalation ladder are a
-deterministic state machine (`backend/app/agents/night_watch.py`). Claude does language and
-judgement only: understanding what she said, and wording each alert for its channel. Every
-command, spoken line and alert passes the **Guardian** first, which enforces quiet-hour caps, a
-maximum number of alerts per contact per night, no medical claims and no raw audio.
+The pillow node sends its state over ESP-NOW to the voice unit by the bed, which passes it to a
+laptop over USB. The laptop forwards state changes to the backend and runs the voice check-in.
+
+We kept the decisions out of the language model on purpose. The timers, thresholds and the
+escalation ladder are ordinary code in a state machine (`backend/app/agents/night_watch.py`), so
+the same night always produces the same alerts. Claude is used for two jobs: working out what she
+said, and writing each alert so it reads well as a push notification, a text or a phone call.
+Everything the system is about to say or send goes through a rules check we call the Guardian
+first. It limits alerts during quiet hours, caps how many alerts one person can get in a night,
+and blocks medical claims and raw audio.
 
 ### Night Watch
 
@@ -103,8 +158,8 @@ stateDiagram-v2
   Escalating --> Up: she says "I'm fine"
 ```
 
-After an "I'm fine" the pillow asks again later. If she says she's fine twice in one trip, family
-get an informational heads-up rather than an alarm.
+When she says she's fine, the pillow believes her but asks again a bit later. If she says "I'm
+fine" twice during the same trip, the family get a heads-up for information, not an alarm.
 
 ### A check-in that needs family
 
@@ -135,24 +190,37 @@ sequenceDiagram
   NW-->>L: stop the ladder
 ```
 
+## Building it
+
+<p align="center">
+  <img src="docs/images/team-testing-pillow.jpg" alt="The team at their table in the hall, one hand on the pillow during a test" width="420">
+  <img src="docs/images/team-at-the-table.jpg" alt="Three of the team at the table giving a thumbs up" width="420">
+</p>
+
+There were four of us, and each person worked with their own Claude Code session. The four
+sessions talked to each other over a small message bus we wrote for the weekend, so one person's
+Claude could ask another's about an API change without either of us relaying it by hand.
+`coord/` has the protocol and a few screenshots of it in use.
+
 ## Repository
 
 | Path | What's there |
 |---|---|
-| `backend/` | FastAPI service: Night Watch, Guardian, Family Liaison, reminders, night summaries and baselines, notifications (Twilio, Cartesia Line), Supabase migrations and seed data. |
+| `backend/` | The FastAPI service: Night Watch, the Guardian, the Family Liaison, reminders, night summaries and baselines, notifications (Twilio and Cartesia Line), and the Supabase migrations and seed data. |
 | `frontend/` | The Rest Easy family app (Expo SDK 58, React Native, Expo Router, NativeWind). |
-| `voice/` | The bedside voice: check-in client, Cartesia speech in and out, the Claude reply judge, settle music, reminders, keypad. |
-| `firmware/` | Arduino sketches for the ESP32-S3 pillow node and the Waveshare voice unit, plus diagnostics. Parts list in `firmware/PARTS.md`. |
-| `sim/` | The laptop audio bridge, serial bridges, and simulators to run a night without hardware. |
+| `voice/` | Everything the bedside speaker does: the check-in client, Cartesia speech in and out, the Claude reply judge, settle music, reminders and the keypad. |
+| `firmware/` | Arduino sketches for the ESP32-S3 pillow node and the Waveshare voice unit, plus diagnostics. The parts list is in `firmware/PARTS.md`. |
+| `sim/` | The laptop audio bridge, serial bridges, and simulators that run a whole night without any hardware. |
 | `agents/fetch/` | The Fetch.ai coordinator and family agents (uAgents, Agent Chat Protocol). |
-| `deploy/` | Docker Compose, Cloudflare tunnel config and the deploy script. A merge to `master` deploys. |
-| `coord/` | How four people and four Claude Code sessions built this together over a shared message bus. |
-| `PRODUCT.md`, `DESIGN.md` | Who it's for, product principles, and the design system. |
+| `deploy/` | Docker Compose, the Cloudflare tunnel config and the deploy script. Merging to `master` deploys. |
+| `coord/` | The message bus and protocol the four Claude Code sessions used. |
+| `docs/images/` | The screenshots and photos in this README. |
+| `PRODUCT.md`, `DESIGN.md` | Who it's for, the product principles, and the design system. |
 
 ## Running it
 
-Backend (Python 3.12, [uv](https://docs.astral.sh/uv/)), with a Supabase project and the keys in
-`backend/.env` (see `backend/README.md`):
+The backend needs Python 3.12, [uv](https://docs.astral.sh/uv/), a Supabase project, and its keys
+in `backend/.env` (`backend/README.md` lists them):
 
 ```bash
 cd backend
@@ -160,33 +228,35 @@ uv run uvicorn app.main:app --reload --port 8000
 uv run pytest   # Supabase tests skip without SUPABASE_URL / SUPABASE_SECRET_KEY
 ```
 
-A whole night without hardware:
+To play through a whole night without the hardware:
 
 ```bash
 uv run sim/night_watch_demo.py
 ```
 
-The app:
+To run the app:
 
 ```bash
 cd frontend && npm install && npx expo start
 ```
 
-The bedside voice and the pillow bridge: see `voice/` and `firmware/README.md`.
+Setting up the bedside voice and the pillow bridge is covered in `voice/` and `firmware/README.md`.
 
 ## Principles
 
-1. **Least intrusive first.** App alert, then text, then call, then the next person. Never auto-call emergency services.
-2. **Say only what matters.** Silence should mean a quiet night.
-3. **Respect the resident.** Consent at setup, pause by voice, no raw audio, no medical claims.
-4. **Readable at 2 am.** Her state is written in plain words ("Mum is asleep"), never colour alone.
-5. **The pillow does the work.** She never needs a screen.
+1. **Least intrusive first.** An app alert comes before a text, a text before a call, and a call
+   before the next person. It never calls emergency services by itself.
+2. **Only say what matters.** If the family hear nothing, it should mean she had a quiet night.
+3. **Respect the resident.** She consents at setup and can pause it by voice. No raw audio is
+   kept, and it makes no medical claims.
+4. **Readable at 2 am.** Her state is always written out in words ("Mum is asleep"), not shown by
+   colour alone.
+5. **The pillow does the work.** She never has to look at a screen.
 
-Rest Easy is a hackathon prototype. It is not a medical device, has not been clinically validated,
-and should not replace emergency services or professional care.
+Rest Easy is a hackathon prototype. It isn't a medical device, it hasn't been clinically tested,
+and it shouldn't replace emergency services or professional care.
 
 ## Team
 
 Built at Cal Hacks 13.0 by Keanu Czirjak (hardware and firmware), Adam Kassam (agents and voice),
-Szymon Arciszewski (backend, notifications and the app) and Adyan Ullah (pillow node and settle),
-each working alongside their own Claude Code session.
+Szymon Arciszewski (backend, notifications and the app) and Adyan Ullah (pillow node and settle).
