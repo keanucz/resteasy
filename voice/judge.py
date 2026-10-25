@@ -63,6 +63,19 @@ def classify(text: str, spoke: bool) -> Kind:
     return Kind.UNCLEAR
 
 
+_PLAIN_FINE_MAX_WORDS = 8
+_HEDGE = re.compile(r"\b(?:but|though|except|apart from)\b")
+
+
+def plainly_fine(text: str) -> bool:
+    """A short, unhedged "I'm fine" / "yes, I'm okay": safe to stand down without asking Claude,
+    which saves a network round trip. Anything longer, hedged, confused or alarming still goes to
+    the judge (the keyword rules check distress and negation first)."""
+    t = text.lower().replace("\u2019", "'")
+    words = re.findall(r"[a-z']+", t)
+    return 0 < len(words) <= _PLAIN_FINE_MAX_WORDS and not _HEDGE.search(t) and classify(t, True) is Kind.FINE
+
+
 def keyword_judge(_question: str, text: str) -> Verdict:
     return Verdict(classify(text, True))
 

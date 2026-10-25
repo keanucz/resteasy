@@ -116,7 +116,25 @@ def main() -> None:
     else:
         import voice
         voice._key()  # exit now, not mid check-in, if CARTESIA_API_KEY is missing
-        speak, listen = voice.speak, voice.listen
+        listen = voice.listen
+        fixed: dict[tuple[str, float], object] = {}  # the check-in's fixed lines, rendered once
+
+        def prerender(_style: object = None) -> None:
+            fixed.clear()
+            for line, vol in checkin.FIXED_LINES:
+                try:
+                    fixed[(line, vol)] = voice.render(line, volume=vol)
+                except Exception as e:  # noqa: BLE001 - not pre-rendered just means a second slower
+                    print(f"[client] could not pre-render {line!r}: {e}", file=sys.stderr, flush=True)
+
+        def speak(text: str, volume: float = 1.0) -> None:
+            audio = fixed.get((text, volume))
+            if audio is None:
+                voice.speak(text, volume=volume)
+            else:
+                voice.play(audio)
+
+        voice.on_style_change(lambda style: threading.Thread(target=prerender, args=(style,), daemon=True).start())
 
     if args.keywords:
         judge_fn, reminder_judge = judge.keyword_judge, judge.keyword_reminder_judge
@@ -162,6 +180,7 @@ def main() -> None:
         with httpx.Client(timeout=10, headers=_headers()) as http:
             refresh_voice(http)  # before talk.py pre-renders its fixed lines
         last_voice_check = time.monotonic()
+        prerender()
 
     events: queue.Queue[str] = queue.Queue()
     stop_checkin = threading.Event()
@@ -267,12 +286,29 @@ def main() -> None:
                         music.join(timeout=3.0)  # and starts in silence: the segment in flight drains first
                     judge.warm_up_in_background()
                     stop_checkin.clear()
+                    reported: list[threading.Thread] = []
+
+                    def report(out, stamp=stamp) -> None:
+                        """Post the outcome now, while the pillow says its closing line."""
+                        def send() -> None:
+                            body = {"escalate": out.escalate, "reason": out.reason[:300], "distress": out.distress}
+                            with httpx.Client(timeout=10, headers=_headers()) as h:
+                                resp = post_result(h, f"{base}/checkin", body)
+                            print(f"{stamp}  check-in {'ESCALATE' if out.escalate else 'STAND DOWN'}: "
+                                  f"{out.reason} -> {resp}", flush=True)
+                        t = threading.Thread(target=send, daemon=True)
+                        t.start()
+                        reported.append(t)
+
                     out = checkin.run_checkin(speak, listen, judge=judge_fn, contact=args.contact,
                                               log=lambda m: print(f"          {m}", flush=True),
-                                              should_stop=stop_checkin.is_set)
+                                              should_stop=stop_checkin.is_set, report=report)
                     drop_stale_talk()
                     if out.reason == checkin.STOPPED_REASON:
                         print(f"{stamp}  check-in stopped: she pressed I'm fine (the server knows)", flush=True)
+                        continue
+                    if reported:
+                        reported[0].join(timeout=15)
                         continue
                     body = {"escalate": out.escalate, "reason": out.reason[:300], "distress": out.distress}
                     resp = post_result(http, f"{base}/checkin", body)

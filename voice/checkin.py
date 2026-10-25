@@ -29,7 +29,7 @@ import argparse
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from judge import Judge, Kind, Verdict, asked_for_help, keyword_judge, said_fine
+from judge import Judge, Kind, Verdict, asked_for_help, keyword_judge, plainly_fine, said_fine
 
 
 @dataclass
@@ -53,6 +53,9 @@ def _usable(say: str | None) -> str | None:
 
 
 STOPPED_REASON = "She pressed I'm fine."
+FIRST_ASK = "Are you alright?"
+FINE_LINE = "Glad you're okay. Take your time."
+FIXED_LINES = ((FIRST_ASK, VOLUMES[0]), (FINE_LINE, 1.0))  # rendered once by the client: no wait
 
 
 class _Stopped(Exception):
@@ -70,9 +73,12 @@ def run_checkin(
     cancel_s: float = 15.0,
     log: Callable[[str], None] = lambda _: None,
     should_stop: Callable[[], bool] = lambda: False,
+    report: Callable[[Outcome], None] | None = None,
 ) -> Outcome:
     """`should_stop`: she pressed "I'm fine" on the pad (the server already knows); checked before
-    each question, so the pillow stops asking."""
+    each question, so the pillow stops asking. `report`: called with the outcome as soon as it is
+    known, before the pillow's closing line, so the server hears "she's fine" (or "get help")
+    seconds sooner. A short, plain "I'm fine" is taken as fine without asking the judge."""
     heard: list[str] = []
     seen: set[Kind] = set()
     reoriented = False
@@ -84,24 +90,31 @@ def run_checkin(
         reply = listen(no_answer_s=wait_s)
         if reply.text:
             heard.append(reply.text)
-            verdict = judge(prompt, reply.text)
+            verdict = Verdict(Kind.FINE) if plainly_fine(reply.text) else judge(prompt, reply.text)
         else:
             verdict = Verdict(Kind.UNCLEAR if reply.spoke else Kind.SILENT)
         seen.add(verdict.kind)
         log(f"{prompt!r} -> {verdict.kind}: {reply.text!r}")
         return verdict
 
+    def early(out: Outcome) -> Outcome:
+        if report is not None:
+            report(out)
+        return out
+
     def distress() -> Outcome:
+        out = early(Outcome(True, f'She said: "{heard[-1]}"', heard, distress=asked_for_help(heard[-1])))
         speak(f"Okay. I'm getting {contact} for you now. Help is coming.", volume=1.3)
-        return Outcome(True, f'She said: "{heard[-1]}"', heard, distress=asked_for_help(heard[-1]))
+        return out
 
     def fine(v: Verdict) -> Outcome:
-        speak(_usable(v.say) or "Glad you're okay. Take your time.")
-        return Outcome(False, "She said she was fine.", heard)
+        out = early(Outcome(False, "She said she was fine.", heard))
+        speak(_usable(v.say) or FINE_LINE)
+        return out
 
     def conversation() -> Outcome:
         nonlocal reoriented
-        prompt, attempt = "Are you alright?", 0
+        prompt, attempt = FIRST_ASK, 0
         while attempt < max_tries:
             v = ask(prompt, VOLUMES[min(attempt, len(VOLUMES) - 1)], no_answer_s)
             attempt += 1
