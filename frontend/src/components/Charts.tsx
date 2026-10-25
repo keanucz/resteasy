@@ -336,7 +336,7 @@ export function MovementChart({ rows, window, tz, height = 96 }: SeriesProps) {
         </View>
         <View className="flex-row items-center gap-1.5">
           <View className="h-2 w-4 rounded-full" style={{ backgroundColor: colors['chart-asleep'] }} />
-          <Text className="font-sans text-xs text-ink-muted">Head on the pillow</Text>
+          <Text className="font-sans text-xs text-ink-muted">Head pressure</Text>
         </View>
       </View>
     </ChartCard>
