@@ -92,7 +92,7 @@ def test_a_fresh_signup_joins_the_demo_household_once(client: TestClient, fresh_
     assert joined.status_code == 200
     me = joined.json()
     assert me["contact_id"] and me["full_name"].startswith("account-test-")
-    assert [(p["pillow_id"], p["role"]) for p in me["pillows"]] == [(TEST_PILLOW_ID, "contact")]
+    assert [(p["pillow_id"], p["role"]) for p in me["pillows"]] == [(TEST_PILLOW_ID, "owner")]
 
     again = client.post("/api/me/join-demo", headers=auth).json()
     assert again["contact_id"] == me["contact_id"] and len(again["pillows"]) == 1
