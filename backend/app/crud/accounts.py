@@ -108,8 +108,9 @@ async def get_link_for_contact(db: AsyncClient, contact_id: str, resident_id: st
 
 
 async def join_household(db: AsyncClient, user_id: str, full_name: str, resident_id: str) -> None:
-    """Make the login a plain contact of the resident: its own contact row if it has none, then a
-    link at the next free priority. Off call, so it never gets the real alerts. Already linked: no-op."""
+    """Make the login an owner of the resident (for the demo, everyone may change her settings): its
+    own contact row if it has none, then a link at the next free priority. Off call, so it never gets
+    the real alerts. Already linked: no-op."""
     contact = await get_contact_for_user(db, user_id)
     if contact is None:
         row = {"full_name": full_name, "user_id": user_id, "on_call": False}
@@ -126,7 +127,12 @@ async def join_household(db: AsyncClient, user_id: str, full_name: str, resident
             .execute()
         )
         priority = (last.data[0]["priority"] if last.data else 0) + 1
-        link = {"resident_id": resident_id, "contact_id": contact["id"], "priority": priority}
+        link = {
+            "resident_id": resident_id,
+            "contact_id": contact["id"],
+            "priority": priority,
+            "role": OWNER_ROLE,
+        }
         try:
             await db.table(RESIDENT_CONTACTS_TABLE).insert(link).execute()
             return
