@@ -26,6 +26,9 @@ off by itself when those stop (the bridge died), instead of streaming forever.
                                                       # (firmware/espnow_relay) on that port
   uv run sim/audio_bridge.py --hotspot 10.42.0.1:47801   # the hotspot (voice_unit PILLOW_HOTSPOT=1),
                                                       # Bluetooth while it's down
+  uv run sim/audio_bridge.py --hotspot 10.42.0.1:47801 --serial /dev/ttyACM0
+                                                      # hotspot, then USB if it's plugged in, then
+                                                      # Bluetooth
   uv run sim/audio_bridge.py --server https://pillow.keanuc.net --pillow-id mum
                                                       # also forward the pillow's lines ("UNO {...}",
                                                       # firmware/pillow_node) as pillow state, and
@@ -196,6 +199,9 @@ class SerialBoard(Board):
                 raise OSError("voice unit not connected")
             self.port.write(line.encode() + b"\n")
 
+    def connected(self) -> bool:
+        return self.port is not None
+
     def command(self, cmd: str) -> None:
         self._write(cmd)
 
@@ -258,9 +264,6 @@ class HotspotBoard(SerialBoard):
         super().__init__(f"{host}:{port}", 0)
         self.addr = (host, port)
         self.conn: socket.socket | None = None
-
-    def connected(self) -> bool:
-        return self.port is not None
 
     def run(self) -> None:
         while True:
@@ -386,7 +389,7 @@ class BleBoard(Board):
 
 
 class FailoverBoard(Board):
-    """Several links to one voice unit, best first (the hotspot, then Bluetooth). Clients and commands
+    """Several links to one voice unit, best first (the hotspot, USB if given, then Bluetooth). Clients and commands
     use the first one that's connected; mic audio counts only from that one. Each MIC ON (repeated
     every 2 s while anyone listens) also turns the mic off on the others, so a switch heals itself.
     Bluetooth only connects while every better link is down (see BleBoard.standby)."""
@@ -634,7 +637,8 @@ def serve(board: Board, host: str, port: int) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--ble-name", default=BLE_NAME, help="the voice unit's Bluetooth name")
-    parser.add_argument("--serial", metavar="PORT", help="use USB serial (e.g. /dev/ttyACM0) instead of Bluetooth")
+    parser.add_argument("--serial", metavar="PORT", help="use USB serial (e.g. /dev/ttyACM0) instead of Bluetooth; "
+                        "with --hotspot, the fallback before Bluetooth")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--hotspot", metavar="HOST:PORT", help="take the voice unit over the laptop's "
                         "hotspot (e.g. 10.42.0.1:47801), with Bluetooth as the fallback")
@@ -644,11 +648,10 @@ def main() -> None:
     parser.add_argument("--pillow-id", default="mum", help="pillow id for state posts and commands")
     args = parser.parse_args()
     host, _, port = args.listen.rpartition(":")
-    if args.serial and args.hotspot:
-        parser.error("--serial and --hotspot are different links: pick one")
     if args.hotspot:
         hotspot_host, _, hotspot_port = args.hotspot.rpartition(":")
-        board = FailoverBoard([HotspotBoard(hotspot_host, int(hotspot_port)), BleBoard(args.ble_name)])
+        usb = [SerialBoard(args.serial, args.baud)] if args.serial else []
+        board = FailoverBoard([HotspotBoard(hotspot_host, int(hotspot_port)), *usb, BleBoard(args.ble_name)])
     elif args.serial:
         board = SerialBoard(args.serial, args.baud)
     else:
