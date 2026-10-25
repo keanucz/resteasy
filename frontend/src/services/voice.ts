@@ -25,7 +25,15 @@ export type Voice = {
   base_voice_id?: string | null;
   /** Where its sample already sits, ready to play; null until it has been made once. */
   sample_url?: string | null;
+  /** Its sample in every preview language made so far (language code to link), so a new language plays at once. */
+  samples?: Record<string, string>;
 };
+
+/** A language the previews can speak in, named in its own language ("Polski"). */
+export type PreviewLanguage = { code: string; name: string };
+
+/** What the previews speak in before anyone picks a language. */
+export const DEFAULT_PREVIEW_LANGUAGE = 'en';
 
 /** How the pillow speaks: Cartesia's speed (0.6 to 1.5), volume (0.5 to 2) and tone. */
 export type VoiceStyle = { speed: number; volume: number; emotion: string };
@@ -36,6 +44,10 @@ export type VoiceChoice = {
   /** The tones the owner may pick. */
   emotions: string[];
   voices: Voice[];
+  /** The language the previews (samples and spoken lines) speak in. */
+  language: string;
+  /** Every language the previews can speak in; empty on an older backend. */
+  languages: PreviewLanguage[];
   /**
    * True when the backend only has the older voice list: choosing works (through the pillow's
    * preferences), hearing a voice first and copying one don't yet.
@@ -79,8 +91,15 @@ const base = (residentId: string) => `/residents/${residentId}/voice`;
  */
 export async function readVoices(residentId: string, savedVoiceId: string | undefined): Promise<VoiceChoice> {
   try {
-    const choice = await api<Omit<VoiceChoice, 'legacy'>>(base(residentId));
-    return { ...choice, legacy: false };
+    const choice = await api<Omit<VoiceChoice, 'legacy' | 'language' | 'languages'> & Partial<VoiceChoice>>(
+      base(residentId),
+    );
+    return {
+      ...choice,
+      language: choice.language ?? DEFAULT_PREVIEW_LANGUAGE,
+      languages: choice.languages ?? [],
+      legacy: false,
+    };
   } catch (e) {
     if (!(e instanceof ApiError && e.status === 404)) throw e;
     const old = await api<{ id: string; name: string; description: string }[]>('/voices');
@@ -89,6 +108,8 @@ export async function readVoices(residentId: string, savedVoiceId: string | unde
       style: DEFAULT_STYLE,
       emotions: [],
       voices: old.map((v) => ({ ...v, source: 'stock', created_by_name: null, created_at: null })),
+      language: DEFAULT_PREVIEW_LANGUAGE,
+      languages: [],
       legacy: true,
     };
   }
@@ -109,18 +130,27 @@ export async function saveStyle(residentId: string, style: VoiceStyle): Promise<
   return api<VoiceStyle>(`${base(residentId)}/style`, { method: 'PUT', body: style });
 }
 
-// Sample links already known this session, so Play never has to ask twice.
+/** Sets the language the previews speak in. Owner only (403 for contacts). */
+export async function saveLanguage(residentId: string, language: string): Promise<string> {
+  const saved = await api<{ language: string }>(`${base(residentId)}/language`, { method: 'PUT', body: { language } });
+  return saved.language;
+}
+
+// Sample links already known this session (per language), so Play never has to ask twice.
 const samples = new Map<string, string>();
 
 /**
- * Where to play `voice` saying the sample line: the link the voice list gave, or one the backend
- * makes the first time anyone plays it (after that it is stored and instant for everyone).
+ * Where to play `voice` saying the sample line in `language`: the link the voice list gave, or one
+ * the backend makes the first time anyone plays it (after that it is stored and instant for everyone).
  */
-export async function sampleUri(residentId: string, voice: Voice): Promise<string> {
-  const known = voice.sample_url ?? samples.get(voice.id);
+export async function sampleUri(residentId: string, voice: Voice, language: string): Promise<string> {
+  const listed = voice.samples ? voice.samples[language] : voice.sample_url;
+  const known = listed ?? samples.get(`${language}|${voice.id}`);
   if (known) return known;
-  const { url } = await api<{ url: string }>(`${base(residentId)}/samples/${encodeURIComponent(voice.id)}`);
-  samples.set(voice.id, url);
+  const { url } = await api<{ url: string }>(
+    `${base(residentId)}/samples/${encodeURIComponent(voice.id)}?language=${encodeURIComponent(language)}`,
+  );
+  samples.set(`${language}|${voice.id}`, url);
   return url;
 }
 
@@ -140,21 +170,28 @@ async function playableUri(response: Response): Promise<string> {
 /**
  * The pillow saying a line in `voiceId`, ready to play, with her words said her way. Without
  * `text` the backend uses its own warm line with her name; without `style` it speaks as she hears it.
+ * In `language` (default: the preview language), a typed line translated first.
  */
 export async function previewVoice(
   residentId: string,
   voiceId: string,
   text?: string,
   style?: VoiceStyle,
+  language?: string,
 ): Promise<string> {
   const words = text?.trim().slice(0, PREVIEW_MAX) || undefined;
-  const key = `${residentId}|${voiceId}|${words ?? ''}|${style ? JSON.stringify(style) : ''}`;
+  const key = `${residentId}|${voiceId}|${words ?? ''}|${style ? JSON.stringify(style) : ''}|${language ?? ''}`;
   const cached = previews.get(key);
   if (cached) return cached;
   const response = await authedFetch(`${base(residentId)}/preview`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'audio/mpeg, audio/wav' },
-    body: JSON.stringify({ voice_id: voiceId, ...(words ? { text: words } : {}), ...(style ? { style } : {}) }),
+    body: JSON.stringify({
+      voice_id: voiceId,
+      ...(words ? { text: words } : {}),
+      ...(style ? { style } : {}),
+      ...(language ? { language } : {}),
+    }),
   });
   const uri = await playableUri(response);
   previews.set(key, uri);

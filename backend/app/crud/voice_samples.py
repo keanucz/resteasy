@@ -1,14 +1,16 @@
 """Data access for voice samples: one MP3 per voice saying the same line, in Supabase Storage.
 
 A stock voice's sample is shared by everyone at `stock/<voice_id>.mp3`; a resident's own voices
-(clones and accent copies) keep theirs at `<resident_id>/<voice_id>.mp3`. Only the backend writes
-them; the app plays them straight from the public link.
+(clones and accent copies) keep theirs at `<resident_id>/<voice_id>.mp3`. The line in another
+preview language sits beside it as `<voice_id>.<language>.mp3`. Only the backend writes them; the
+app plays them straight from the public link.
 """
 
 from supabase import AsyncClient
 
 from app.core.voice_constants import (
     PREVIEW_CONTENT_TYPE,
+    PREVIEW_LANGUAGE,
     SAMPLE_EXTENSION,
     SAMPLES_BUCKET,
     SAMPLES_LIST_LIMIT,
@@ -27,9 +29,10 @@ def sample_folder(resident_id: str, voice_id: str) -> str:
     return STOCK_SAMPLES_FOLDER if voice_id in VOICE_IDS else resident_id
 
 
-def sample_path(resident_id: str, voice_id: str) -> str:
-    """Where a voice's sample sits in the bucket."""
-    return f"{sample_folder(resident_id, voice_id)}/{voice_id}{SAMPLE_EXTENSION}"
+def sample_path(resident_id: str, voice_id: str, language: str = PREVIEW_LANGUAGE) -> str:
+    """Where a voice's sample in `language` sits in the bucket (English keeps the original path)."""
+    suffix = "" if language == PREVIEW_LANGUAGE else f".{language}"
+    return f"{sample_folder(resident_id, voice_id)}/{voice_id}{suffix}{SAMPLE_EXTENSION}"
 
 
 async def cached_samples(db: AsyncClient, resident_id: str) -> set[str]:

@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from supabase import Client
 
 from app.core.config import get_settings
-from app.core.dependencies import get_cartesia
+from app.core.dependencies import get_cartesia, get_translator
 from app.core.voice_constants import (
     CARTESIA_VERSION,
     CLIP_MAX_BYTES,
@@ -26,10 +26,12 @@ from app.core.voice_constants import (
     EMOTIONS,
     PREVIEW_CONTENT_TYPE,
     PREVIEW_FAILED,
+    PREVIEW_LANGUAGES,
     PRONUNCIATION_FAILED,
     PRONUNCIATIONS_TABLE,
     SAMPLE_EMOTION,
     SAMPLE_TEXT,
+    SAMPLE_TEXTS,
     STYLE_COLUMNS,
     TTS_MODEL,
     VOICE_IDS,
@@ -297,8 +299,11 @@ def test_anyone_in_her_circle_lists_the_stock_voices_and_her_current_one(
         "accent": None,
         "base_voice_id": None,
         "sample_url": None,
+        "samples": {},
     }
     assert listed["emotions"] == list(EMOTIONS)
+    assert listed["language"] == "en"
+    assert [lang["code"] for lang in listed["languages"]] == [code for code, _ in PREVIEW_LANGUAGES]
     assert set(listed["style"]) == {"speed", "volume", "emotion"}
 
 
@@ -369,10 +374,12 @@ def test_a_contact_clones_a_voice_the_owner_picks_and_the_creator_removes(
     assert voice["source"] == "clone" and voice["created_by_name"] == "Test Helper"
     assert voice["description"] is None and voice["created_at"]
     assert cartesia.cloned[0]["content_type"] == "audio/mp4" and cartesia.cloned[0]["bytes"] == 2048
-    # The sample is made just after the reply, so only the listing has its link.
+    # The samples (one per preview language) are made just after the reply, so only the listing
+    # has their links.
     listed = client.get(VOICE_URL, headers=owner).json()["voices"][-1]
     assert voice["sample_url"] is None and listed["sample_url"]
-    assert listed | {"sample_url": None} == voice
+    assert set(listed["samples"]) == {code for code, _ in PREVIEW_LANGUAGES}
+    assert listed | {"sample_url": None, "samples": {}} == voice
 
     assert client.post(PREVIEW_URL, json={"voice_id": voice["id"]}, headers=helper).status_code == 200
     assert client.put(VOICE_URL, json={"voice_id": voice["id"]}, headers=owner).json() == {
@@ -690,3 +697,83 @@ def test_a_word_cartesia_refuses_is_not_listed(client: TestClient, db: Client, o
     response = client.post(WORDS_URL, json={"word": "Margaret", "sounds_like": "x"}, headers=owner)
     assert response.status_code == 502 and response.json() == {"detail": PRONUNCIATION_FAILED}
     assert client.get(WORDS_URL, headers=owner).json() == []
+
+
+# ---------- preview languages ----------
+
+
+class FakeTranslator:
+    """Stands in for app.voice.translate.Translator: marks the line with the language."""
+
+    def __init__(self) -> None:
+        self.asked: list[tuple[str, str]] = []
+
+    async def translate(self, text: str, language: str) -> str:
+        self.asked.append((text, language))
+        return text if language == "en" else f"[{language}] {text}"
+
+
+@pytest.fixture
+def preview_language_restored(db: Client) -> Iterator[None]:
+    """Put the test resident's preview language back to English."""
+    yield
+    db.table(RESIDENTS_TABLE).update({"preview_language": "en"}).eq("id", TEST_RESIDENT_ID).execute()
+
+
+@pytest.mark.usefixtures("preview_language_restored")
+def test_a_sample_in_another_language_is_kept_beside_the_english_one(
+    client: TestClient, contact_token: str, cartesia: FakeCartesia, samples: dict[str, bytes]
+):
+    auth = _bearer(contact_token)
+    polish = client.get(f"{VOICE_URL}/samples/{GEMMA}", params={"language": "pl"}, headers=auth)
+    assert polish.json() == {"url": f"{SAMPLE_URL_BASE}stock/{GEMMA}.pl.mp3"}
+    assert cartesia.spoken[0] == (GEMMA, SAMPLE_TEXTS["pl"], "pl")
+    english = client.get(f"{VOICE_URL}/samples/{GEMMA}", headers=auth)
+    assert english.json() == {"url": f"{SAMPLE_URL_BASE}stock/{GEMMA}.mp3"}
+    listed = next(v for v in client.get(VOICE_URL, headers=auth).json()["voices"] if v["id"] == GEMMA)
+    assert listed["samples"] == {"en": english.json()["url"], "pl": polish.json()["url"]}
+    unknown = client.get(f"{VOICE_URL}/samples/{GEMMA}", params={"language": "xx"}, headers=auth)
+    assert unknown.status_code == 422
+
+
+@pytest.mark.usefixtures("preview_language_restored")
+def test_choosing_a_language_swaps_the_samples_and_makes_the_missing_ones(
+    client: TestClient, db: Client, owner_token: str, cartesia: FakeCartesia, samples: dict[str, bytes]
+):
+    auth = _bearer(owner_token)
+    chosen = client.put(f"{VOICE_URL}/language", json={"language": "es"}, headers=auth)
+    assert chosen.json() == {"language": "es"}
+    stored = db.table(RESIDENTS_TABLE).select("preview_language").eq("id", TEST_RESIDENT_ID).single()
+    assert stored.execute().data["preview_language"] == "es"
+    # every voice she may pick now has its Spanish sample (made after the reply)
+    assert {f"stock/{voice_id}.es.mp3" for voice_id, _, _ in VOICES} <= set(samples)
+    listed = client.get(VOICE_URL, headers=auth).json()
+    assert listed["language"] == "es"
+    gemma = next(v for v in listed["voices"] if v["id"] == GEMMA)
+    assert gemma["sample_url"] == f"{SAMPLE_URL_BASE}stock/{GEMMA}.es.mp3"
+    bad = client.put(f"{VOICE_URL}/language", json={"language": "klingon"}, headers=auth)
+    assert bad.status_code == 422
+
+
+@pytest.mark.usefixtures("preview_language_restored")
+def test_previews_speak_the_preview_language_and_translate_a_typed_line(
+    client: TestClient, db: Client, owner_token: str, cartesia: FakeCartesia
+):
+    translator = FakeTranslator()
+    app.dependency_overrides[get_translator] = lambda: translator
+    auth = _bearer(owner_token)
+    resident = db.table(RESIDENTS_TABLE).select("*").eq("id", TEST_RESIDENT_ID).single().execute().data
+    client.put(f"{VOICE_URL}/language", json={"language": "fr"}, headers=auth)
+    cartesia.spoken.clear()
+    assert client.post(PREVIEW_URL, json={"voice_id": GEMMA}, headers=auth).status_code == 200
+    assert cartesia.spoken[-1] == (
+        GEMMA,
+        f"Bonjour {resident['preferred_name']}, c'est l'heure de prendre tes comprimés pour le cœur.",
+        "fr",
+    )
+    typed = {"voice_id": GEMMA, "text": "Goodnight."}
+    assert client.post(PREVIEW_URL, json=typed, headers=auth).status_code == 200
+    assert cartesia.spoken[-1] == (GEMMA, "[fr] Goodnight.", "fr")
+    asked = {"voice_id": GEMMA, "text": "Goodnight.", "language": "de"}
+    client.post(PREVIEW_URL, json=asked, headers=auth)
+    assert cartesia.spoken[-1] == (GEMMA, "[de] Goodnight.", "de")

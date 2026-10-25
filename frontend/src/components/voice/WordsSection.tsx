@@ -11,6 +11,7 @@ import { loadOnce, type Playing, type VoicePlayer } from '@/hooks/useVoicePlayer
 import { ApiError } from '@/services/api';
 import {
   addPronunciation,
+  DEFAULT_PREVIEW_LANGUAGE,
   forgetPreviews,
   previewVoice,
   type Pronunciation,
@@ -72,7 +73,10 @@ export function WordsSection({ residentId, voiceId, player }: WordsSectionProps)
     (key: string, text: string) => {
       setStatus(null);
       toggle(key, () =>
-        loadOnce(`preview|${residentId}|${voiceId}|${text}`, () => previewVoice(residentId, voiceId, text)),
+        // Words are tried as typed, in English: translating would change the word being taught
+        loadOnce(`preview|${residentId}|${voiceId}|${text}`, () =>
+          previewVoice(residentId, voiceId, text, undefined, DEFAULT_PREVIEW_LANGUAGE),
+        ),
       ).catch((e) => setStatus({ kind: 'error', text: previewError(e) }));
     },
     [residentId, voiceId, toggle],
