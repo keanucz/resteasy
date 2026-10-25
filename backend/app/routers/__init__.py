@@ -13,6 +13,7 @@ from app.routers import (
     pillows,
     reminders,
     residents,
+    voice,
 )
 
 api_router = APIRouter()
@@ -26,3 +27,4 @@ api_router.include_router(family.router)
 api_router.include_router(reminders.router)
 api_router.include_router(account.router)
 api_router.include_router(residents.router)
+api_router.include_router(voice.router)

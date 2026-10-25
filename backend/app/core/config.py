@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     checkin_token: str = ""
     # Claude, for the Family Liaison's wording (app/agents/liaison.py); empty = fixed messages only
     anthropic_api_key: str = ""
+    # Cartesia, for the app's voice previews and clones (app/voice); empty = those routes answer 503
+    cartesia_api_key: str = ""
     # Family alerts to real phones (app/notify): the iMessage sidecar (deploy/imessage) and Twilio
     # for SMS fallback and calls. Each is optional; with neither, sms/call rows stay queued.
     imessage_url: str = ""

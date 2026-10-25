@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import Depends, Header, HTTPException, Query, Request, UploadFile, status
+from fastapi import Depends, Form, Header, HTTPException, Query, Request, UploadFile, status
 from supabase import AsyncClient
 from supabase_auth.errors import AuthError
 
@@ -28,11 +28,25 @@ from app.core.app_constants import (
     SUPABASE_NOT_CONFIGURED,
 )
 from app.core.config import get_settings
+from app.core.voice_constants import (
+    CLIP_CONTENT_TYPES,
+    CLIP_EMPTY,
+    CLIP_MAX_BYTES,
+    CLIP_TOO_LARGE,
+    CLIP_WRONG_TYPE,
+    CLONE_NAME_MAX,
+    CLONE_NAME_MISSING,
+    CONSENT_GIVEN,
+    CONSENT_MISSING,
+    VOICE_NOT_CONFIGURED,
+)
 from app.crud.accounts import get_link_for_contact, get_link_for_user
 from app.crud.pillows import get_pillow
 from app.crud.residents import get_resident
 from app.schemas.pillow import Pillow
 from app.schemas.resident_photo import PhotoUpload
+from app.schemas.voice import CloneUpload
+from app.voice.cartesia import Cartesia
 
 
 def get_supabase(request: Request) -> AsyncClient:
@@ -158,6 +172,66 @@ async def owned_resident(
 
 ViewedResidentDep = Annotated[dict[str, Any], Depends(viewed_resident)]
 OwnedResidentDep = Annotated[dict[str, Any], Depends(owned_resident)]
+
+
+@dataclass(frozen=True)
+class ResidentLogin:
+    """A signed-in member of the care circle of the resident in the path: her row, their contact id
+    and whether they are her owner."""
+
+    resident: dict[str, Any]
+    contact_id: str
+    is_owner: bool
+
+
+async def resident_login(
+    user_id: UserIdDep, resident: Annotated[dict[str, Any], Depends(existing_resident)], db: SupabaseDep
+) -> ResidentLogin:
+    """The resident in the path, for a login that looks after them, with who that login is."""
+    link = await require_role(db, user_id, resident["id"], owner=False)
+    return ResidentLogin(
+        resident=resident, contact_id=link["contact_id"], is_owner=link["role"] == OWNER_ROLE
+    )
+
+
+ResidentLoginDep = Annotated[ResidentLogin, Depends(resident_login)]
+
+
+def get_cartesia(request: Request) -> Cartesia:
+    """Return the process-wide Cartesia client, or 503 when the server has no Cartesia key."""
+    cartesia = request.app.state.cartesia
+    if cartesia is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=VOICE_NOT_CONFIGURED)
+    return cartesia
+
+
+CartesiaDep = Annotated[Cartesia, Depends(get_cartesia)]
+
+
+async def clone_upload(
+    clip: UploadFile,
+    name: Annotated[str, Form(min_length=1, max_length=CLONE_NAME_MAX)],
+    consent: Annotated[str, Form()],
+) -> CloneUpload:
+    """The multipart recording to clone: an audio file (422 otherwise) of at most 10 MB (413), and
+    `consent` "true" from the person recorded (422 otherwise)."""
+    if consent != CONSENT_GIVEN:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=CONSENT_MISSING)
+    if not name.strip():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=CLONE_NAME_MISSING)
+    if clip.content_type not in CLIP_CONTENT_TYPES:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=CLIP_WRONG_TYPE)
+    content = await clip.read(CLIP_MAX_BYTES + 1)
+    if not content:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=CLIP_EMPTY)
+    if len(content) > CLIP_MAX_BYTES:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, detail=CLIP_TOO_LARGE)
+    return CloneUpload(
+        clip=content, filename=clip.filename or "clip", content_type=clip.content_type, name=name.strip()
+    )
+
+
+CloneUploadDep = Annotated[CloneUpload, Depends(clone_upload)]
 
 
 @dataclass(frozen=True)

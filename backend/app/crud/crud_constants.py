@@ -15,6 +15,10 @@ MISSING_COLUMN = "PGRST204"
 AGENT_LOG_TABLE = "agent_log"
 REMINDERS_TABLE = "reminders"
 REMINDER_OCCURRENCES_TABLE = "reminder_occurrences"
+VOICE_CLONES_TABLE = "voice_clones"
+
+# A cloned voice with the name of the family member who recorded it
+VOICE_CLONE_COLUMNS = "*, creator:contacts(full_name)"
 
 # Conflict target that makes creating a reminder's occurrence for a due time and purpose idempotent
 OCCURRENCE_KEY = "reminder_id,due_at,purpose"

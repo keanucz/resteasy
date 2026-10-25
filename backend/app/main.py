@@ -5,8 +5,9 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from supabase import acreate_client
 
 from app.agents.liaison import Liaison
@@ -23,6 +24,7 @@ from app.core.app_constants import (
 from app.core.config import get_settings
 from app.notify.sender import NotificationSender
 from app.routers import api_router
+from app.voice.cartesia import Cartesia, VoiceServiceError
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.night_watch = WatchService(Liaison.from_api_key(settings.anthropic_api_key))
     app.state.reminders = ReminderService(app.state.night_watch)
     app.state.notifier = NotificationSender.from_settings(settings)
+    app.state.cartesia = Cartesia.from_settings(settings)
     tickers = (
         [asyncio.create_task(_tick_night_watch(app)), asyncio.create_task(_tick_reminders(app))]
         if app.state.supabase is not None
@@ -49,6 +52,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     for ticker in tickers:
         ticker.cancel()
+    if app.state.cartesia is not None:
+        await app.state.cartesia.aclose()
 
 
 async def _tick_night_watch(app: FastAPI) -> None:
@@ -89,7 +94,13 @@ def create_app() -> FastAPI:
         allow_headers=CORS_ALLOW_HEADERS,
     )
     app.include_router(api_router, prefix=API_PREFIX)
+    app.add_exception_handler(VoiceServiceError, _voice_service_failed)
     return app
+
+
+async def _voice_service_failed(_request: Request, err: VoiceServiceError) -> JSONResponse:
+    """Cartesia refused or was unreachable: a 502 with the plain sentence the app shows."""
+    return JSONResponse(status_code=status.HTTP_502_BAD_GATEWAY, content={"detail": str(err)})
 
 
 app = create_app()
