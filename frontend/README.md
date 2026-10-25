@@ -5,8 +5,8 @@ Expo (SDK 58, to match Expo Go on iOS) + Expo Router + TypeScript.
 ## Goal: talk to the pillow
 
 The app must **send signals to and receive signals from the pillow hardware**: show live sensor state
-(head on pillow, motion, keys, light, temperature) and send commands (lights, vibration, breathing pulse,
-presence glow) for setup, calibration and alerts.
+(head on pillow, motion, keys, light, temperature) and send commands (vibration, breathing pulse) for
+setup, calibration and alerts.
 
 The phone never talks to a board directly (boards are USB-bridged to a laptop, and the venue Wi-Fi
 isolates devices). Everything goes through the backend, using the shapes in `coord/CONTRACT.md`:

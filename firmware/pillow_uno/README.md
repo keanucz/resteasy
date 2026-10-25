@@ -15,7 +15,6 @@ JSON line per 500 ms; it never decides what a reading means (that is the server'
 |---|---|---|
 | plate side 1 | Uno pin 2 | `INPUT_PULLUP`: pressed reads LOW |
 | plate side 2 | Uno GND | |
-| Uno pin 13 | LED, 1 kΩ, GND | on = head on the pillow (handy for the demo) |
 | Uno pin 1 (TX) | 1 kΩ, then Waveshare GPIO44 (U0RXD) | plus 2 kΩ from GPIO44 to GND: the S3 is not 5 V tolerant |
 | Uno GND | Waveshare GND | shared ground, or nothing is readable |
 

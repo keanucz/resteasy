@@ -54,20 +54,19 @@ is logged as `key_talk`. The `keys` object above stays for a keypad wired to the
 The device polls every 500 ms, runs each command, then remembers its `id`.
 
 ```json
-{"id": 41, "cmd": "set_light", "args": {"brightness_pct": 20, "color": "warm", "fade_s": 3}}
+{"id": 41, "cmd": "buzz", "args": {"pattern": "chime", "repeat": 1}}
 ```
 
 | `cmd` | `args` | Device does |
 |---|---|---|
-| `set_light` | `brightness_pct` 0–100, `color` `warm`/`amber`/`off`, `fade_s` 0–60 | LEDs / path light |
-| `pulse` | `start_bpm`, `end_bpm` (4–14), `duration_min` (1–30) | motor + glow breathing ramp |
+| `pulse` | `start_bpm`, `end_bpm` (4–14), `duration_min` (1–30) | motor breathing ramp |
 | `vibrate` | `pattern` `tap`/`double`/`long`, `repeat` 1–5 | motor |
 | `fan` | `speed_pct` 0–100 | kit fan motor |
 | `buzz` | `pattern` `chime`/`alert`, `repeat` 1–3 | passive buzzer: `chime` = two soft rising notes (~1 s), `alert` = 3 beeps. Queued ~2 s before a reminder is spoken |
 | `stop_all` | none | everything off |
 
 Speech and audio (`say`, `play_audio`) play from `voice/voice.py` on the laptop, not the ESP32, so they are
-not device commands. Guardian caps brightness, volume and intensity before a command is queued.
+not device commands. Guardian caps volume and intensity before a command is queued.
 
 ## 4. Pillows
 

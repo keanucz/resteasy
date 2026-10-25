@@ -1,13 +1,13 @@
 # Pillow firmware
 
 `pillow/pillow.ino` speaks `coord/CONTRACT.md`: every ~500 ms it reads the sensors, POSTs state to
-`SERVER_URL/api/pillows/{PILLOW_ID}/state`, polls `/commands`, and drives the motor and LED.
+`SERVER_URL/api/pillows/{PILLOW_ID}/state`, polls `/commands`, and drives the motor.
 
 ## Two pillows, two boards
 
 - `pillow/`: **Mum's pillow**, booth ESP32 DevKit + breadboard sensors (pins below).
 - `kid_pillow/`: **not used** (decision Sat 24 Oct: no second pillow, the adult child only uses the app).
-  Kept for reference: Waveshare ESP32-S3 AMOLED V2, no wiring: screen glows
+  Kept for reference: Waveshare ESP32-S3 AMOLED V2, no wiring: screen shows
   "Mum's in bed", flashes "Check on Mum" on alerts, tap or touch = `keys.fine`. FQBN
   `esp32:esp32:esp32s3:CDCOnBoot=cdc`.
 - `voice_unit/`: the Waveshare inside Mum's pillow as **speaker + mic only** (ES8311 codec, squeeze
@@ -52,7 +52,6 @@ power bank (outside) ──USB──> N16R8                (mic, speaker, screen
 | head switch plate, sheet 1 | GPIO4 (`PLATE_PIN`, `INPUT_PULLUP`) | pressed reads LOW |
 | head switch plate, sheet 2 | GND | |
 | passive buzzer | GPIO5 (`BUZZER_PIN`) → 100 Ω → buzzer +, − → GND | plays the server's `buzz`; `-1` = none |
-| debug LED | GPIO6 (`LED_PIN`) → 220 Ω → LED → GND | lit while a head is on the plate, follows the notes during a `buzz`; not a server-controlled light; `-1` = none |
 
 S3 pins are 3.3 V only: no 5 V sensor outputs straight in (an HC-SR04 echo needs a 1k/2k divider);
 analog only on ADC1 (GPIO1-10); keep off GPIO0/3/45/46 (strapping), 19/20 (USB), 48 (RGB LED).
@@ -127,8 +126,7 @@ the backend's live tests wipe `test-pillow`.
 
 The voice unit's audio stays on USB; the radio carries only the pillow's lines (`UNO {...}`, the
 prefix kept from the Uno days) and its talk key (`"talk":1` after `"talk":0`, acked, arrives as
-`KEY talk`). The node's LED: red = looking for the voice unit, green = paired, blue blink = a line
-sent. On its USB (115200) it prints what it forwards, and a JSON line typed there is forwarded as if
+`KEY talk`). On its USB (115200) it prints what it forwards, and a JSON line typed there is forwarded as if
 the sensors produced it (`STATS`: link health).
 
 ## Wireless voice link: ESP-NOW relay (no access point)
@@ -215,7 +213,6 @@ onboard I2C bus and GPIOs differ (check its header pinout before wiring).
 | Ultrasonic HC-SR04 | trig 5, **echo 18 via 1k/2k divider**, 5V, GND | nightstand, aimed at the floor by the bed | **echo is 5 V: the divider protects the ESP32** |
 | Photoresistor | 34 + 10k divider | nightstand | ADC1 only (Wi-Fi blocks ADC2) |
 | DC motor | 25 → 1k → PN2222 base; emitter GND; collector → motor −; motor + → 5V; 1N4007 across motor, stripe to 5V | pillow pod | breathing pulse, vibrate; tape an off-centre weight on the shaft |
-| LED | 26 → 220Ω → LED → GND | bedside | glow, path light; use a transistor for a strip |
 
 Only sensors and the motor go inside the pillow. The ESP32, power and USB stay on the
 nightstand; no LiPo inside bedding. Every part we have: `PARTS.md`.

@@ -24,7 +24,7 @@ uv run ruff check .  # lint
 |---|---|---|
 | `POST` | `/api/pillows/{pillow_id}/state` | device, about 2/s (`coord/CONTRACT.md` section 1) |
 | `GET` | `/api/pillows/{pillow_id}/commands?after=N` | device, every 500 ms (section 3) |
-| `POST` | `/api/pillows/{pillow_id}/commands` | app / agents: queue `set_light`, `vibrate`, ... |
+| `POST` | `/api/pillows/{pillow_id}/commands` | app / agents: queue `vibrate`, `buzz`, ... |
 | `GET` | `/api/pillows/{pillow_id}` and `/state` | app: the pillow and its live status card |
 | `GET` | `/api/contacts/{contact_id}/pillows` | app: pillows of every resident a carer looks after |
 | `POST` | `/api/pillows/{pillow_id}/checkin` | base laptop (`voice/checkin_client.py`): the voice check-in's result; bearer `CHECKIN_TOKEN` |
@@ -44,10 +44,10 @@ Every `POST /state` runs the pillow's agents in order; all settings come from `r
 
 | Module | Does | Settings |
 |---|---|---|
-| `night_watch.py` | state machine: lay_down, bed_exit, bed_return, no_return, path light, check-in, alert ladder | `residents.*`, `resident_contacts.priority` |
+| `night_watch.py` | state machine: lay_down, bed_exit, bed_return, no_return, check-in, alert ladder | `residents.*`, `resident_contacts.priority` |
 | `sleep_events.py` | restless / settled / asleep, key_talk / key_family (CONTRACT.md section 2) | fixed thresholds |
 | `liaison.py` | Family Liaison: Claude (tools) words each alert for its channel and one line for her | `ANTHROPIC_API_KEY` in `.env` (empty = fixed text) |
-| `guardian.py` | checks every command / line / alert: contract ranges, brightness <= 40 % at night, no medical claims, alert caps, SMS consent, config whitelist | `contacts.sms_consent`, `residents.step_wait_min` |
+| `guardian.py` | checks every command / line / alert: contract ranges, no medical claims, alert caps, SMS consent, config whitelist | `contacts.sms_consent`, `residents.step_wait_min` |
 | `watch_service.py` | glues them to Supabase: events, commands, incidents, notifications, `agent_log` (with the Guardian's verdict) | |
 
 `.env` keys: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `CHECKIN_TOKEN`, `FAMILY_AGENT_TOKENS`,

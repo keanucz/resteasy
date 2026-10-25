@@ -6,7 +6,7 @@ holds: **timers and thresholds are plain code; Claude does language and judgemen
 
 ```
 pillow state ─> event deriver ─> Night Watch state machine ─> Claude tool loop ─> Guardian ─> actions
-(Supabase)      (plain code)      (plain code, timers)         (words, judgement)  (plain code)  (light, voice,
+(Supabase)      (plain code)      (plain code, timers)         (words, judgement)  (plain code)  (voice,
                                                                                                  family alerts)
         every plan, tool call and Guardian verdict ─> Supabase `agent_log` ─> family app (live, Realtime)
 ```
@@ -28,7 +28,7 @@ pillow state ─> event deriver ─> Night Watch state machine ─> Claude tool 
 |---|---|---|---|
 | `AWAKE` | default by day | nothing | `lay_down` in quiet hours → `IN_BED` |
 | `IN_BED` | `lay_down` | plays any queued goodnight message once | `bed_exit` → `UP` |
-| `UP` | `bed_exit` (+ `room_motion` helps) | path light warm 20 %, fade 3 s; one soft line ("Light's on, take your time") | `bed_return` → `IN_BED` (light fades out); `checkin_timeout_min` passes → `CHECK_IN` |
+| `UP` | `bed_exit` (+ `room_motion` helps) | one soft line ("Take your time") | `bed_return` → `IN_BED`; `checkin_timeout_min` passes → `CHECK_IN` |
 | `CHECK_IN` | `no_return` | voice asks "Are you alright?" up to 2 times, 30 s each | Claude classifies the reply (below) |
 | `ESCALATING` | DISTRESS or no answer | runs the family ladder (section 4) | a contact acknowledges, or `key_fine` / "I'm fine" |
 
@@ -42,7 +42,7 @@ Claude receives the transcript and recent state and returns exactly one of:
 - **FINE**: "Glad you're OK." → back to `UP`, timer restarts. **Every** no-return runs a new
   check-in, so she is always asked and warned before family are alarmed. After the 2nd "fine" on
   one trip, family get an informational heads-up, not an alarm (provisional, to decide: PR #21).
-- **CONFUSED**: gentle reorienting ("It's night, you're at home, the light's on by the bed") → ask again.
+- **CONFUSED**: gentle reorienting ("It's night, you're at home, in your bedroom") → ask again.
 - **DISTRESS** → `ESCALATING` at once. Silence / unclear after 3 asks → a warning with 15 s to say
   "I'm fine" → `ESCALATING`, with the reason in one plain sentence for the family.
 
@@ -66,7 +66,7 @@ you." There is no second pillow: the adult child only has the app.
 
 ## 5. Guardian (plain code, checks every tool call before it is queued)
 
-- Caps: brightness ≤ 40 % at night, volume cap, pulse within 4–14 bpm.
+- Caps: volume cap, pulse within 4–14 bpm.
 - Max alerts per night per contact; no repeats inside the step wait.
 - No medical claims or diagnoses in any message ("may have had a stroke" → blocked and rewritten).
 - No raw audio stored; transcripts only.
@@ -115,4 +115,4 @@ request; checks that `motion` drops.
 
 - **Szymon:** Supabase tables for pillow state, events, commands, `agent_log`, contacts (with phone
   numbers) and config; owner of the schema. Agent code lives in the backend under `app/agents/`.
-- **Keanu / Adyan:** `keys.fine` from the hit sensor on Mum's pillow; path light and motor on Mum's pillow.
+- **Keanu / Adyan:** `keys.fine` from the hit sensor on Mum's pillow; motor on Mum's pillow.

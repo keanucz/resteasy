@@ -35,10 +35,10 @@ Somnox 2 is a $600 breathing cushion on a fixed program. Nobody owns the night w
 
 ## Agents (detail in Keanu's session; build the first four first)
 
-1. **Night Watch**: pillow empty + PIR motion + dark → path light on, soft voice, timer.
+1. **Night Watch**: pillow empty + PIR motion + dark → soft voice, timer.
    Not back in 20 min → Check-in.
 2. **Check-in Voice** (Cartesia + Moss): FINE / CONFUSED (reorient) / DISTRESS or no answer → escalate.
-3. **Family Liaison**: least intrusive first (family pillow glows → phone → call → next person),
+3. **Family Liaison**: least intrusive first (app alert → phone → call → next person),
    picks who is awake from family pillow presence. Never auto-calls 911.
 4. **Guardian**: checks every action (quiet-hour caps, max alerts, no medical claims, no raw audio).
    Show one blocked action in the demo.
@@ -65,7 +65,7 @@ agents), Fetch.ai
 
 - Ours: Keanu's Waveshare ESP32-S3 AMOLED 1.8" (mic, speaker, IMU, battery, Wi-Fi; enclosed, no
   header to wire), the Elegoo kit's bare ESP32-S3-N16R8, a 3-key
-  keypad with a knob, ELEGOO Super Starter Kit (UNO R3 Project: DHT11, HC-SR04, photoresistors, LEDs,
+  keypad with a knob, ELEGOO Super Starter Kit (UNO R3 Project: DHT11, HC-SR04, photoresistors,
   transistors, diodes, fan motor, buttons, IR remote; no PIR, IMU or mic), Szymon's Raspberry Pi +
   HTN badge. Full list: `firmware/PARTS.md`.
 - Reserved from the booth (actual, Adam + Keanu + Szymon, awaiting pickup): 1 ESP32, 2 MPU6050,
@@ -125,7 +125,7 @@ Findings worth keeping:
 
 Built on top of Adam's Night Watch and voice check-in, all tested without Supabase (live tests skip):
 - `backend/app/agents/guardian.py`: every command / spoken line / alert passes it; verdict in
-  `agent_log.guardian`. Caps brightness at 40 % at night, pulse 4-14 bpm, contract arg ranges, blocks
+  `agent_log.guardian`. Caps pulse at 4-14 bpm, contract arg ranges, blocks
   medical claims (her own quoted words are allowed), max 6 alerts per contact per night, no repeat
   on one channel inside the step wait, SMS only with `contacts.sms_consent`, config whitelist.
 - `backend/app/agents/sleep_events.py`: `restless`, `settled`, `asleep`, `key_talk`, `key_family`.
@@ -133,7 +133,7 @@ Built on top of Adam's Night Watch and voice check-in, all tested without Supaba
   alert for its channel and one line for her; ladder stays plain code; fixed text on any failure.
 - Family API (`backend/app/routers/family.py`): `GET /night`, `PATCH /settings`,
   `POST`/`GET /goodnight`, `POST /goodnight/played`. Writes use the shared `CHECKIN_TOKEN`.
-- `voice/checkin_client.py`: base laptop watches `night_state`, speaks the path-light line, runs the
+- `voice/checkin_client.py`: base laptop watches `night_state`, speaks a soft line when she gets up, runs the
   check-in and posts the result, plays queued goodnight messages.
 - `agents/fetch/family_agent.py`: uAgent on Agentverse (chat protocol) for ASI:One.
 
@@ -176,10 +176,10 @@ still open:
   agreed). Agents in Python against Supabase; family app via supabase-js Realtime. Trade-off
   accepted: no backend sponsor prize (Spacetime, Convex).
 - Sat 24 Oct: ONE pillow only (Szymon). No kid pillow: the adult child / carer uses only the family
-  app. Kid-pillow features move into the app: "Mum is in bed" glow becomes the live status card,
+  app. Kid-pillow features move into the app: "Mum is in bed" becomes the live status card,
   `vibrate` / "Check on Mum" becomes the first ladder rung (in-app alert or push), the `keys.fine` ack
   becomes an "I'm on it" button that acknowledges the incident, and "who is awake" routing becomes
-  on-call + quiet hours per contact. `pillow_id` `kid` and the `glow_presence` command are dropped.
+  on-call + quiet hours per contact. `pillow_id` `kid` and its presence command are dropped.
 - Sat 24 Oct: alert ladder never skips a contact (Adam + Szymon). Reachable contacts (on call,
   outside their own quiet hours) are tried first in priority order, the rest after them, so at 3am
   someone is always alerted. In-app alert goes to every contact at once first; "I'm on it" in the
@@ -224,7 +224,7 @@ still open:
   American English. Voice choice in the family app is a TODO (`residents.voice_id` exists, unread).
   (4) Judge = Opus 5.5 at low effort. (6) Build the personal night baseline from the past week of
   `night_trips` (rules as in the Fri 23 Oct baseline entry); next feature in the agents lane.
-  (7) Guardian rules as built: brightness <= 40 % at night, max 6 alerts per contact per night,
+  (7) Guardian rules as built: max 6 alerts per contact per night,
   medical words blocked. (5) still open.
 - Sat 24 Oct: personal night baseline rules (Adam; plain code, `backend/app/agents/baseline.py`).
   Window = the 7 nights before the current night (night = 18:00 to noon). Usual trip = under 20 min;
@@ -249,8 +249,7 @@ still open:
 - Sat 24 Oct: pillow node bench path (Adyan). The N16R8 runs `firmware/pillow_node` on Adyan's Mac
   (the devkit has two USB-C sockets: build with `CDCOnBoot=cdc` for the native "USB" one, without it
   for the CH343 "COM" one, see firmware/README.md; the Arduino IDE on the same Mac once re-uploaded
-  the bare test sketch over it, so keep the IDE closed or on another port), with a debug LED on
-  GPIO6 (lit while head on; follows the notes during a `buzz`; not a server light). On USB,
+  the bare test sketch over it, so keep the IDE closed or on another port), . On USB,
   `sim/uno_bridge.py` posts its lines to the VPS as `test-pillow` and writes `buzz` commands back as
   `BUZZ chime 1` lines, so the full loop (plate → Supabase → agents → command → board) runs with no
   Waveshare. The radio is unchanged: Keanu's Waveshare pairs with the same node and serves `mum`.

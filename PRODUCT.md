@@ -16,7 +16,7 @@ The app is one Expo (React Native) codebase that ships the same custom identity 
 
 ## Product Purpose
 
-An agentic pillow that watches over an older parent at night: sensors in the pillow, actuators (path light, voice, vibration) in a nightstand base, Claude deciding. When she gets up and does not come back, it checks in by voice, then escalates to family, least intrusive first. The app is the family's window onto the night: live status, the night so far, alerts with an "I'm on it" acknowledgement, history and settings.
+An agentic pillow that watches over an older parent at night: sensors in the pillow, actuators (voice, vibration) at the bedside, Claude deciding. When she gets up and does not come back, it checks in by voice, then escalates to family, least intrusive first. The app is the family's window onto the night: live status, the night so far, alerts with an "I'm on it" acknowledgement, history and settings.
 
 Success: the adult child sleeps better because they trust the pillow to tell them only when it matters, and the parent keeps living independently without wearing a device.
 
@@ -62,7 +62,7 @@ Pitch line: "Not a monitor. A goodnight."
 
 ## Product Principles
 
-1. Least intrusive first: glow, then phone, then call, then the next person. Never auto-call emergency services.
+1. Least intrusive first: app alert, then text, then call, then the next person. Never auto-call emergency services.
 2. Say only what matters: the owner should trust that silence means a quiet night.
 3. Respect the resident: consent at setup, pause by voice, no raw audio, no medical claims.
 4. Readable at 2 am: the state is clear in a glance from a phone picked up in the dark.
