@@ -257,7 +257,9 @@ def test_a_plain_im_fine_skips_the_judge(reply):
 
 
 @pytest.mark.parametrize("reply", ["I'm fine but I fell", "I'm not fine", "I'm fine, where am I?",
-                                   "I'm okay I think but my chest hurts a bit"])
+                                   "I'm okay I think but my chest hurts a bit",
+                                   "No, why is this the last king? Yes.", "No, I'm fine", "Yes, okay, good, sure",
+                                   "Good."])
 def test_anything_hedged_or_alarming_still_goes_to_the_judge(reply):
     from judge import plainly_fine
 
