@@ -109,6 +109,8 @@ type CloneVoiceSheetProps = {
   /** Her preferred name. */
   name: string;
   residentId: string;
+  /** The language its sample plays in. */
+  language: string;
   /** The screen's player, so a voice in the list and a recording here never play over each other. */
   player: VoicePlayer;
   /** Accents the speaker may have, so the copy keeps theirs; none hides the choice. */
@@ -128,6 +130,7 @@ export function CloneVoiceSheet({
   visible,
   name,
   residentId,
+  language,
   player,
   accents = NO_ACCENTS,
   canUse = true,
@@ -427,7 +430,7 @@ export function CloneVoiceSheet({
             title="Hear it"
             what={`${made.name}'s voice`}
             state={phaseOf(player.playing, made.id)}
-            onPress={() => listen(made.id, () => sampleUri(residentId, made))}
+            onPress={() => listen(made.id, () => sampleUri(residentId, made, language))}
           />
           <Text className="font-sans text-sm text-ink-muted">
             If it doesn&apos;t sound like them, remove it from the list and record again somewhere quiet.

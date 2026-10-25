@@ -21,7 +21,15 @@ import { useTheme } from '@/hooks/useTheme';
 import { loadOnce, useVoicePlayer } from '@/hooks/useVoicePlayer';
 import { useVoices } from '@/hooks/useVoices';
 import { ApiError } from '@/services/api';
-import { type Accent, deleteClone, readAccents, sampleUri, type Voice, type VoiceStyle } from '@/services/voice';
+import {
+  type Accent,
+  DEFAULT_PREVIEW_LANGUAGE,
+  deleteClone,
+  readAccents,
+  sampleUri,
+  type Voice,
+  type VoiceStyle,
+} from '@/services/voice';
 
 const NO_ACCENTS: Accent[] = [];
 
@@ -45,6 +53,7 @@ export default function CustomVoiceScreen() {
   const name = resident?.preferred_name ?? 'her';
   const voices = useVoices(name);
   const { residentId, choice, failed, isOwner, reload, choose, add, setChoice } = voices;
+  const language = choice?.language ?? DEFAULT_PREVIEW_LANGUAGE;
   const player = useVoicePlayer();
   const { toggle, stop } = player;
   // Read once here for both the accent section and the clone sheet; null while loading.
@@ -80,11 +89,11 @@ export default function CustomVoiceScreen() {
     (voice: Voice) => {
       if (!residentId) return;
       setStatus(null);
-      toggle(voice.id, () => loadOnce(`sample|${voice.id}`, () => sampleUri(residentId, voice))).catch((e) =>
-        setStatus({ kind: 'error', text: previewError(e) }),
-      );
+      toggle(voice.id, () =>
+        loadOnce(`sample|${language}|${voice.id}`, () => sampleUri(residentId, voice, language)),
+      ).catch((e) => setStatus({ kind: 'error', text: previewError(e) }));
     },
-    [residentId, toggle],
+    [residentId, toggle, language],
   );
 
   const use = useCallback(
@@ -207,6 +216,7 @@ export default function CustomVoiceScreen() {
               saved={choice.style}
               emotions={choice.emotions}
               isOwner={isOwner}
+              language={language}
               player={player}
               onSaved={savedStyle}
             />
@@ -231,6 +241,7 @@ export default function CustomVoiceScreen() {
                 accentsFailed={accentsFailed}
                 name={name}
                 voice={current}
+                language={language}
                 player={player}
                 onMade={add}
                 onUse={use}
@@ -242,6 +253,7 @@ export default function CustomVoiceScreen() {
             visible={cloning}
             name={name}
             residentId={residentId}
+            language={language}
             player={player}
             accents={accents ?? NO_ACCENTS}
             canUse={isOwner}

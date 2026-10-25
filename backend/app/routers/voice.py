@@ -6,12 +6,16 @@ of the person recorded, or an accent copy) or a word; only the owner picks the v
 how it speaks. A voice or word is removed by whoever added it or by the owner. Cartesia is called
 from here only, so its key never reaches the app; requests carry the app's Supabase access token,
 like the residents router.
+
+The previews (samples and spoken lines) speak in the language picked in Settings > Voice; every
+voice's sample is made ahead in each language, so changing it swaps the samples at once. A typed
+line is translated first. The pillow and the alert calls keep her own language.
 """
 
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, Response, status
+from fastapi import APIRouter, BackgroundTasks, Form, HTTPException, Query, Response, status
 
 from app.core.app_constants import FAMILY_APP_AGENT, SETTINGS_CHANGE_INTENT
 from app.core.dependencies import (
@@ -20,6 +24,7 @@ from app.core.dependencies import (
     OwnedResidentDep,
     ResidentLoginDep,
     SupabaseDep,
+    TranslatorDep,
     ViewedResidentDep,
 )
 from app.core.voice_constants import (
@@ -33,16 +38,21 @@ from app.core.voice_constants import (
     NOT_CLONE_CREATOR,
     NOT_PRONUNCIATION_CREATOR,
     PREVIEW_CONTENT_TYPE,
-    PREVIEW_TEXT,
+    PREVIEW_LANGUAGE,
+    PREVIEW_LANGUAGE_CODES,
+    PREVIEW_LANGUAGE_COLUMN,
+    PREVIEW_LANGUAGES,
+    PREVIEW_TEXTS,
     PRONUNCIATION_DICT_NAME,
     PRONUNCIATION_EXISTS,
     PRONUNCIATIONS_FULL,
     PRONUNCIATIONS_MAX,
     SAMPLE_EMOTION,
     SAMPLE_SPEED,
-    SAMPLE_TEXT,
+    SAMPLE_TEXTS,
     STYLE_COLUMNS,
     UNKNOWN_ACCENT,
+    UNKNOWN_LANGUAGE,
     UNKNOWN_PRONUNCIATION,
     UNKNOWN_VOICE,
     VOICE_TOOL,
@@ -69,6 +79,8 @@ from app.schemas.voice import (
     Accent,
     AccentRequest,
     CurrentVoice,
+    PreviewLanguage,
+    PreviewLanguageChoice,
     Pronunciation,
     PronunciationRequest,
     ResidentVoice,
@@ -91,47 +103,68 @@ _accents: dict[str, list[Accent]] = {}
 @router.get("")
 async def read_voices(resident: ViewedResidentDep, db: SupabaseDep) -> ResidentVoices:
     """The voice she hears now and how it speaks, then every voice the owner may pick: the stock
-    voices, then her own (clones and accent copies), oldest first, each with its sample's link once
-    one has been made."""
+    voices, then her own (clones and accent copies), oldest first, each with its samples' links (in
+    every preview language made so far; `sample_url` in the preview language), and the languages."""
     stock = [ResidentVoice.stock(*voice) for voice in VOICES]
     own = [ResidentVoice.clone(row) for row in await list_voice_clones(db, resident["id"])]
     cached = await cached_samples(db, resident["id"])
+    language = _preview_language(resident)
     for voice in stock + own:
-        path = sample_path(resident["id"], voice.id)
-        if path in cached:
-            voice.sample_url = await sample_url(db, path)
+        for code, _ in PREVIEW_LANGUAGES:
+            path = sample_path(resident["id"], voice.id, code)
+            if path in cached:
+                voice.samples[code] = await sample_url(db, path)
+        voice.sample_url = voice.samples.get(language)
     return ResidentVoices(
         current=resident["voice_id"],
         style=VoiceStyle.of(resident),
         emotions=list(EMOTIONS),
         voices=stock + own,
+        language=language,
+        languages=[PreviewLanguage(code=code, name=name) for code, name in PREVIEW_LANGUAGES],
     )
 
 
 @router.get("/samples/{voice_id}")
 async def read_sample(
-    resident: ViewedResidentDep, voice_id: str, db: SupabaseDep, cartesia: CartesiaDep
+    resident: ViewedResidentDep,
+    voice_id: str,
+    db: SupabaseDep,
+    cartesia: CartesiaDep,
+    language: Annotated[str | None, Query()] = None,
 ) -> SampleLink:
-    """Where to play the voice saying the sample line. Cartesia speaks it the first time only;
-    after that it comes from Supabase Storage."""
+    """Where to play the voice saying the sample line in `language` (default: the preview
+    language). Cartesia speaks it the first time only; after that it comes from Supabase Storage."""
+    if language is not None and language not in PREVIEW_LANGUAGE_CODES:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=UNKNOWN_LANGUAGE)
     await _require_offered(db, resident, voice_id)
-    path = sample_path(resident["id"], voice_id)
+    language = language or _preview_language(resident)
+    path = sample_path(resident["id"], voice_id, language)
     if path in await cached_samples(db, resident["id"]):
         return SampleLink(url=await sample_url(db, path))
-    return SampleLink(url=await _make_sample(db, cartesia, resident, voice_id))
+    return SampleLink(url=await _make_sample(db, cartesia, resident, voice_id, language))
 
 
 @router.post("/preview", response_class=Response, responses={200: {"content": {PREVIEW_CONTENT_TYPE: {}}}})
 async def preview_voice(
-    resident: ViewedResidentDep, preview: VoicePreviewRequest, db: SupabaseDep, cartesia: CartesiaDep
+    resident: ViewedResidentDep,
+    preview: VoicePreviewRequest,
+    db: SupabaseDep,
+    cartesia: CartesiaDep,
+    translator: TranslatorDep,
 ) -> Response:
     """MP3 of the voice saying `text` (at most 200 characters), or a line with her name, spoken as
-    she hears it (or in the `style` being tried) with her words said her way. Nothing is stored."""
+    she hears it (or in the `style` being tried) with her words said her way, in the preview
+    language (or `language`): a typed line is translated first. Nothing is stored."""
     await _require_offered(db, resident, preview.voice_id)
-    text = preview.text or PREVIEW_TEXT.format(name=resident["preferred_name"])
+    language = preview.language or _preview_language(resident)
+    if preview.text:
+        text = await translator.translate(preview.text, language)
+    else:
+        text = PREVIEW_TEXTS[language].format(name=resident["preferred_name"])
     style = preview.style or VoiceStyle.of(resident)
     speech = Speech(**style.model_dump(), pronunciation_dict_id=resident["pronunciation_dict_id"])
-    audio = await cartesia.speak(preview.voice_id, text, resident["language"], speech)
+    audio = await cartesia.speak(preview.voice_id, text, _spoken_language(resident, language), speech)
     return Response(content=audio, media_type=PREVIEW_CONTENT_TYPE)
 
 
@@ -141,6 +174,21 @@ async def choose_voice(resident: OwnedResidentDep, choice: VoiceChoice, db: Supa
     await _require_offered(db, resident, choice.voice_id)
     await _set_voice(db, resident, choice.voice_id)
     return CurrentVoice(current=choice.voice_id)
+
+
+@router.put("/language")
+async def choose_preview_language(
+    resident: OwnedResidentDep,
+    choice: PreviewLanguageChoice,
+    db: SupabaseDep,
+    cartesia: CartesiaDep,
+    background: BackgroundTasks,
+) -> PreviewLanguageChoice:
+    """Set the language the app's previews speak in. Samples are made ahead in every language, so
+    the app swaps at once; any still missing for her voices are made after the reply."""
+    await _change(db, resident, {PREVIEW_LANGUAGE_COLUMN: choice.language})
+    background.add_task(_warm_language, db, cartesia, resident, choice.language)
+    return choice
 
 
 @router.put("/style")
@@ -159,7 +207,11 @@ async def read_accents(resident: ViewedResidentDep, cartesia: CartesiaDep) -> li
 
 @router.post("/accents", status_code=status.HTTP_201_CREATED)
 async def copy_with_accent(
-    login: ResidentLoginDep, request: AccentRequest, db: SupabaseDep, cartesia: CartesiaDep
+    login: ResidentLoginDep,
+    request: AccentRequest,
+    db: SupabaseDep,
+    cartesia: CartesiaDep,
+    background: BackgroundTasks,
 ) -> ResidentVoice:
     """A copy of one of her voices speaking with another accent (Cartesia's localize); it joins her
     picker with its sample made. A copy she already has is returned rather than made again."""
@@ -186,7 +238,11 @@ async def copy_with_accent(
             accent=accent.id,
         )
     copy = ResidentVoice.clone(row)
-    copy.sample_url = await _sample_or_none(db, cartesia, resident, copy.id)
+    language = _preview_language(resident)
+    copy.sample_url = await _sample_or_none(db, cartesia, resident, copy.id, language)
+    if copy.sample_url:
+        copy.samples[language] = copy.sample_url
+    background.add_task(_samples_in_every_language, db, cartesia, resident, copy.id)
     return copy
 
 
@@ -213,7 +269,7 @@ async def clone_voice(
     )
     row = await _keep_voice(db, cartesia, resident, voice["id"], upload.name, login.contact_id, accent=accent)
     clone = ResidentVoice.clone(row)
-    background.add_task(_sample_or_none, db, cartesia, resident, clone.id)
+    background.add_task(_samples_in_every_language, db, cartesia, resident, clone.id)
     return clone
 
 
@@ -233,7 +289,8 @@ async def remove_clone(
     if resident["voice_id"] == voice_id:
         await _set_voice(db, resident, DEFAULT_VOICE_ID)
     await delete_voice_clone(db, resident["id"], voice_id)
-    await delete_sample(db, sample_path(resident["id"], voice_id))
+    for code, _ in PREVIEW_LANGUAGES:
+        await delete_sample(db, sample_path(resident["id"], voice_id, code))
 
 
 @router.get("/pronunciations")
@@ -348,22 +405,66 @@ async def _keep_voice(
         raise
 
 
-async def _make_sample(db: SupabaseDep, cartesia: Cartesia, resident: dict[str, Any], voice_id: str) -> str:
-    """Have the voice say the sample line once, keep it, and return its link."""
+def _preview_language(resident: dict[str, Any]) -> str:
+    """The language the app's previews speak in for her (English when unset or unknown)."""
+    language = resident.get(PREVIEW_LANGUAGE_COLUMN) or PREVIEW_LANGUAGE
+    return language if language in PREVIEW_LANGUAGE_CODES else PREVIEW_LANGUAGE
+
+
+def _spoken_language(resident: dict[str, Any], language: str) -> str:
+    """The language code Cartesia is given: hers (say "en-GB") for English, else the preview's."""
+    return resident["language"] if language == PREVIEW_LANGUAGE else language
+
+
+async def _make_sample(
+    db: SupabaseDep,
+    cartesia: Cartesia,
+    resident: dict[str, Any],
+    voice_id: str,
+    language: str = PREVIEW_LANGUAGE,
+) -> str:
+    """Have the voice say the sample line in `language` once, keep it, and return its link."""
     speech = Speech(speed=SAMPLE_SPEED, emotion=SAMPLE_EMOTION)
-    mp3 = await cartesia.speak(voice_id, SAMPLE_TEXT, resident["language"], speech)
-    return await store_sample(db, sample_path(resident["id"], voice_id), mp3)
+    mp3 = await cartesia.speak(voice_id, SAMPLE_TEXTS[language], _spoken_language(resident, language), speech)
+    return await store_sample(db, sample_path(resident["id"], voice_id, language), mp3)
 
 
 async def _sample_or_none(
-    db: SupabaseDep, cartesia: Cartesia, resident: dict[str, Any], voice_id: str
+    db: SupabaseDep,
+    cartesia: Cartesia,
+    resident: dict[str, Any],
+    voice_id: str,
+    language: str = PREVIEW_LANGUAGE,
 ) -> str | None:
-    """A new voice's sample link; None if Cartesia can't say it right now (Play makes it later)."""
+    """A voice's sample link in `language`; None if Cartesia can't say it now (Play makes it later)."""
     try:
-        return await _make_sample(db, cartesia, resident, voice_id)
+        return await _make_sample(db, cartesia, resident, voice_id, language)
     except VoiceServiceError:
-        log.warning("No sample yet for a new voice of resident %s", resident["id"])
+        log.warning("No %s sample yet for a voice of resident %s", language, resident["id"])
         return None
+
+
+async def _samples_in_every_language(
+    db: SupabaseDep, cartesia: Cartesia, resident: dict[str, Any], voice_id: str
+) -> None:
+    """Make a new voice's sample in every preview language it lacks, the preview language first."""
+    cached = await cached_samples(db, resident["id"])
+    first = _preview_language(resident)
+    for code in sorted(PREVIEW_LANGUAGE_CODES, key=lambda c: c != first):
+        if sample_path(resident["id"], voice_id, code) not in cached:
+            await _sample_or_none(db, cartesia, resident, voice_id, code)
+
+
+async def _warm_language(
+    db: SupabaseDep, cartesia: Cartesia, resident: dict[str, Any], language: str
+) -> None:
+    """Make the sample in `language` of every voice she may pick that lacks one."""
+    cached = await cached_samples(db, resident["id"])
+    voice_ids = [voice_id for voice_id, _, _ in VOICES]
+    voice_ids += [row["voice_id"] for row in await list_voice_clones(db, resident["id"])]
+    for voice_id in voice_ids:
+        if sample_path(resident["id"], voice_id, language) not in cached:
+            await _sample_or_none(db, cartesia, resident, voice_id, language)
 
 
 async def _sync_dictionary(

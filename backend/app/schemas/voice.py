@@ -13,6 +13,7 @@ from app.core.voice_constants import (
     DEFAULT_SPEED,
     DEFAULT_VOLUME,
     EMOTIONS,
+    PREVIEW_LANGUAGE_CODES,
     PREVIEW_TEXT_MAX,
     PRONUNCIATION_WORD_MAX,
     SOUNDS_LIKE_MAX,
@@ -20,6 +21,7 @@ from app.core.voice_constants import (
     SPEED_MIN,
     STOCK_SOURCE,
     UNKNOWN_EMOTION,
+    UNKNOWN_LANGUAGE,
     VOLUME_MAX,
     VOLUME_MIN,
 )
@@ -39,7 +41,10 @@ class ResidentVoice(BaseModel):
     accent: str | None = None
     # The voice an accent copy was made from
     base_voice_id: str | None = None
+    # Its sample in the preview language, once made
     sample_url: str | None = None
+    # Its sample in every preview language made so far (code -> link), so the app swaps at once
+    samples: dict[str, str] = Field(default_factory=dict)
 
     @classmethod
     def stock(cls, voice_id: str, name: str, description: str) -> "ResidentVoice":
@@ -96,13 +101,40 @@ class VoiceStyle(BaseModel):
         )
 
 
+def _offered_language(language: str) -> str:
+    if language not in PREVIEW_LANGUAGE_CODES:
+        raise ValueError(UNKNOWN_LANGUAGE)
+    return language
+
+
+class PreviewLanguage(BaseModel):
+    """A language the previews can speak in: its code and its own name ("Polski")."""
+
+    code: str
+    name: str
+
+
+class PreviewLanguageChoice(BaseModel):
+    """The language the app's previews speak in."""
+
+    language: str
+
+    @field_validator("language")
+    @classmethod
+    def offered_language(cls, language: str) -> str:
+        return _offered_language(language)
+
+
 class ResidentVoices(BaseModel):
-    """The voice she hears now and how it speaks, and every voice the owner may pick for her."""
+    """The voice she hears now and how it speaks, every voice the owner may pick for her, and the
+    language the previews speak in."""
 
     current: str
     style: VoiceStyle
     emotions: list[str]
     voices: list[ResidentVoice]
+    language: str
+    languages: list[PreviewLanguage]
 
 
 class VoiceChoice(BaseModel):
@@ -124,6 +156,13 @@ class VoicePreviewRequest(BaseModel):
     voice_id: str
     text: Annotated[str, StringConstraints(strip_whitespace=True, max_length=PREVIEW_TEXT_MAX)] | None = None
     style: VoiceStyle | None = None
+    # The language to speak in (a typed line is translated first); None = the preview language
+    language: str | None = None
+
+    @field_validator("language")
+    @classmethod
+    def offered_language(cls, language: str | None) -> str | None:
+        return None if language is None else _offered_language(language)
 
 
 class SampleLink(BaseModel):

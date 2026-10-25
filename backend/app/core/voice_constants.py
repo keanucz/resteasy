@@ -41,6 +41,59 @@ PREVIEW_TEXT_MAX = 200
 # What a preview says when the app sends no text, with her preferred name
 PREVIEW_TEXT = "Hello {name}, it's time to take your heart tablets."
 
+# The languages the app's previews can speak in (Settings > Voice), as Cartesia's sonic-3 codes,
+# each named in its own language. Only the previews follow it: the pillow and alert calls keep hers.
+PREVIEW_LANGUAGE = "en"
+PREVIEW_LANGUAGES: tuple[tuple[str, str], ...] = (
+    ("en", "English"),
+    ("es", "Español"),
+    ("fr", "Français"),
+    ("de", "Deutsch"),
+    ("it", "Italiano"),
+    ("pt", "Português"),
+    ("pl", "Polski"),
+    ("zh", "中文"),
+    ("ja", "日本語"),
+    ("hi", "हिन्दी"),
+)
+PREVIEW_LANGUAGE_CODES = frozenset(code for code, _ in PREVIEW_LANGUAGES)
+# The English name of each, for the translator's instructions
+LANGUAGE_ENGLISH_NAMES = {
+    "en": "English",
+    "es": "Spanish",
+    "fr": "French",
+    "de": "German",
+    "it": "Italian",
+    "pt": "Portuguese",
+    "pl": "Polish",
+    "zh": "Mandarin Chinese",
+    "ja": "Japanese",
+    "hi": "Hindi",
+}
+# The default preview line in each language, with her preferred name
+PREVIEW_TEXTS = {
+    "en": PREVIEW_TEXT,
+    "es": "Hola {name}, es hora de tomar tus pastillas para el corazón.",
+    "fr": "Bonjour {name}, c'est l'heure de prendre tes comprimés pour le cœur.",
+    "de": "Hallo {name}, es ist Zeit für deine Herztabletten.",
+    "it": "Ciao {name}, è ora di prendere le tue pastiglie per il cuore.",
+    "pt": "Olá {name}, está na hora de tomar os seus comprimidos para o coração.",
+    "pl": "Cześć {name}, czas wziąć tabletki na serce.",
+    "zh": "{name}，你好，该吃心脏药了。",
+    "ja": "{name}さん、こんにちは。心臓のお薬を飲む時間ですよ。",
+    "hi": "नमस्ते {name}, दिल की दवा लेने का समय हो गया है।",
+}
+# A typed preview line is translated with Claude before it is spoken in another language; the
+# line as typed is spoken if that fails or takes longer than this
+TRANSLATE_MODEL = "claude-haiku-5-5"
+TRANSLATE_TIMEOUT_S = 8
+TRANSLATE_MAX_TOKENS = 400
+TRANSLATE_SYSTEM = (
+    "Translate the user's text into {language} for a voice to read aloud to an older woman. Keep "
+    "names as they are. Reply with the translation only, no quotes and no notes."
+)
+UNKNOWN_LANGUAGE = "That language is not offered for previews"
+
 # How the pillow speaks to her, set by the owner (residents.voice_speed, voice_volume, voice_emotion).
 # Bounds are Cartesia's own for sonic-3 (generation_config); the defaults are how it always spoke.
 SPEED_MIN, SPEED_MAX = 0.6, 1.5
@@ -56,6 +109,19 @@ EMOTION_LANGUAGE = "en"
 # One short line per voice, spoken once and kept in Supabase Storage, so Play in the app is instant
 # and never asks Cartesia again. Casual and the same for everyone, so a stock voice's sample is shared.
 SAMPLE_TEXT = "Hi, this is the voice your pillow will use."
+# The same line in each preview language
+SAMPLE_TEXTS = {
+    "en": SAMPLE_TEXT,
+    "es": "Hola, esta es la voz que usará tu almohada.",
+    "fr": "Bonjour, voici la voix que ton oreiller va utiliser.",
+    "de": "Hallo, das ist die Stimme, die dein Kissen benutzen wird.",
+    "it": "Ciao, questa è la voce che userà il tuo cuscino.",
+    "pt": "Olá, esta é a voz que o seu travesseiro vai usar.",
+    "pl": "Cześć, to jest głos, którego będzie używać twoja poduszka.",
+    "zh": "你好，这是你的枕头将会使用的声音。",
+    "ja": "こんにちは。これがあなたの枕の声です。",
+    "hi": "नमस्ते, यह वह आवाज़ है जो आपका तकिया इस्तेमाल करेगा।",
+}
 SAMPLE_SPEED = 1.0
 SAMPLE_EMOTION = "content"
 SAMPLES_BUCKET = "voice-samples"
@@ -129,5 +195,7 @@ UNKNOWN_EMOTION = "That tone is not offered"
 # Tables and columns the voice features use
 PRONUNCIATIONS_TABLE = "pronunciations"
 PRONUNCIATION_COLUMNS = "*, creator:contacts(full_name)"
+# The resident's column with the language the app's previews speak in
+PREVIEW_LANGUAGE_COLUMN = "preview_language"
 # The resident's columns that say how the pillow speaks
 STYLE_COLUMNS = ("voice_speed", "voice_volume", "voice_emotion")

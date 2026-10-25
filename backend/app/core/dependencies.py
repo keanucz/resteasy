@@ -55,6 +55,7 @@ from app.schemas.resident_photo import PhotoUpload
 from app.schemas.voice import CloneUpload
 from app.sensors.readings_recorder import ReadingsRecorder
 from app.voice.cartesia import Cartesia
+from app.voice.translate import Translator
 
 
 def get_supabase(request: Request) -> AsyncClient:
@@ -278,6 +279,14 @@ def get_cartesia(request: Request) -> Cartesia:
 
 
 CartesiaDep = Annotated[Cartesia, Depends(get_cartesia)]
+
+
+def get_translator(request: Request) -> Translator:
+    """Return the process-wide preview translator (it translates nothing without a Claude key)."""
+    return getattr(request.app.state, "translator", None) or Translator(None)
+
+
+TranslatorDep = Annotated[Translator, Depends(get_translator)]
 
 
 async def clone_upload(

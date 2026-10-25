@@ -6,6 +6,7 @@ import { Button } from '@/components/Button';
 import { type Status, StatusLine } from '@/components/Feedback';
 import { ListRow } from '@/components/List';
 import { phaseOf, previewError } from '@/components/PlayButton';
+import { OptionSelect } from '@/components/OptionSelect';
 import { ListRowSkeleton, SkeletonGroup } from '@/components/Skeleton';
 import { ChevronIcon } from '@/components/TabIcons';
 import { VoiceRow } from '@/components/voice/VoiceRow';
@@ -22,7 +23,8 @@ import { sampleUri, type Voice } from '@/services/voice';
  */
 export const VoicePicker = memo(function VoicePicker({ name }: { name: string }) {
   const { colors } = useTheme();
-  const { residentId, choice, failed, isOwner, reload, choose } = useVoices(name);
+  const { residentId, choice, failed, isOwner, reload, choose, setLanguage } = useVoices(name);
+  const language = choice?.language ?? 'en';
   const { playing, toggle, stop } = useVoicePlayer();
   const [status, setStatus] = useState<Status | null>(null);
 
@@ -30,11 +32,25 @@ export const VoicePicker = memo(function VoicePicker({ name }: { name: string })
     (voice: Voice) => {
       if (!residentId) return;
       setStatus(null);
-      toggle(voice.id, () => loadOnce(`sample|${voice.id}`, () => sampleUri(residentId, voice))).catch((e) =>
-        setStatus({ kind: 'error', text: previewError(e) }),
+      toggle(voice.id, () => loadOnce(`sample|${language}|${voice.id}`, () => sampleUri(residentId, voice, language))).catch(
+        (e) => setStatus({ kind: 'error', text: previewError(e) }),
       );
     },
-    [residentId, toggle],
+    [residentId, toggle, language],
+  );
+
+  const changeLanguage = useCallback(
+    async (code: string) => {
+      stop();
+      setStatus(null);
+      setStatus(await setLanguage(code));
+    },
+    [setLanguage, stop],
+  );
+
+  const languageOptions = useMemo(
+    () => choice?.languages.map((l) => ({ value: l.code, label: l.name })) ?? [],
+    [choice?.languages],
   );
 
   const pick = useCallback(
@@ -108,6 +124,16 @@ export const VoicePicker = memo(function VoicePicker({ name }: { name: string })
           `Choose the voice ${name} hears.`
         )}
       </Text>
+
+      {languageOptions.length > 1 ? (
+        <OptionSelect
+          label="Preview language"
+          value={language}
+          options={languageOptions}
+          onChange={changeLanguage}
+          disabled={!isOwner}
+        />
+      ) : null}
 
       {choice.voices.length === 0 ? (
         <Text className="font-sans text-base text-ink-muted">Voice choices arrive with the next pillow update.</Text>

@@ -56,6 +56,8 @@ type StyleSectionProps = {
   saved: VoiceStyle;
   emotions: string[];
   isOwner: boolean;
+  /** The language "Hear it" speaks in (a typed line is translated first). */
+  language: string;
   player: VoicePlayer;
   onSaved: (style: VoiceStyle) => void;
 };
@@ -64,7 +66,17 @@ type StyleSectionProps = {
  * How the pillow speaks: speed, volume and tone. Try it in her voice before saving; only the
  * owner saves, everyone else sees it in words (the page says why, once, under its title).
  */
-export function StyleSection({ residentId, name, voiceId, saved, emotions, isOwner, player, onSaved }: StyleSectionProps) {
+export function StyleSection({
+  residentId,
+  name,
+  voiceId,
+  saved,
+  emotions,
+  isOwner,
+  language,
+  player,
+  onSaved,
+}: StyleSectionProps) {
   const [speed, setSpeed] = useState(nearest(SPEEDS, saved.speed));
   const [volume, setVolume] = useState(nearest(VOLUMES, saved.volume));
   const [emotion, setEmotion] = useState(saved.emotion);
@@ -87,8 +99,8 @@ export function StyleSection({ residentId, name, voiceId, saved, emotions, isOwn
     setStatus(null);
     player
       .toggle('style', () =>
-        loadOnce(`preview|${residentId}|${voiceId}|${text}|${JSON.stringify(draft)}`, () =>
-          previewVoice(residentId, voiceId, text, draft),
+        loadOnce(`preview|${residentId}|${voiceId}|${text}|${JSON.stringify(draft)}|${language}`, () =>
+          previewVoice(residentId, voiceId, text, draft, language),
         ),
       )
       .catch((e) => setStatus({ kind: 'error', text: previewError(e) }));

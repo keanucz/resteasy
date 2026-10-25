@@ -20,6 +20,8 @@ type AccentSectionProps = {
   name: string;
   /** The voice she hears now, the one a copy is made of. */
   voice: Voice;
+  /** The language samples play in. */
+  language: string;
   player: VoicePlayer;
   onMade: (voice: Voice) => void;
   onUse: (voiceId: string) => unknown;
@@ -35,6 +37,7 @@ export function AccentSection({
   accentsFailed,
   name,
   voice,
+  language,
   player,
   onMade,
   onUse,
@@ -53,10 +56,10 @@ export function AccentSection({
 
   const play = useCallback(
     (v: Voice) =>
-      toggle(v.id, () => loadOnce(`sample|${v.id}`, () => sampleUri(residentId, v))).catch((e) =>
+      toggle(v.id, () => loadOnce(`sample|${language}|${v.id}`, () => sampleUri(residentId, v, language))).catch((e) =>
         setStatus({ kind: 'error', text: previewError(e) }),
       ),
-    [residentId, toggle],
+    [residentId, toggle, language],
   );
 
   const choose = useCallback((id: string) => {

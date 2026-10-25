@@ -4,7 +4,7 @@ import type { Status } from '@/components/Feedback';
 import { usePillow } from '@/hooks/usePillow';
 import { usePillowLink } from '@/hooks/usePillowLink';
 import { ApiError } from '@/services/api';
-import { chooseVoice, readVoices, type Voice, type VoiceChoice } from '@/services/voice';
+import { chooseVoice, readVoices, saveLanguage, type Voice, type VoiceChoice } from '@/services/voice';
 
 /** Why choosing a voice failed. */
 function chooseError(e: unknown, name: string): string {
@@ -69,6 +69,8 @@ export type Voices = {
   choose: (voiceId: string) => Promise<Status | null>;
   /** Adds a voice just made (a clone or an accent copy) to the list without a reload. */
   add: (voice: Voice) => void;
+  /** Switches the previews to `language` at once (optimistic), and says how saving it went. */
+  setLanguage: (language: string) => Promise<Status | null>;
   setChoice: (update: (choice: VoiceChoice) => VoiceChoice) => void;
 };
 
@@ -167,6 +169,23 @@ export function useVoices(name: string): Voices {
     [setChoice],
   );
 
+  const setLanguage = useCallback(
+    async (language: string): Promise<Status | null> => {
+      const shown = residentId ? cache.get(residentId)?.choice : undefined;
+      if (!residentId || !shown || shown.language === language) return null;
+      const before = shown.language;
+      setChoice((c) => ({ ...c, language }));
+      try {
+        await saveLanguage(residentId, language);
+        return null;
+      } catch (e) {
+        setChoice((c) => (c.language === language ? { ...c, language: before } : c));
+        return { kind: 'error', text: chooseError(e, name) };
+      }
+    },
+    [residentId, name, setChoice],
+  );
+
   const failed = failedFor !== null && failedFor === residentId && !choice;
-  return { residentId, choice, failed, isOwner, reload, choose, add, setChoice };
+  return { residentId, choice, failed, isOwner, reload, choose, add, setChoice, setLanguage };
 }
