@@ -208,3 +208,26 @@ def test_saying_no_help_is_not_asking_for_it(text):
     from judge import asked_for_help
 
     assert not asked_for_help(text)
+
+
+@pytest.mark.parametrize("text", [
+    "Help!", "help help", "please help", "help me", "help me up", "I need help", "can you help",
+    "pillow, help", "get me help", "somebody send help", "can someone help me",
+])
+def test_help_asked_of_the_pillow_counts(text):
+    from judge import asked_for_help
+
+    assert asked_for_help(text)
+
+
+@pytest.mark.parametrize("text", [
+    "An agentic carer. Agentic help. Tutor.",  # venue chatter heard during a real check-in
+    "Okay, can you like help me think?",
+    "can you help me with the slides",
+    "that really helps a lot, thanks",
+    "the help desk said they would sort it out tomorrow",
+])
+def test_help_in_passing_chatter_does_not(text):
+    from judge import asked_for_help
+
+    assert not asked_for_help(text)

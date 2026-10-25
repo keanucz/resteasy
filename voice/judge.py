@@ -70,16 +70,34 @@ def keyword_judge(_question: str, text: str) -> Verdict:
 # An explicit call for help: only these phone family at once. A reply Claude merely reads as distress
 # (a TV, chatter across the room: "I didn't bleed properly") still escalates, up the gentle ladder.
 _ASKED_FOR_HELP = re.compile(
-    r"\b(help|hurt|hurts|injured|fallen|i fell|fell down|can'?t get up|cannot get up|can'?t move|"
+    r"\b(hurt|hurts|injured|fallen|i fell|fell down|can'?t get up|cannot get up|can'?t move|"
     r"cannot move|bleeding|ambulance|chest pain|can'?t breathe|cannot breathe|"
     r"call (?:someone|somebody|an ambulance|my \w+|\w+ for me))\b")
 _NO_HELP = re.compile(r"\b(?:don'?t|do not|no|not)\s+(?:need\s+)?(?:any\s+)?(?:help|hurt)\b")
+# The word "help" alone is chatter as often as a plea ("agentic help", "that helps"): it counts only
+# when asked of the pillow ("help me", "please help", "I need help", "pillow, help") or when it is
+# most of a short reply ("Help!"). Asking for help with a task ("help me think") is not a plea.
+_HELP_ASKED = re.compile(
+    r"\b(?:help (?:me|us)\b(?! (?:think|with|figure|understand|out|decide|find|pick|choose|write|"
+    r"fix|do|make|build|name|come|plan|remember))|please,? help|help,? please|need (?:some |your )?help|"
+    r"get (?:me |us |some )?help|send help|call for help|can (?:you|someone|somebody) help\b(?! (?:me |us )?"
+    r"(?:think|with|figure|understand|out|decide|find|pick|choose|write|fix|do|make|build|name|come|plan))|"
+    r"pillow,? help)")
+_SHORT_REPLY_WORDS = 4
+
+
+def _asked_pillow_for_help(t: str) -> bool:
+    if _HELP_ASKED.search(t):
+        return True
+    words = re.findall(r"[a-z']+", t)
+    return "help" in words and len(words) <= _SHORT_REPLY_WORDS
 
 
 def asked_for_help(text: str) -> bool:
     """She asked for help in so many words ("I'm hurt, please help", "I've fallen"): call at once."""
     t = text.lower().replace("’", "'")
-    return bool(_ASKED_FOR_HELP.search(t)) and not _NO_HELP.search(t)
+    asked = bool(_ASKED_FOR_HELP.search(t)) or _asked_pillow_for_help(t)
+    return asked and not _NO_HELP.search(t)
 
 
 def said_fine(text: str) -> bool:
