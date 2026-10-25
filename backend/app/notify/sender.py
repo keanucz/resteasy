@@ -2,9 +2,11 @@
 
     sms   iMessage through the Photon sidecar; if that fails or isn't set up, Twilio SMS.
           Only to contacts who agreed to texts (contacts.sms_consent).
-    call  a Twilio call that plays the alert once in the pillow's own voice (Cartesia; Twilio's
-          voice reads it if that can't be made in time). If it's rejected, not answered or goes to
-          voicemail, the same alert follows as a text (the consent rule above still applies).
+    call  a live call from a Cartesia Line agent that says the alert in the pillow's voice and
+          answers their questions (app/notify/line.py); if Line isn't set up or refuses, a Twilio
+          call that plays the alert once in the pillow's own voice (Cartesia; Twilio's voice reads
+          it if that can't be made in time). If it's rejected, not answered or goes to voicemail,
+          the same alert follows as a text (the consent rule above still applies).
 
 Night Watch's ladder never waits on this: it queues the row and moves on, and this ticker sends
 what is queued. Only pillows in NOTIFY_PILLOW_IDS reach real phones (test pillows stay queued),
@@ -22,12 +24,15 @@ from supabase import AsyncClient
 from app.core.config import Settings
 from app.crud.night_log import finish_notification, list_sendable_notifications, log_action
 from app.notify.call_audio import CallAudio
+from app.notify.line import CartesiaLine
 from app.notify.notify_constants import (
     AGENT,
     CALL_MISSED,
     CALL_POLL_S,
     CALL_WATCH_S,
     FALLBACK_TEXT,
+    LINE_REF,
+    LINE_WATCH_S,
     MAX_AGE_S,
     SENT_CHANNELS,
 )
@@ -51,11 +56,12 @@ class NotificationSender:
     """Sends the queued rows; each provider is optional (None = not configured)."""
 
     def __init__(self, imessage: IMessage | None, twilio: Twilio | None, pillow_ids: list[str],
-                 audio: CallAudio | None = None) -> None:
+                 audio: CallAudio | None = None, line: CartesiaLine | None = None) -> None:
         self.imessage = imessage
         self.twilio = twilio
         self.pillow_ids = pillow_ids
         self.audio = audio  # None: Twilio's voice reads every call
+        self.line = line  # None: every call is a Twilio one
         # calls being checked and call audio waiting to be deleted (kept so they aren't collected)
         self._followups: set[asyncio.Task] = set()
 
@@ -64,11 +70,12 @@ class NotificationSender:
                       cartesia: Cartesia | None = None) -> "NotificationSender":
         imessage, twilio = IMessage.from_settings(settings), Twilio.from_settings(settings)
         audio = CallAudio(cartesia, db) if cartesia is not None and db is not None else None
-        return cls(imessage, twilio, settings.notify_pillow_ids, audio)
+        line = CartesiaLine.from_settings(settings, db)
+        return cls(imessage, twilio, settings.notify_pillow_ids, audio, line)
 
     @property
     def enabled(self) -> bool:
-        return bool((self.imessage or self.twilio) and self.pillow_ids)
+        return bool((self.imessage or self.twilio or self.line) and self.pillow_ids)
 
     async def tick(self, db: AsyncClient) -> None:
         """Send every queued row that is recent and on an enabled pillow, oldest first."""
@@ -95,7 +102,7 @@ class NotificationSender:
         if not phone:
             return Delivery(False, error="no phone number on record")
         if row["channel"] == "call":
-            return await self._call(phone, text)
+            return await self._call(row, phone, text)
         if not contact.get("sms_consent"):
             return Delivery(False, error="has not agreed to texts (sms_consent)")
         return await self._text(phone, text)
@@ -115,14 +122,21 @@ class NotificationSender:
                 failures.append(f"SMS {err}")
         return Delivery(False, error="; ".join(failures) or "no iMessage or SMS sender configured")
 
-    async def _call(self, phone: str, text: str) -> Delivery:
+    async def _call(self, row: dict[str, Any], phone: str, text: str) -> Delivery:
+        failed = None  # why not Line, if it was tried
+        if self.line is not None:
+            try:
+                return Delivery(True, "call", f"{LINE_REF}{await self.line.call(row, phone)}")
+            except DeliveryError as err:
+                log.warning("Line call failed (%s); calling through Twilio", err)
+                failed = str(err)
         if self.twilio is None:
-            return Delivery(False, error="no Twilio configured for calls")
+            return Delivery(False, error=failed or "no Twilio configured for calls")
         audio = await self.audio.make(text) if self.audio is not None else None
         try:
-            return Delivery(True, "call", await self.twilio.call(phone, text, audio and audio[1]))
+            return Delivery(True, "call", await self.twilio.call(phone, text, audio and audio[1]), failed)
         except DeliveryError as err:
-            return Delivery(False, error=f"call {err}")
+            return Delivery(False, error="; ".join(filter(None, [failed, f"call {err}"])))
         finally:
             if audio is not None:
                 self._keep(self.audio.forget_later(audio[0]))
@@ -131,7 +145,8 @@ class NotificationSender:
         """Wait to see whether alert call `sid` reached a person; if not, text the alert instead.
         Never raises."""
         try:
-            missed = await self._missed(sid)
+            missed = await (self._missed_line(sid.removeprefix(LINE_REF)) if sid.startswith(LINE_REF)
+                            else self._missed(sid))
         except DeliveryError as err:
             log.warning("Could not check call %s: %s", sid, err)
             return
@@ -166,6 +181,17 @@ class NotificationSender:
                 return CALL_MISSED[status]
             if status == "completed" or answered_by == "human":
                 return None
+            await asyncio.sleep(CALL_POLL_S)
+        return None
+
+    async def _missed_line(self, call_id: str) -> str | None:
+        """Like _missed, for a Line call: read once it's over (a conversation can run minutes)."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + LINE_WATCH_S
+        while loop.time() < deadline:
+            done, missed = await self.line.missed(call_id)
+            if done:
+                return missed
             await asyncio.sleep(CALL_POLL_S)
         return None
 

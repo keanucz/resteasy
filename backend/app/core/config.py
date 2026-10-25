@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_from_number: str = ""
+    # Cartesia Line for live alert calls (scripts/setup_line.py prints both); empty = Twilio calls
+    cartesia_line_agent_id: str = ""
+    cartesia_line_number_id: str = ""
     # Pillows whose alerts reach real phones; test pillows' rows are never sent
     notify_pillow_ids: list[str] = DEFAULT_NOTIFY_PILLOW_IDS
     # Seconds-long Night Watch and sleep timings for the judged demo (night_watch.DEMO_TIMINGS);

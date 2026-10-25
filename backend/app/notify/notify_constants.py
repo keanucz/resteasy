@@ -41,3 +41,18 @@ MAX_AGE_S = 15 * 60
 
 AGENT = "notifier"  # its name in agent_log, which the family app shows live
 FALLBACK_TEXT = "Your family pillow needs you to check in. Please open the app."
+
+# Live alert calls on Cartesia Line (app/notify/line.py, set up by scripts/setup_line.py): a
+# Claude agent speaks the alert in the pillow's voice and answers questions. The Twilio call above
+# is the fallback whenever Line isn't configured or refuses the call.
+LINE_API_PATH = "/agents/calls"
+LINE_AGENTS_PATH = "/v1/agents"
+LINE_AGENT_NAME = "Pillow alert calls"  # the base agent; one copy per other voice, named after it
+LINE_RING_S = CALL_RING_S
+# A conversation outlasts a played alert: watch longer before counting no news as reached
+LINE_WATCH_S = 10 * 60
+LINE_REF = "line:"  # notifications.provider_ref prefix for these calls
+LINE_VOICEMAIL_TOOL = "left_voicemail"  # the agent calls it when voicemail answers
+LINE_DONE = ("completed", "failed")
+LINE_MISSED = {"dial_no_answer": "didn't answer", "dial_busy": "rejected the call",
+               "dial_failed": "couldn't be called", "error": "couldn't be called"}
