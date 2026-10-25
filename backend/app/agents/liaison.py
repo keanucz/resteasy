@@ -39,7 +39,9 @@ message, recent events, and what the pillow heard her say, which may be mis-tran
 for that channel:
 - app: one or two short sentences, the headline first ("Mum's been up 25 min and didn't answer").
 - sms: under 300 characters, plain, includes when she got up and what she said if anything.
-- call: a short script to be read aloud, calm, one fact per sentence.
+- call: read aloud twice and may land on voicemail, so at most 35 words in 3 or 4 short \
+sentences: who it's about, when she got up, that she didn't answer (or what she said), and the \
+ask. No greeting or sign-off.
 Keep every fact; add nothing you were not told. Quote what she said if it helps. Never guess a \
 cause, never name or hint at a medical condition or diagnosis, never give medical advice. Ask the \
 contact to check on her and, if they can't reach her, to go round or call for help. Never say the \
@@ -70,6 +72,7 @@ TOOLS = [
      "input_schema": SPEAK_SCHEMA},
 ]
 MAX_MESSAGE = 600  # longer wordings keep the fixed text instead
+MAX_CALL_WORDS = 40  # a call script is read twice; a longer one keeps the fixed text
 
 
 @dataclass(frozen=True)
@@ -102,7 +105,9 @@ def apply_tool_calls(planned: list[Alert], calls: list[Any]) -> list[Action]:
         args = block.input if isinstance(block.input, dict) else {}
         if block.name == SEND_TOOL:
             text = str(args.get("message", "")).strip()
-            if text and len(text) <= MAX_MESSAGE:
+            too_long = len(text) > MAX_MESSAGE or (
+                args.get("channel") == "call" and len(text.split()) > MAX_CALL_WORDS)
+            if text and not too_long:
                 wording.setdefault((str(args.get("contact")), str(args.get("channel"))), text)
         elif block.name == SPEAK_TOOL and say is None:
             text = str(args.get("text", "")).strip()

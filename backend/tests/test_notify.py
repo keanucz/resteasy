@@ -191,7 +191,7 @@ def test_twilio_sms_and_call_requests():
     assert seen[0] == ("/2010-04-01/Accounts/AC1/Messages.json",
                        {"To": [PHONE], "From": ["+15550000000"], "Body": ["hi"]})
     assert seen[1][0].endswith("/Calls.json") and "Mum &amp; Dad &lt;now&gt;" in seen[1][1]["Twiml"][0]
-    assert seen[1][1]["MachineDetection"] == ["Enable"] and seen[1][1]["Timeout"] == ["25"]
+    assert seen[1][1]["MachineDetection"] == ["DetectMessageEnd"] and seen[1][1]["Timeout"] == ["25"]
 
 
 def test_twilio_call_status():

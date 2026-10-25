@@ -7,6 +7,9 @@ HTTP_TIMEOUT_S = 15
 # Alert calls: ring this long before Twilio gives up ("no-answer"), shorter than most voicemail
 # pickups. Twilio's answering-machine detection tells voicemail from a person ("machine_*").
 CALL_RING_S = 25
+# Wait for the voicemail beep before speaking, so a voicemail holds the whole script rather than
+# the end of it talked over the greeting; a person who answers still hears it straight away
+MACHINE_DETECTION = "DetectMessageEnd"
 # After placing a call the sender checks how it went this often, for at most this long; a call
 # that was rejected, not answered or went to voicemail is followed by a text with the same alert
 CALL_POLL_S = 3

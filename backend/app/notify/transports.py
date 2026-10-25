@@ -8,7 +8,13 @@ from xml.sax.saxutils import escape
 import httpx
 
 from app.core.config import Settings
-from app.notify.notify_constants import CALL_RING_S, HTTP_TIMEOUT_S, TWILIO_API, TWILIO_VOICE
+from app.notify.notify_constants import (
+    CALL_RING_S,
+    HTTP_TIMEOUT_S,
+    MACHINE_DETECTION,
+    TWILIO_API,
+    TWILIO_VOICE,
+)
 
 
 class DeliveryError(Exception):
@@ -69,7 +75,7 @@ class Twilio:
         line = f'<Say voice="{TWILIO_VOICE}">{escape(say)}</Say>'
         twiml = f'<Response>{line}<Pause length="1"/>{line}</Response>'
         form = {"To": to, "From": self.from_number, "Twiml": twiml,
-                "Timeout": str(CALL_RING_S), "MachineDetection": "Enable"}
+                "Timeout": str(CALL_RING_S), "MachineDetection": MACHINE_DETECTION}
         return await self._create("Calls.json", form)
 
     async def call_status(self, sid: str) -> tuple[str, str | None]:

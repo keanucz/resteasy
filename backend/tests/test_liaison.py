@@ -58,6 +58,15 @@ def test_apply_drops_blank_wording():
     assert out == PLANNED
 
 
+def test_apply_keeps_the_fixed_text_for_a_long_call_script():
+    planned = [Alert("Sarah", "call", FACTS)]
+    short = "Margaret got up at 03:10 and isn't back in bed. She didn't answer. Please check on her."
+    rambly = " ".join(["Margaret is still up and we are not sure how she is."] * 5)
+    assert apply_tool_calls(planned, [tool_use(SEND_TOOL, contact="Sarah", channel="call", message=short)]) \
+        == [Alert("Sarah", "call", short)]
+    assert apply_tool_calls(planned, [tool_use(SEND_TOOL, contact="Sarah", channel="call", message=rambly)]) \
+        == planned
+
 def test_no_client_means_the_fixed_messages():
     liaison = Liaison(client=None)
     assert run(liaison.compose(SITUATION)) == PLANNED
