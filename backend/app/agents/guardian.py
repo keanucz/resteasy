@@ -1,7 +1,7 @@
 """Guardian: the last check before anything leaves the agents (coord/AGENT_FLOW.md section 5).
 
-Plain code, no model: every device command, spoken line, family message and config change goes
-through `check()` / `check_config()` and gets a `Verdict`. A blocked action may come with a safe
+Plain code, no model: every device command, spoken line and family message goes through `check()`
+and gets a `Verdict`. A blocked action may come with a safe
 `replacement` (a capped brightness, a message with the medical claim removed), because at 3 am a
 blocked alert must still reach someone. The caller logs every verdict to `agent_log.guardian`,
 which the family app shows live.
@@ -11,7 +11,6 @@ Rules (defaults, all in config):
 - words: no diagnosis or medical claim in anything spoken or sent ("may have had a stroke").
 - alerts: at most N per contact per night; no repeat on one channel inside the step wait; SMS only
   to contacts who opted in.
-- config: the Morning Brief may only change whitelisted keys, within bounds.
 """
 
 from __future__ import annotations
@@ -25,9 +24,7 @@ from zoneinfo import ZoneInfo
 from app.agents.night_watch import Action, Alert, Command, Say
 
 NIGHT_BRIGHTNESS_MAX = 40
-CONFIG_BOUNDS: dict[str, tuple[int, int]] = {"checkin_timeout_min": (10, 30), "path_light_pct": (0, 40)}
-CONFIG_TIMES = ("quiet_start", "quiet_end")
-CONFIG_WHITELIST = (*CONFIG_BOUNDS, *CONFIG_TIMES)
+CONFIG_BOUNDS: dict[str, tuple[int, int]] = {"checkin_timeout_min": (10, 30)}
 
 _COMMANDS: dict[str, dict[str, tuple]] = {  # cmd -> arg -> (lo, hi) or allowed values
     "set_light": {"brightness_pct": (0, 100), "color": ("warm", "amber", "off"), "fade_s": (0, 60)},
@@ -187,34 +184,6 @@ class Guardian:
         key = (self._night_key(ts), a.contact)
         self._sent[key] = self._sent.get(key, 0) + 1
         self._last[(a.contact, a.channel)] = ts
-
-    # ---------- config (Morning Brief) ----------
-
-    def check_config(self, diff: dict[str, Any]) -> Verdict:
-        """Keep only whitelisted keys, clamp numbers to their bounds, validate times."""
-        clean, reasons = {}, []
-        for key, value in diff.items():
-            if key not in CONFIG_WHITELIST:
-                reasons.append(f"{key} is not a key the agents may change")
-            elif key in CONFIG_BOUNDS:
-                lo, hi = CONFIG_BOUNDS[key]
-                if not isinstance(value, int | float) or isinstance(value, bool):
-                    reasons.append(f"{key} must be a number")
-                    continue
-                clean[key] = min(max(value, lo), hi)
-                if clean[key] != value:
-                    reasons.append(f"{key} {value} clamped to {clean[key]} ({lo}-{hi})")
-            else:
-                try:
-                    time.fromisoformat(str(value))
-                    clean[key] = value
-                except ValueError:
-                    reasons.append(f"{key} {value!r} is not a time")
-        if reasons:
-            return Verdict(False, "; ".join(reasons), clean)
-        return Verdict(True)
-
-    # ---------- on-call roster (Fetch.ai coordinator) ----------
 
     def check_on_call(self, contacts: list[dict[str, Any]], contact_id: str, on_call: bool) -> Verdict:
         """Agents may take a contact off call, but never the last one: someone is always tried first.

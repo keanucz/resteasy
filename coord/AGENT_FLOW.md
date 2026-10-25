@@ -69,20 +69,13 @@ you." There is no second pillow: the adult child only has the app.
 - Caps: brightness ≤ 40 % at night, volume cap, pulse within 4–14 bpm.
 - Max alerts per night per contact; no repeats inside the step wait.
 - No medical claims or diagnoses in any message ("may have had a stroke" → blocked and rewritten).
-- No raw audio stored; transcripts only, deleted after the Morning Brief.
-- Config changes only to whitelisted keys (section 6).
+- No raw audio stored; transcripts only.
 - **Demo moment:** Claude drafts "she might have had a stroke"; Guardian blocks it on screen and the
   family gets "Mum got up 25 min ago, hasn't come back to bed and didn't answer."
 
 Every decision goes to `agent_log` with `{ts, agent, intent, tool, args, guardian: allowed|blocked, reason}`.
 
-## 6. Morning Brief (Factory Droid, 06:00 trigger)
-
-Droid reads the night's events and `agent_log`, writes a short family note (trips, longest trip,
-anything unusual) and proposes a config diff **limited to** `checkin_timeout_min` (clamped 10–30),
-`quiet_hours` and `path_light_pct`. The diff is shown in the family app; nothing else is writable.
-
-## 7. Family agents + pillow coordinator (Fetch.ai: uAgents on Agentverse, used through ASI:One)
+## 6. Family agents + pillow coordinator (Fetch.ai: uAgents on Agentverse, used through ASI:One)
 
 One agent per family member plus one coordinator for the pillow, all mailbox agents on Agentverse
 (`agents/fetch/README.md`). Each family member talks to their own agent in ASI:One: "How was Mum's
@@ -93,9 +86,9 @@ API and its Guardian. Every evening (21:00 her time, or "plan tonight") the coor
 family agent in parallel who can be called first tonight and sets `contacts.on_call` through
 `PUT /api/pillows/{id}/roster/{contact}` (Guardian: the last on-call contact stays on). Night Watch
 only uses `on_call` for the ORDER of the ladder, so agents can make help come sooner, never later.
-The backend never calls the agents; with them off, everything above section 7 is unchanged.
+The backend never calls the agents; with them off, everything above section 6 is unchanged.
 
-## 8. Stretch: Settle
+## 7. Stretch: Settle
 
 `restless` while `IN_BED` → breathing `pulse` 12 → 6 bpm for 10 min, optional story or music on
 request; checks that `motion` drops.
@@ -107,7 +100,6 @@ request; checks that `motion` drops.
 | Core | Anthropic | Claude tool loop + Guardian ("knows where it could go wrong") |
 | Core | Cartesia | check-in voice, goodnight playback |
 | Core | Microsoft "Built for the Real World" | healthcare framing, measurable (time on the floor), responsible design |
-| Bet | Factory Droid | Morning Brief: designed trigger, whitelisted access, visible diff |
 | Bet | Fetch.ai | family agent in ASI:One |
 | Dropped | Atlassian (must be a Forge app for Jira/Confluence), Moss and ElevenLabs (second voice stack), Backboard, Spacetime and Convex (backend is Supabase, not a sponsor), MLH Tiger Data (only if night history moved there) | |
 
@@ -117,7 +109,7 @@ request; checks that `motion` drops.
 2. Check-in: Cartesia voice + Claude classify.
 3. Guardian + ladder: in-app alert first, then SMS.
 4. `agent_log` live in the family app.
-5. Morning Brief Droid. 6. Fetch family agent. 7. Settle.
+5. Fetch family agent. 6. Settle.
 
 ## Needs from other lanes
 

@@ -60,7 +60,7 @@ class NightWatchConfig:
 
 @dataclass(frozen=True)
 class Event:
-    """A derived pillow event, for the events table (and the night baseline / Morning Brief)."""
+    """A derived pillow event, for the events table (and the night baseline / night summary)."""
 
     ts: float
     type: str

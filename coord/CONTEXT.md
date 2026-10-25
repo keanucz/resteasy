@@ -46,8 +46,7 @@ Somnox 2 is a $600 breathing cushion on a fixed program. Nobody owns the night w
    that restlessness drops). 6. Routine: recurring reminders (meds, call family, walk the dog),
    buzzer then voice, never advises dosing. Built, see the decisions log (Sat 24 Oct, reminders).
 7. Environment (DHT11 room temp). 8. Goodnight Messenger (ASI:One → plays when she lies down).
-9. Story Keeper (Moss, opt-in). 10. Morning Brief (Factory Droid at 06:00: family note, trend
-   flag, config diff limited to whitelisted keys).
+9. Story Keeper (Moss, opt-in).
 
 Design rule: timers and thresholds are plain code (a state machine); the LLM does language and
 judgement. One pillow (the parent's); the adult child follows it live in the family app.
@@ -58,7 +57,7 @@ Organiser: Overall, Best Hardware (Bambu A1 Mini each), People-First, Most Creat
 Sponsors: Anthropic (named community, real problem, works, knows failure modes), Microsoft
 "Built for the Real World" (customer understanding, measurable usefulness, path to production,
 responsible design), Cartesia (voice core, 25% on accessibility/privacy), Moss (voice/personal
-agents), Factory Droid (trigger you designed, limited access, visible plans/diffs), Fetch.ai
+agents), Fetch.ai
 (Agentverse + ASI:One, intent → action), Spacetime (live shared state, agent coordination), Meta
 (human connection), MLH Tiger Data (time series). Skip Hyphenate, Visa, CRS.
 
@@ -96,19 +95,18 @@ Merged on master and deployed to Keanu's VPS (pillow.keanuc.net, PR -> master au
 - `backend/app/agents/night_watch.py` (PR #21): Night Watch runs inside POST /state. POST /checkin takes
   the voice laptop's result, POST /ack is the app's "I'm on it". Demo: `uv run sim/night_watch_demo.py`.
 - Guardian, Family Liaison, sleep events, family API, laptop voice client (`voice/checkin_client.py`),
-  Morning Brief droid, Fetch family agent: Adyan's PR #30, detail in his section below.
+  Fetch family agent: Adyan's PR #30, detail in his section below.
 - Reminders, the Routine agent (PR #37): see the decisions log (Sat 24 Oct, reminders). Live on the VPS.
 - Personal night baseline (`backend/app/agents/baseline.py`, PR pending): see the decisions log
   (Sat 24 Oct, baseline). On `mum`'s seeded demo week: wait 14 min, usual trip 9 min, 2 long trips
-  in the Brief. GET /night carries it as `summary.baseline`.
+  in the summary. GET /night carries it as `summary.baseline`.
 
 Not built or not yet run, in rough order:
 1. A sender for queued `notifications` (Twilio SMS / call, push). The ladder writes rows but nothing
    reaches a phone yet: the demo's last hop.
 2. A full dry run on the real hardware (pillow node -> Night Watch -> check-in through the Waveshare
    with live Cartesia -> Liaison -> phone). Each hop is tested alone; the whole chain never has been.
-3. Morning Brief (Factory) and family agent (Fetch.ai) written but never run live: need
-   `FACTORY_API_KEY` + Droid CLI, and `AGENT_SEED` + an Agentverse mailbox. No agent-to-agent hop yet
+3. Family agent (Fetch.ai) written but never run live: needs `AGENT_SEED` + an Agentverse mailbox. No agent-to-agent hop yet
    (the family agent only calls the backend).
 
 Findings worth keeping:
@@ -133,16 +131,15 @@ Built on top of Adam's Night Watch and voice check-in, all tested without Supaba
 - `backend/app/agents/sleep_events.py`: `restless`, `settled`, `asleep`, `key_talk`, `key_family`.
 - `backend/app/agents/liaison.py`: Family Liaison, Claude Opus 5.5 with strict tools words each
   alert for its channel and one line for her; ladder stays plain code; fixed text on any failure.
-- Family API (`backend/app/routers/family.py`): `GET /night`, `GET`/`POST /brief`, `PATCH /settings`,
+- Family API (`backend/app/routers/family.py`): `GET /night`, `PATCH /settings`,
   `POST`/`GET /goodnight`, `POST /goodnight/played`. Writes use the shared `CHECKIN_TOKEN`.
 - `voice/checkin_client.py`: base laptop watches `night_state`, speaks the path-light line, runs the
   check-in and posts the result, plays queued goodnight messages.
-- `droid/morning_brief.py`: Factory Droid at 06:00, read-only workspace, structured note + diff.
 - `agents/fetch/family_agent.py`: uAgent on Agentverse (chat protocol) for ASI:One.
 
 Needs: `ANTHROPIC_API_KEY` in `backend/.env` (Liaison), re-run `supabase/seed.sql` (sets
-`sms_consent = true` for Sarah and Test User, or the Guardian blocks their SMS), Droid CLI +
-`FACTORY_API_KEY` on the laptop that runs the brief, `AGENT_SEED` for the family agent.
+`sms_consent = true` for Sarah and Test User, or the Guardian blocks their SMS), `AGENT_SEED` for the family
+agent.
 
 ## Open team decisions (agents)
 
@@ -169,11 +166,11 @@ still open:
   20 min no-return timeout + voice check-in from night one, trips only recorded. From week two,
   `checkin_timeout_min` = her usual trip length (≈p90 of past trips) + margin, clamped to 10–30 min;
   trips at unusual hours also flag. Drift (e.g. more trips per night over weeks) goes to family in
-  the Morning Brief, never silently absorbed. Demo uses a hardcoded week of history.
+  the night summary, never silently absorbed. Demo uses a hardcoded week of history.
 - Sat 24 Oct: Adyan moves to hardware with Keanu; Adam takes over all agents, built in Szymon's
   backend (`szymon/app-scaffold`).
 - Sat 24 Oct: agent flow and sponsor targets in `coord/AGENT_FLOW.md`. Core: Anthropic, Cartesia,
-  Microsoft. Bets: Factory Droid (Morning Brief), Fetch.ai (family agent in ASI:One).
+  Microsoft. Bet: Fetch.ai (family agent in ASI:One).
   Dropped: Atlassian (Forge/Jira only), Moss, ElevenLabs, Backboard.
 - Sat 24 Oct: backend = Supabase (Postgres + Realtime) behind FastAPI, not Spacetime (Szymon + Adam
   agreed). Agents in Python against Supabase; family app via supabase-js Realtime. Trade-off
@@ -231,11 +228,10 @@ still open:
   medical words blocked. (5) still open.
 - Sat 24 Oct: personal night baseline rules (Adam; plain code, `backend/app/agents/baseline.py`).
   Window = the 7 nights before the current night (night = 18:00 to noon). Usual trip = under 20 min;
-  longer trips never move the baseline, they go to the Brief as "not counted as usual". Learning
+  longer trips never move the baseline, they go to the night summary as "not counted as usual". Learning
   mode until >= 5 usual trips on >= 4 nights. Learned wait = p90 of usual trips (nearest rank) + 5
   min, clamped to the Guardian's 10-30. **Owner vs learned: the shorter wins**
-  (`min(owner checkin_timeout_min, learned)`): the owner's value (app #45, PATCH /settings, brief
-  diff) is the longest she's ever left, learning only brings a check-in sooner, and a demo value
+  (`min(owner checkin_timeout_min, learned)`): the owner's value (app #45, PATCH /settings) is the longest she's ever left, learning only brings a check-in sooner, and a demo value
   below 10 set by SQL still wins. Night Watch re-reads it with the other settings (every 60 s) and
   logs a change to agent_log (tool `baseline`). Unusual hour = a trip starting > 60 min outside the
   week's earliest-latest start. Drift lines in `summary.unusual`: last night's trips >= the week's

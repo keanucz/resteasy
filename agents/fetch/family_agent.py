@@ -138,8 +138,8 @@ TOOLS: list[dict[str, Any]] = [
      "(awake/in_bed/up/check_in/escalating), room light and temperature.", "strict": True,
      "input_schema": _strict()},
     {"name": "get_night", "description": "One night (last night by default): summary (lay down, asleep, "
-     "trips with times and lengths, check-ins, alerts, who acknowledged, restless spells, anything unusual), "
-     "the latest Morning Brief note if one exists, and current settings. The person also sees it as a card.",
+     "trips with times and lengths, check-ins, alerts, who acknowledged, restless spells, anything unusual) "
+     "and current settings. The person also sees it as a card.",
      "strict": True, "input_schema": _strict({"night": NIGHT_ARG})},
     {"name": "get_agent_log", "description": "What the pillow's agents did in one night (last night by "
      "default), step by step, with the Guardian's allowed/blocked verdicts.", "strict": True,
@@ -321,9 +321,6 @@ async def call_tool(http: httpx.AsyncClient, name: str, args: dict[str, Any]) ->
                "summary": night["summary"], "settings": night["settings"]}
         if tonight:
             out["tonight_so_far"] = tonight
-        b = await http.get(f"{base}/brief")
-        if b.status_code == 200:
-            out["morning_brief"] = b.json()
         return out
     if name == "get_agent_log":
         night, tonight = await latest_night(http, base, args.get("night"))

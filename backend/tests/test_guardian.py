@@ -108,23 +108,6 @@ def test_a_repeat_of_the_same_alert_inside_the_step_wait_is_blocked():
     assert g.check(Alert("Sarah", "call", "x"), NIGHT + 121).allowed
 
 
-# ---------- config changes (Morning Brief) ----------
-
-
-def test_config_diff_keeps_only_whitelisted_keys_within_bounds():
-    g = guardian()
-    diff = {"checkin_timeout_min": 45, "quiet_start": "23:00", "voice_id": "x", "path_light_pct": 30}
-    v = g.check_config(diff)
-    assert not v.allowed
-    assert v.replacement == {"checkin_timeout_min": 30, "quiet_start": "23:00", "path_light_pct": 30}
-    assert "voice_id" in v.reason and "checkin_timeout_min" in v.reason
-
-
-def test_a_clean_config_diff_is_allowed_unchanged():
-    v = guardian().check_config({"checkin_timeout_min": 15})
-    assert v == Verdict(True)
-
-
 # ---------- screening a batch ----------
 
 

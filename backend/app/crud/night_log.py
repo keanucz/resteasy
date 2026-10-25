@@ -185,7 +185,7 @@ async def list_agent_log_between(db: AsyncClient, pillow_id: str, start_iso: str
 
 
 async def latest_log_row(db: AsyncClient, pillow_id: str, agent: str, tool: str | None = None) -> dict | None:
-    """The most recent agent_log row written by `agent` (e.g. the last Morning Brief), optionally
+    """The most recent agent_log row written by `agent` (e.g. the last baseline change), optionally
     only rows for `tool`, or None."""
     query = db.table(AGENT_LOG_TABLE).select("ts, agent, intent, args, guardian, reason")
     query = query.eq("pillow_id", pillow_id).eq("agent", agent)

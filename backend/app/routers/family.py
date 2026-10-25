@@ -1,15 +1,14 @@
-"""Family router: what the Morning Brief droid and the Fetch.ai agents read and write.
+"""Family router: what the family app and the Fetch.ai agents read and write.
 
 Reads of the night are open like the rest of the app API. A family member's own writes (settings,
 a goodnight, the nights they're away) take the app's login of anyone in her care circle, or that
 person's family agent with its own token (`FAMILY_AGENT_TOKENS`), the same way as reminders. The
-droid's brief carries the shared agent token (`CHECKIN_TOKEN`); the watch roster takes the
-coordinator's (`COORDINATOR_TOKEN`). Every change lands in `agent_log`, so the family app shows it
-live.
+watch roster takes the coordinator's (`COORDINATOR_TOKEN`). Every change lands in `agent_log`, so
+the family app shows it live.
 """
 
 import time as clock
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
@@ -37,7 +36,6 @@ from app.core.dependencies import (
 )
 from app.crud.night_log import (
     add_event,
-    latest_log_row,
     list_agent_log_between,
     list_events_between,
     list_recent_events_of_type,
@@ -55,8 +53,6 @@ from app.crud.residents import (
 from app.schemas.family import (
     Away,
     AwayCreate,
-    Brief,
-    BriefCreate,
     Goodnight,
     GoodnightCreate,
     NightReport,
@@ -70,11 +66,10 @@ from app.schemas.family import (
 
 router = APIRouter(prefix="/pillows/{pillow_id}", tags=["family"])
 
-BRIEF_AGENT = "morning_brief"
 ROSTER_AGENT = "watch_roster"  # the Fetch.ai coordinator
 GOODNIGHT_TYPES = ["goodnight_queued", "goodnight_played"]
 SETTINGS_KEYS = ("checkin_timeout_min", "quiet_start", "quiet_end")  # residents columns
-_guardian = Guardian()  # config checks need no per-resident settings
+_guardian = Guardian()  # text and roster checks need no per-resident settings
 
 
 @router.get("/night")
@@ -82,7 +77,7 @@ async def read_night(
     pillow: PillowDep, db: SupabaseDep,
     night: Annotated[date | None, Query(description="The evening it started; default the latest")] = None,
 ) -> NightReport:
-    """Last night: summary (trips, check-ins, alerts), events and the agent log. The droid's input.
+    """Last night: summary (trips, check-ins, alerts), events and the agent log.
     `night` reads an earlier one, e.g. yesterday's while tonight has only just begun."""
     resident = await resident_of(db, pillow)
     start, end = last_night_window(clock.time(), resident["timezone"], night)
@@ -96,30 +91,6 @@ async def read_night(
         summary=summarize_night(events, resident["timezone"], baseline), events=events, agent_log=log,
         settings={k: resident[k] for k in SETTINGS_KEYS},
     )
-
-
-@router.get("/brief")
-async def read_brief(pillow: PillowDep, db: SupabaseDep) -> Brief:
-    """The latest Morning Brief, or 404 if none has been written yet."""
-    row = await latest_log_row(db, pillow.id, BRIEF_AGENT)
-    if row is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No morning brief yet")
-    return Brief(ts=row["ts"], guardian=row["guardian"] or "allowed", reason=row["reason"], **row["args"])
-
-
-@router.post("/brief", dependencies=[Depends(require_checkin_token)], status_code=status.HTTP_201_CREATED)
-async def write_brief(pillow: PillowDep, brief: BriefCreate, db: SupabaseDep) -> Brief:
-    """Store the droid's note and apply its settings diff, limited to what the Guardian allows."""
-    resident = await resident_of(db, pillow)
-    verdict = _guardian.check_config(brief.config_diff)
-    allowed = brief.config_diff if verdict.allowed else (verdict.replacement or {})
-    await update_resident(db, resident["id"], {k: v for k, v in allowed.items() if k in SETTINGS_KEYS})
-    args = {"note": brief.note, "proposed": brief.config_diff, "applied": allowed,
-            "droid_session_id": brief.droid_session_id}
-    await log_action(db, pillow.id, BRIEF_AGENT, intent="morning brief", tool="config_diff", args=args,
-                     guardian=verdict.label, reason=verdict.reason or None)
-    return Brief(ts=datetime.now(UTC).isoformat(), note=brief.note, proposed=brief.config_diff,
-                 applied=allowed, guardian=verdict.label, reason=verdict.reason or None)
 
 
 async def _log_for(

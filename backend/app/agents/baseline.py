@@ -93,7 +93,7 @@ class Baseline:
         return f"{_hhmm(self.earliest)}-{_hhmm(self.latest)}"
 
     def drift(self, last_night_trips: int) -> list[str]:
-        """Plain sentences for the Morning Brief: what changed, so family hear it."""
+        """Plain sentences for the night summary: what changed, so family hear it."""
         lines: list[str] = []
         if (not self.learning and last_night_trips >= 2
                 and last_night_trips >= self.trips_per_night + 1):

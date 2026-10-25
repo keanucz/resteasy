@@ -41,7 +41,6 @@ jobs:
               - *ci
               - "voice/**"
               - "sim/**"
-              - "droid/**"
               - "coord/*.py"
               - "agents/**"
             schema:
@@ -83,8 +82,6 @@ jobs:
         run: uv run -q --python 3.12 --with pytest --with httpx --with numpy --with anthropic --with websockets pytest -q voice
       - name: sim
         run: uv run -q --python 3.12 --with pytest --with bleak --with numpy --with pyserial --with httpx pytest -q sim
-      - name: droid
-        run: uv run -q --python 3.12 --with pytest --with httpx --with anthropic pytest -q droid
       - name: coord and agents compile
         run: python3 -m py_compile coord/*.py && python3 -m compileall -q agents
 

@@ -1,4 +1,4 @@
-"""Schemas for what the family-facing agents read and write: the night, the Morning Brief,
+"""Schemas for what the family-facing agents read and write: the night,
 goodnight messages, settings changes and the nights a family member is away."""
 
 from datetime import date
@@ -19,7 +19,7 @@ class NightReport(BaseModel):
     summary: dict[str, Any]
     events: list[dict[str, Any]]
     agent_log: list[dict[str, Any]]
-    settings: dict[str, Any]  # the keys the Morning Brief may propose changes to
+    settings: dict[str, Any]  # the settings family can change
 
 
 class GoodnightCreate(BaseModel):
@@ -32,23 +32,6 @@ class GoodnightCreate(BaseModel):
 class Goodnight(BaseModel):
     message: str
     from_name: str
-
-
-class BriefCreate(BaseModel):
-    """What the Morning Brief droid produced: a family note and a proposed settings diff."""
-
-    note: str = Field(min_length=1, max_length=2000)
-    config_diff: dict[str, Any] = {}
-    droid_session_id: str | None = None
-
-
-class Brief(BaseModel):
-    ts: str | None = None
-    note: str
-    proposed: dict[str, Any]
-    applied: dict[str, Any]
-    guardian: str
-    reason: str | None = None
 
 
 class SettingsPatch(BaseModel):

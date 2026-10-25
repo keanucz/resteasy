@@ -1,4 +1,4 @@
-"""Plain-code summary of one night from the events table (for the Morning Brief and the family agent)."""
+"""Plain-code summary of one night from the events table (for the family agents)."""
 
 from datetime import date, datetime
 from zoneinfo import ZoneInfo

@@ -8,7 +8,7 @@ Four humans, four Claude Code sessions. **The ntfy bus is how we talk** (push, u
 | Keanu | `keanucz` | `keanu` | Electronics + firmware lead: ESP32s, sensors, motors, LEDs, wiring, device side of `coord/CONTRACT.md`. Research desk (Parallel search, docs) |
 | APOLLO (Adyan) | `apollo-ullah` | `adyan` | Hardware with Keanu (from Sat 24 Oct; agents handed to Adam) |
 | Szymon | `Blacbrd` | `szymon` | Backend + live state: Supabase (Postgres + Realtime) behind FastAPI, family app, server side of `coord/CONTRACT.md`. **Sat morning: pairs with Keanu on wiring** once the endpoints are up |
-| Adam | `aak523` | `adam` | Product + physical build: Figma flows, pitch, demo video, Devpost, sponsor READMEs. **Plus the non-electronic build:** 3D-printed sensor pod, cable routing, pillowcases. **From Sat 24 Oct: all agents** (state machine, Claude tool loop, Night Watch / Check-in / Guardian, Fetch, Factory Droid; see `coord/AGENT_FLOW.md`) |
+| Adam | `aak523` | `adam` | Product + physical build: Figma flows, pitch, demo video, Devpost, sponsor READMEs. **Plus the non-electronic build:** 3D-printed sensor pod, cable routing, pillowcases. **From Sat 24 Oct: all agents** (state machine, Claude tool loop, Night Watch / Check-in / Guardian, Fetch; see `coord/AGENT_FLOW.md`) |
 
 ## Setup (2 minutes)
 

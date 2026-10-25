@@ -125,7 +125,7 @@ language table before promising it.
 - Older UK study: at-risk older people's bedrooms were far below WHO-recommended temperature
   ([BMJ 1987](https://www.bmj.com/content/295/6595/419); strong but old).
 - → Environment agent: if the bedroom is <18 °C at bedtime, a gentle voice nudge; repeated cold nights
-  go in the Morning Brief.
+  go in the night summary.
 
 ## 9. Physical build safety (Adam's build lane)
 

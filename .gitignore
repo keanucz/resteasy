@@ -8,7 +8,6 @@ coord/.bus_last_*
 firmware/**/secrets.h
 coord/.agent
 coord/.bus_polled_*
-droid/workspace/
 firmware/**/build*/
 
 # Claude Code worktrees (each one is a whole checkout; never commit them)

@@ -29,8 +29,7 @@ uv run ruff check .  # lint
 | `GET` | `/api/contacts/{contact_id}/pillows` | app: pillows of every resident a carer looks after |
 | `POST` | `/api/pillows/{pillow_id}/checkin` | base laptop (`voice/checkin_client.py`): the voice check-in's result; bearer `CHECKIN_TOKEN` |
 | `POST` | `/api/pillows/{pillow_id}/ack` | app: "I'm on it" (`{"contact_id": uuid}`) |
-| `GET` | `/api/pillows/{pillow_id}/night` | Morning Brief droid / family agent: last night's summary, events, agent log |
-| `GET` `POST` | `/api/pillows/{pillow_id}/brief` | family agent reads the latest Morning Brief; the droid posts it (bearer); diff goes through the Guardian |
+| `GET` | `/api/pillows/{pillow_id}/night` | family agent: last night's summary, events, agent log |
 | `PATCH` | `/api/pillows/{pillow_id}/settings` | anyone in her care circle (login, or their family agent's own token): quiet hours / check-in wait, the app's bounds |
 | `GET` `POST` | `/api/pillows/{pillow_id}/goodnight` | a care-circle login or family agent queues a goodnight message; the base laptop reads it and posts `/goodnight/played` (bearer) |
 | `GET` `POST` `DELETE` | `/api/pillows/{pillow_id}/away` | the caller's own away nights (login or family agent); the coordinator's evening roster reads them through each family agent |

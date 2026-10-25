@@ -32,7 +32,7 @@ Pitch line: "Not a monitor. A goodnight."
 
 - Night use is the main scene: a phone picked up in a dark bedroom at 2 am, read in seconds.
 - Alerts arrive as push notifications and in the app; the owner acknowledges ("I'm on it") so the escalation chain stops or moves on.
-- Week one is "learning mode" (fixed 20 minute no-return timeout); from week two the timeout follows her usual trip length. Drift (more trips per night over weeks) is reported to family in a Morning Brief, never silently absorbed.
+- Week one is "learning mode" (fixed 20 minute no-return timeout); from week two the timeout follows her usual trip length. Drift (more trips per night over weeks) is reported to family in the night summary, never silently absorbed.
 - Hackathon context: Cal Hacks 13.0, a 2 minute live demo with a hardcoded week of history. Judging weighs intentionality: every design choice needs a clear who and why.
 
 ## Capabilities and Constraints
@@ -43,7 +43,7 @@ Pitch line: "Not a monitor. A goodnight."
 - The app sends and receives pillow signals only through the backend contract, never directly.
 - Timers and thresholds are plain code (a state machine); the LLM does language and judgement.
 - Guardian rules sit above owner settings: quiet-hour caps, a maximum number of alerts, no medical claims, no raw audio.
-- Terminology: "pillow", "owner", "contacts", "check-in", "learning mode", "Morning Brief", "I'm on it".
+- Terminology: "pillow", "owner", "contacts", "check-in", "learning mode", "night summary", "I'm on it".
 
 ## Brand Commitments
 

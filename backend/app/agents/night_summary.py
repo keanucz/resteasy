@@ -1,7 +1,7 @@
 """One night, summarised from the events table in plain code.
 
-The Morning Brief (Factory Droid) and the family agent (Fetch.ai) both read this, so the numbers
-family see are computed, never guessed by a model. Times are in the resident's timezone.
+The family agents (Fetch.ai) read this, so the numbers family see are computed, never guessed by
+a model. Times are in the resident's timezone.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from app.agents.baseline import Baseline
 
 NIGHT_STARTS_H = 18  # a "night" runs from 18:00 ...
 NIGHT_ENDS_H = 12  # ... to noon the next day
-LONG_TRIP_MIN = 15  # a trip this long is worth a line in the brief
+LONG_TRIP_MIN = 15  # a trip this long is worth a line in the summary
 
 
 def last_night_window(now_ts: float, timezone: str, evening: date | None = None) -> tuple[datetime, datetime]:

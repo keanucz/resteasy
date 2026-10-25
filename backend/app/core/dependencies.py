@@ -127,8 +127,8 @@ LAPTOP, COORDINATOR, FAMILY = "laptop", "coordinator", "family"
 
 @dataclass(frozen=True)
 class AgentToken:
-    """Whose bearer token this is: the shared agent token (`CHECKIN_TOKEN`, the base laptop and the
-    droid), the Fetch.ai coordinator's, or a family agent's, which speaks for `contact_id`."""
+    """Whose bearer token this is: the shared agent token (`CHECKIN_TOKEN`, the base laptop), the
+    Fetch.ai coordinator's, or a family agent's, which speaks for `contact_id`."""
 
     kind: Literal["laptop", "coordinator", "family"]
     contact_id: str | None = None
