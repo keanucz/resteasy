@@ -308,11 +308,11 @@ def test_demo_timings_show_every_state_within_seconds():
     assert nw.state is State.IN_BED
 
 
-def test_demo_alerts_family_10_s_into_an_unanswered_checkin():
+def test_demo_alerts_family_60_s_into_an_unfinished_checkin():
     nw = NightWatch(timings=DEMO_TIMINGS)
     play(nw, NIGHT, [True] * 4 + [False] * 20)  # check-in started at 19
-    assert nw.tick(NIGHT + 28) == []
-    acts = nw.tick(NIGHT + 29)
+    assert nw.tick(NIGHT + 78) == []  # room for three asks and the warning
+    acts = nw.tick(NIGHT + 79)
     assert isinstance(acts[1], CancelCheckin) and nw.state is State.ESCALATING
     assert [a.channel for a in acts if isinstance(a, Alert)] == ["app"]
 

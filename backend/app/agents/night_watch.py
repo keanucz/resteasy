@@ -52,9 +52,9 @@ class Timings:
 # head plate, so a five-minute judging slot sees them all. Held on 2 s = in bed, so with the bridge's
 # second of lag the app shows her in bed about 3 s after the press. The check-in counts from the lift. After
 # "I'm fine" it waits a minute, so a rehearsal can't run into the second-fine family heads-up. A
-# check-in she hasn't answered "I'm fine" to within 10 s alerts family, so the red alert shows fast.
+# check-in that hasn't finished within 60 s alerts family: room for all three asks and the warning.
 DEMO_TIMINGS = Timings(
-    lay_down_s=2, bed_return_s=2, bed_exit_s=5, checkin_after_s=15, recheck_after_fine_s=60, checkin_max_s=10
+    lay_down_s=2, bed_return_s=2, bed_exit_s=5, checkin_after_s=15, recheck_after_fine_s=60, checkin_max_s=60
 )
 
 
