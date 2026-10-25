@@ -12,6 +12,7 @@ from app.notify.notify_constants import (
     CALL_RING_S,
     HTTP_TIMEOUT_S,
     MACHINE_DETECTION,
+    MACHINE_DETECTION_SILENCE_MS,
     TWILIO_API,
     TWILIO_VOICE,
 )
@@ -70,12 +71,15 @@ class Twilio:
     async def sms(self, to: str, body: str) -> str:
         return await self._create("Messages.json", {"To": to, "From": self.from_number, "Body": body})
 
-    async def call(self, to: str, say: str) -> str:
-        # Said twice: the first time is often lost while the phone is lifted
-        line = f'<Say voice="{TWILIO_VOICE}">{escape(say)}</Say>'
-        twiml = f'<Response>{line}<Pause length="1"/>{line}</Response>'
-        form = {"To": to, "From": self.from_number, "Twiml": twiml,
-                "Timeout": str(CALL_RING_S), "MachineDetection": MACHINE_DETECTION}
+    async def call(self, to: str, say: str, audio_url: str | None = None) -> str:
+        """Call `to` and play `audio_url` (the script in the pillow's voice) once, or have Twilio's
+        voice read `say` when there is none. It starts after they answer with "Hello?", once
+        answering-machine detection hears them stop, so nothing is lost while the phone is lifted."""
+        line = (f"<Play>{escape(audio_url)}</Play>" if audio_url
+                else f'<Say voice="{TWILIO_VOICE}">{escape(say)}</Say>')
+        form = {"To": to, "From": self.from_number, "Twiml": f"<Response>{line}</Response>",
+                "Timeout": str(CALL_RING_S), "MachineDetection": MACHINE_DETECTION,
+                "MachineDetectionSilenceTimeout": str(MACHINE_DETECTION_SILENCE_MS)}
         return await self._create("Calls.json", form)
 
     async def call_status(self, sid: str) -> tuple[str, str | None]:

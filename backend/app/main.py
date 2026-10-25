@@ -44,8 +44,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.night_watch = WatchService(Liaison.from_api_key(settings.anthropic_api_key))
     app.state.reminders = ReminderService(app.state.night_watch)
     app.state.readings = ReadingsRecorder()
-    app.state.notifier = NotificationSender.from_settings(settings)
     app.state.cartesia = Cartesia.from_settings(settings)
+    app.state.notifier = NotificationSender.from_settings(settings, app.state.supabase, app.state.cartesia)
     tickers = (
         [asyncio.create_task(_tick_night_watch(app)), asyncio.create_task(_tick_reminders(app))]
         if app.state.supabase is not None

@@ -39,7 +39,7 @@ message, recent events, and what the pillow heard her say, which may be mis-tran
 for that channel:
 - app: one or two short sentences, the headline first ("Mum's been up 25 min and didn't answer").
 - sms: under 300 characters, plain, includes when she got up and what she said if anything.
-- call: read aloud twice and may land on voicemail, so at most 35 words in 3 or 4 short \
+- call: read aloud once and may land on voicemail, so at most 35 words in 3 or 4 short \
 sentences: who it's about, when she got up, that she didn't answer (or what she said), and the \
 ask. No greeting or sign-off.
 Keep every fact; add nothing you were not told. Quote what she said if it helps. Never guess a \
@@ -72,7 +72,7 @@ TOOLS = [
      "input_schema": SPEAK_SCHEMA},
 ]
 MAX_MESSAGE = 600  # longer wordings keep the fixed text instead
-MAX_CALL_WORDS = 40  # a call script is read twice; a longer one keeps the fixed text
+MAX_CALL_WORDS = 40  # a call can land on voicemail; a longer script keeps the fixed text
 
 
 @dataclass(frozen=True)

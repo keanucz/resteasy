@@ -6,9 +6,13 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 
+from app.core.voice_constants import DEFAULT_VOICE_ID
+from app.notify import call_audio
 from app.notify import sender as sender_module
+from app.notify.call_audio import CallAudio
 from app.notify.sender import NotificationSender
 from app.notify.transports import DeliveryError, IMessage, Twilio
+from app.voice.cartesia import VoiceServiceError
 
 PHONE = "+15551234567"
 
@@ -41,10 +45,10 @@ class FakeTwilio:
         self.texts.append((to, body))
         return "SM1"
 
-    async def call(self, to, say):
+    async def call(self, to, say, audio_url=None):
         if self.fail:
             raise DeliveryError(self.fail)
-        self.calls.append((to, say))
+        self.calls.append((to, say, audio_url))
         return "CA1"
 
     async def call_status(self, sid):
@@ -188,10 +192,14 @@ def test_twilio_sms_and_call_requests():
     tw = Twilio("AC1", "tok", "+15550000000", http=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
     assert asyncio.run(tw.sms(PHONE, "hi")) == "SM9"
     asyncio.run(tw.call(PHONE, "Mum & Dad <now>"))
+    asyncio.run(tw.call(PHONE, "Mum & Dad <now>", "https://x.test/calls/a.mp3?v=1&w=2"))
     assert seen[0] == ("/2010-04-01/Accounts/AC1/Messages.json",
                        {"To": [PHONE], "From": ["+15550000000"], "Body": ["hi"]})
     assert seen[1][0].endswith("/Calls.json") and "Mum &amp; Dad &lt;now&gt;" in seen[1][1]["Twiml"][0]
     assert seen[1][1]["MachineDetection"] == ["DetectMessageEnd"] and seen[1][1]["Timeout"] == ["25"]
+    assert seen[1][1]["MachineDetectionSilenceTimeout"] == ["3000"]
+    assert seen[1][1]["Twiml"][0].count("<Say") == 1  # read once
+    assert seen[2][1]["Twiml"] == ["<Response><Play>https://x.test/calls/a.mp3?v=1&amp;w=2</Play></Response>"]
 
 
 def test_twilio_call_status():
@@ -249,3 +257,82 @@ def test_queues_without_the_words_until_the_column_exists():
     asyncio.run(add_notification(db, 3, "c1", "sms", "words"))
     assert inserts == [{"incident_id": 3, "contact_id": "c1", "channel": "sms", "message": "words"},
                        {"incident_id": 3, "contact_id": "c1", "channel": "sms"}]
+
+
+# ---------- the call in the pillow's own voice ----------
+
+class FakeAudio:
+    def __init__(self, made=("calls/abc.mp3", "https://x.test/calls/abc.mp3")):
+        self.made, self.scripts, self.forgotten = made, [], []
+
+    async def make(self, text):
+        self.scripts.append(text)
+        return self.made
+
+    async def forget_later(self, path):
+        self.forgotten.append(path)
+
+
+def test_call_plays_the_pillow_voice_and_deletes_it_after():
+    tw, audio = FakeTwilio(), FakeAudio()
+
+    async def go():
+        sender = NotificationSender(FakeIMessage(), tw, ["mum"], audio)
+        result = await sender.deliver(row("call"))
+        await asyncio.gather(*sender._followups)
+        return result
+
+    assert asyncio.run(go()).sent
+    assert tw.calls == [(PHONE, "Margaret hasn't come back to bed.", "https://x.test/calls/abc.mp3")]
+    assert audio.scripts == ["Margaret hasn't come back to bed."] and audio.forgotten == ["calls/abc.mp3"]
+
+
+def test_call_falls_back_to_twilio_voice_without_audio():
+    tw = FakeTwilio()
+    assert deliver(NotificationSender(FakeIMessage(), tw, ["mum"], FakeAudio(made=None)), row("call")).sent
+    assert tw.calls == [(PHONE, "Margaret hasn't come back to bed.", None)]
+
+
+class FakeCartesia:
+    def __init__(self, fail=None, delay=0.0):
+        self.fail, self.delay, self.spoken = fail, delay, []
+
+    async def speak(self, voice_id, text, language, speech=None):
+        await asyncio.sleep(self.delay)
+        if self.fail:
+            raise self.fail
+        self.spoken.append((voice_id, text, language))
+        return b"mp3"
+
+
+def test_call_audio_is_spoken_in_the_pillow_voice_and_stored(monkeypatch):
+    stored = []
+
+    async def store(db, path, mp3):
+        stored.append((path, mp3))
+        return f"https://x.test/{path}"
+
+    monkeypatch.setattr(call_audio, "store_sample", store)
+    cartesia = FakeCartesia()
+    path, url = asyncio.run(CallAudio(cartesia, None).make("Hi"))
+    assert cartesia.spoken == [(DEFAULT_VOICE_ID, "Hi", "en")]
+    assert path.startswith("calls/") and path.endswith(".mp3") and len(path) > len("calls/.mp3") + 16
+    assert stored == [(path, b"mp3")] and url == f"https://x.test/{path}"
+
+
+def test_call_audio_gives_up_on_failure_or_when_slow(monkeypatch):
+    monkeypatch.setattr(call_audio, "CALL_AUDIO_BUDGET_S", 0.05)
+    assert asyncio.run(CallAudio(FakeCartesia(fail=VoiceServiceError("down")), None).make("Hi")) is None
+    assert asyncio.run(CallAudio(FakeCartesia(delay=1), None).make("Hi")) is None
+
+
+def test_call_audio_is_deleted_later(monkeypatch):
+    removed = []
+
+    async def remove(db, path):
+        removed.append(path)
+
+    monkeypatch.setattr(call_audio, "CALL_AUDIO_KEEP_S", 0)
+    monkeypatch.setattr(call_audio, "delete_sample", remove)
+    asyncio.run(CallAudio(FakeCartesia(), None).forget_later("calls/abc.mp3"))
+    assert removed == ["calls/abc.mp3"]

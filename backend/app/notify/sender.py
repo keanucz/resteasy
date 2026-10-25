@@ -2,7 +2,8 @@
 
     sms   iMessage through the Photon sidecar; if that fails or isn't set up, Twilio SMS.
           Only to contacts who agreed to texts (contacts.sms_consent).
-    call  a Twilio call that reads the alert aloud. If it's rejected, not answered or goes to
+    call  a Twilio call that plays the alert once in the pillow's own voice (Cartesia; Twilio's
+          voice reads it if that can't be made in time). If it's rejected, not answered or goes to
           voicemail, the same alert follows as a text (the consent rule above still applies).
 
 Night Watch's ladder never waits on this: it queues the row and moves on, and this ticker sends
@@ -20,6 +21,7 @@ from supabase import AsyncClient
 
 from app.core.config import Settings
 from app.crud.night_log import finish_notification, list_sendable_notifications, log_action
+from app.notify.call_audio import CallAudio
 from app.notify.notify_constants import (
     AGENT,
     CALL_MISSED,
@@ -30,6 +32,7 @@ from app.notify.notify_constants import (
     SENT_CHANNELS,
 )
 from app.notify.transports import DeliveryError, IMessage, Twilio
+from app.voice.cartesia import Cartesia
 
 log = logging.getLogger(__name__)
 
@@ -47,16 +50,21 @@ class Delivery:
 class NotificationSender:
     """Sends the queued rows; each provider is optional (None = not configured)."""
 
-    def __init__(self, imessage: IMessage | None, twilio: Twilio | None, pillow_ids: list[str]) -> None:
+    def __init__(self, imessage: IMessage | None, twilio: Twilio | None, pillow_ids: list[str],
+                 audio: CallAudio | None = None) -> None:
         self.imessage = imessage
         self.twilio = twilio
         self.pillow_ids = pillow_ids
-        self._followups: set[asyncio.Task] = set()  # calls being checked (kept so they aren't collected)
+        self.audio = audio  # None: Twilio's voice reads every call
+        # calls being checked and call audio waiting to be deleted (kept so they aren't collected)
+        self._followups: set[asyncio.Task] = set()
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> "NotificationSender":
+    def from_settings(cls, settings: Settings, db: AsyncClient | None = None,
+                      cartesia: Cartesia | None = None) -> "NotificationSender":
         imessage, twilio = IMessage.from_settings(settings), Twilio.from_settings(settings)
-        return cls(imessage, twilio, settings.notify_pillow_ids)
+        audio = CallAudio(cartesia, db) if cartesia is not None and db is not None else None
+        return cls(imessage, twilio, settings.notify_pillow_ids, audio)
 
     @property
     def enabled(self) -> bool:
@@ -71,9 +79,13 @@ class NotificationSender:
             await finish_notification(db, row["id"], status, result.ref, result.error)
             await self._log(db, row, result)
             if result.sent and result.via == "call":
-                task = asyncio.create_task(self.follow_call(db, row, result.ref))
-                self._followups.add(task)
-                task.add_done_callback(self._followups.discard)
+                self._keep(self.follow_call(db, row, result.ref))
+
+    def _keep(self, work) -> None:
+        """Run `work` in the background, holding a reference until it is done."""
+        task = asyncio.create_task(work)
+        self._followups.add(task)
+        task.add_done_callback(self._followups.discard)
 
     async def deliver(self, row: dict[str, Any]) -> Delivery:
         """Send one row; never raises."""
@@ -106,10 +118,14 @@ class NotificationSender:
     async def _call(self, phone: str, text: str) -> Delivery:
         if self.twilio is None:
             return Delivery(False, error="no Twilio configured for calls")
+        audio = await self.audio.make(text) if self.audio is not None else None
         try:
-            return Delivery(True, "call", await self.twilio.call(phone, text))
+            return Delivery(True, "call", await self.twilio.call(phone, text, audio and audio[1]))
         except DeliveryError as err:
             return Delivery(False, error=f"call {err}")
+        finally:
+            if audio is not None:
+                self._keep(self.audio.forget_later(audio[0]))
 
     async def follow_call(self, db: AsyncClient, row: dict[str, Any], sid: str) -> None:
         """Wait to see whether alert call `sid` reached a person; if not, text the alert instead.
