@@ -147,11 +147,12 @@ async def _debug_caller(db: SupabaseDep, user_id: str, pillow: Pillow) -> None:
 async def start_debug_alert(
     user_id: UserIdDep, pillow: PillowDep, db: SupabaseDep, night_watch: NightWatchDep
 ) -> NightStatus:
-    """Test accounts: start a real alert now, through Night Watch. The app goes red and the gentle
-    ladder runs (in-app first, then texts and calls to the care circle in turn), and "I'm on it" and
-    her "I'm fine" work on it like on any alert."""
+    """Test accounts: start a real alert now, through Night Watch, as if she had asked the pillow for
+    help (ALERT_DEBUG_REASON). Like any distress alert the app goes red and everyone who takes calls
+    is phoned at once (in the voice she hears), texts follow, and "I'm on it" and her "I'm fine" work
+    on it like on any alert."""
     await _debug_caller(db, user_id, pillow)
-    night_state = await night_watch.report_distress(db, pillow, ALERT_DEBUG_REASON, urgent=False)
+    night_state = await night_watch.report_distress(db, pillow, ALERT_DEBUG_REASON)
     return NightStatus(night_state=night_state)
 
 
