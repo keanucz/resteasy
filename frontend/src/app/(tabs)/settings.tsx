@@ -24,7 +24,10 @@ import { useSession } from '@/hooks/useSession';
 import { useTheme } from '@/hooks/useTheme';
 import {
   type AlertPrefsPatch,
+  type CheckinCooldown,
+  getCheckinCooldown,
   saveAlertPrefs,
+  setCheckinCooldown,
   sendTestAlert,
   startDebugAlert,
   startDebugReminder,
@@ -806,6 +809,7 @@ const AlertTestSection = memo(function AlertTestSection({ pillowId, name }: { pi
   const [busy, setBusy] = useState<AlertTest | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
   const [debug, setDebug] = useState(false);
+  const [cooldown, setCooldown] = useState<CheckinCooldown | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -821,6 +825,22 @@ const AlertTestSection = memo(function AlertTestSection({ pillowId, name }: { pi
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!debug || !pillowId) return;
+    let cancelled = false;
+    getCheckinCooldown(pillowId).then(
+      (value) => {
+        if (!cancelled) setCooldown(value);
+      },
+      () => {
+        // Without it the switch stays hidden; the pillow keeps whatever wait it has.
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [debug, pillowId]);
 
   if (!prefs) return null;
 
@@ -860,6 +880,19 @@ const AlertTestSection = memo(function AlertTestSection({ pillowId, name }: { pi
       setStatus({ kind: 'error', text: e instanceof ApiError ? e.message : "Couldn't reach the server. Try again." });
     } finally {
       setBusy(null);
+    }
+  };
+
+  const changeCooldown = async (on: boolean) => {
+    if (!pillowId || !cooldown) return;
+    const before = cooldown;
+    setCooldown({ ...cooldown, on });
+    setStatus(null);
+    try {
+      setCooldown(await setCheckinCooldown(pillowId, on));
+    } catch (e) {
+      setCooldown(before);
+      setStatus({ kind: 'error', text: e instanceof ApiError ? e.message : "Couldn't reach the server. Try again." });
     }
   };
 
@@ -942,6 +975,19 @@ const AlertTestSection = memo(function AlertTestSection({ pillowId, name }: { pi
               disabled={busy !== null && busy !== 'reminder'}
               onPress={() => run('reminder')}
             />
+            {cooldown ? (
+              <ListRow
+                title="Wait between check-ins"
+                meta={
+                  cooldown.on
+                    ? `After asking ${name} twice, the pillow waits ${cooldown.minutes} min before asking again.`
+                    : `Off: the pillow checks on ${name} every time she stays up.`
+                }
+                trailing={
+                  <Toggle label="Wait between check-ins" value={cooldown.on} onValueChange={changeCooldown} />
+                }
+              />
+            ) : null}
           </>
         ) : null}
         <Button fullWidth variant="ghost" title="Test vibration" onPress={() => run('buzz')} />

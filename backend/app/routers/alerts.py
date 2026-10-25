@@ -23,6 +23,7 @@ from app.core.app_constants import (
     ALERT_TEST_NO_PHONE,
     ALERT_TEST_NOT_CONFIGURED,
     ALERT_TEST_TOO_SOON,
+    CHECKIN_COOLDOWN_MIN,
     CONSENT_AGREED,
     DEMO_PILLOW_ID,
     DEMO_REMINDER,
@@ -44,10 +45,10 @@ from app.crud.accounts import get_alert_contact, list_contact_resident_ids, upda
 from app.crud.pillow_state import get_state
 from app.crud.pillows import get_pillow
 from app.crud.reminders import create_reminder
-from app.crud.residents import list_contacts_in_order
+from app.crud.residents import list_contacts_in_order, update_resident
 from app.notify.sender import NotificationSender
 from app.schemas.account import AlertSettings, AlertSettingsPatch, AlertTest, AlertTestResult
-from app.schemas.checkin import NightStatus
+from app.schemas.checkin import CheckinCooldown, CheckinCooldownChange, NightStatus
 from app.schemas.pillow import Pillow
 
 log = logging.getLogger(__name__)
@@ -203,3 +204,28 @@ async def start_debug_reminder(user_id: UserIdDep, pillow: PillowDep, db: Supaba
     await create_reminder(db, resident["id"], fields)
     state = await get_state(db, pillow.id)
     return NightStatus(night_state=state.night_state if state else "awake")
+
+
+@router.get("/pillows/{pillow_id}/alert-debug/cooldown")
+async def read_checkin_cooldown(user_id: UserIdDep, pillow: PillowDep, db: SupabaseDep) -> CheckinCooldown:
+    """Test accounts: whether the pillow waits between check-ins (residents.checkin_cooldown_min)."""
+    await _debug_caller(db, user_id, pillow)
+    minutes = (await resident_of(db, pillow)).get("checkin_cooldown_min") or 0
+    return CheckinCooldown(on=minutes > 0, minutes=minutes or CHECKIN_COOLDOWN_MIN)
+
+
+@router.put("/pillows/{pillow_id}/alert-debug/cooldown")
+async def change_checkin_cooldown(
+    change: CheckinCooldownChange,
+    user_id: UserIdDep,
+    pillow: PillowDep,
+    db: SupabaseDep,
+    night_watch: NightWatchDep,
+) -> CheckinCooldown:
+    """Test accounts: on, the pillow checks on her at most once every CHECKIN_COOLDOWN_MIN minutes;
+    off, it asks every time she stays up (for when the judges arrive). Night Watch uses it at once."""
+    await _debug_caller(db, user_id, pillow)
+    minutes = CHECKIN_COOLDOWN_MIN if change.on else 0
+    await update_resident(db, (await resident_of(db, pillow))["id"], {"checkin_cooldown_min": minutes})
+    await night_watch.reload(db, pillow)
+    return CheckinCooldown(on=change.on, minutes=CHECKIN_COOLDOWN_MIN)

@@ -1,6 +1,7 @@
 """Night Watch against the simulator's scripted nights (sim/pillow_sim.py) and a few edge cases."""
 
 import importlib.util
+from dataclasses import replace
 from datetime import datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -342,3 +343,27 @@ def test_default_timings_are_the_products():
     assert second_of(log, "lay_down") == 5
     assert second_of(log, "bed_exit") == 16  # 10 s after the lift at 6
     assert nw.state is State.UP  # the check-in waits the owner's minutes, not seconds
+
+
+def _up_and_said_fine(config: NightWatchConfig) -> tuple[NightWatch, float]:
+    """In bed, up at +10 s, the check-in at +25 s, and she says she's fine at +30 s (demo timings)."""
+    nw = NightWatch(config, DEMO_TIMINGS)
+    for second in range(26):
+        acts = nw.observe({"ts": NIGHT + second, "head_on": second < 10})
+    assert any(isinstance(a, StartCheckin) for a in acts)
+    nw.checkin_done(NIGHT + 30, escalate=False, reason="She said she was fine.")
+    return nw, NIGHT + 30
+
+
+def test_the_cooldown_holds_the_next_check_in():
+    nw, done = _up_and_said_fine(NightWatchConfig(checkin_cooldown_min=10))
+    held = [a for s in range(1, 600) for a in nw.observe({"ts": done + s, "head_on": False})]
+    assert not any(isinstance(a, StartCheckin) for a in held)  # the 60 s recheck waits
+    assert any(isinstance(a, StartCheckin) for a in nw.observe({"ts": done + 600, "head_on": False}))
+
+
+def test_turning_the_cooldown_off_asks_again_at_once():
+    nw, done = _up_and_said_fine(NightWatchConfig(checkin_cooldown_min=10))
+    assert not any(isinstance(a, StartCheckin) for a in nw.observe({"ts": done + 60, "head_on": False}))
+    nw.cfg = replace(nw.cfg, checkin_cooldown_min=0)
+    assert any(isinstance(a, StartCheckin) for a in nw.observe({"ts": done + 61, "head_on": False}))
