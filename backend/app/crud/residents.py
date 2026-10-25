@@ -4,7 +4,7 @@ from typing import Any
 
 from supabase import AsyncClient
 
-from app.crud.crud_constants import RESIDENT_CONTACTS_TABLE, RESIDENTS_TABLE
+from app.crud.crud_constants import CONTACTS_TABLE, RESIDENT_CONTACTS_TABLE, RESIDENTS_TABLE
 from app.crud.supabase_query import fetch_one
 
 
@@ -29,3 +29,8 @@ async def update_resident(db: AsyncClient, resident_id: str, fields: dict[str, A
     """Change the resident's settings (quiet hours, timeout); the caller has run the Guardian."""
     if fields:
         await db.table(RESIDENTS_TABLE).update(fields).eq("id", resident_id).execute()
+
+
+async def set_contact_on_call(db: AsyncClient, contact_id: str, on_call: bool) -> None:
+    """Set whether a contact is on call; Night Watch tries reachable contacts first (re-read every 60 s)."""
+    await db.table(CONTACTS_TABLE).update({"on_call": on_call}).eq("id", contact_id).execute()

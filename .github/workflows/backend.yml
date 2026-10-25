@@ -3,10 +3,10 @@ name: backend
 
 on:
   pull_request:
-    paths: ["backend/**", "deploy/**", ".github/workflows/backend.yml"]
+    paths: ["backend/**", "deploy/**", "agents/fetch/**", ".github/workflows/backend.yml"]
   push:
     branches: [master]
-    paths: ["backend/**", "deploy/**", ".github/workflows/backend.yml"]
+    paths: ["backend/**", "deploy/**", "agents/fetch/**", ".github/workflows/backend.yml"]
   workflow_dispatch:  # redeploy master by hand from the Actions tab
 
 jobs:

@@ -61,3 +61,35 @@ class SettingsResult(BaseModel):
     applied: dict[str, Any]
     guardian: str
     reason: str | None = None
+
+
+class RosterContact(BaseModel):
+    """A contact as the watch roster sees them: who, whether on call, their own quiet hours."""
+
+    contact_id: str
+    name: str
+    on_call: bool
+    quiet_start: str | None = None
+    quiet_end: str | None = None
+
+
+class Roster(BaseModel):
+    """The resident's contacts, first to alert first, and her timezone (quiet hours are in it)."""
+
+    resident: str
+    timezone: str
+    contacts: list[RosterContact]
+
+
+class OnCallUpdate(BaseModel):
+    """The Fetch.ai coordinator sets tonight's on-call flag from what the contact's agent said."""
+
+    on_call: bool
+    reason: str = Field(min_length=1, max_length=200)
+
+
+class OnCallResult(BaseModel):
+    contact_id: str
+    on_call: bool  # what is stored now
+    guardian: str
+    reason: str | None = None

@@ -240,3 +240,12 @@ still open:
   week's earliest-latest start. Drift lines in `summary.unusual`: last night's trips >= the week's
   average + 1 (and >= 2), each long trip, and learned > owner ("she may be checked on during
   ordinary trips"). No schema change; one week of data, so no multi-week trend yet.
+- Sat 24 Oct: Fetch.ai = one agent per family member + a pillow coordinator (Adam; research: Cal Hacks
+  12 Fetch winners EDFlow and Agent Santa, Fetch staff in the workshop). Family agents turn goals into
+  plans the person confirms on an ASI:One review card; the coordinator runs an evening roster, asking
+  every family agent in parallel and setting `contacts.on_call` via the new token-guarded
+  `GET|PUT /api/pillows/{id}/roster` (Guardian: last on-call contact stays on). Chosen over a live
+  "can you go?" rally during an alert, which could not safely change anything. All agents on the VPS
+  (compose profile `fetch`, Keanu OK'd), Claude stays the model (Fetch doesn't require OpenAI). Contained:
+  the backend never calls them; withdraw from the Fetch track by dropping the profile. Reminder steps
+  dropped from plans since #52 (reminder writes need a family-app login).

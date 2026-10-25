@@ -82,12 +82,18 @@ Droid reads the night's events and `agent_log`, writes a short family note (trip
 anything unusual) and proposes a config diff **limited to** `checkin_timeout_min` (clamped 10–30),
 `quiet_hours` and `path_light_pct`. The diff is shown in the family app; nothing else is writable.
 
-## 7. Family agent (Fetch.ai: uAgent on Agentverse, Chat Protocol, used through ASI:One)
+## 7. Family agents + pillow coordinator (Fetch.ai: uAgents on Agentverse, used through ASI:One)
 
-The adult child's whole workflow happens in ASI:One, no custom frontend needed:
-"How was Mum's night?" (reads the Morning Brief), "Send Mum a goodnight message" (queued, played
-by Cartesia at her next `lay_down`), "Set quiet hours to 23:00–07:00" (goes through Guardian).
-Talks only to the backend API.
+One agent per family member plus one coordinator for the pillow, all mailbox agents on Agentverse
+(`agents/fetch/README.md`). Each family member talks to their own agent in ASI:One: "How was Mum's
+night?" (a card), "Send Mum a goodnight" (a form card), and goals like "I'm in Denver Thu-Sun, make
+sure Mum's covered", which Claude turns into a plan (away nights, goodnights, settings) shown as a
+Confirm / Cancel card. Nothing changes before they confirm; plain code then runs the steps through the
+API and its Guardian. Every evening (21:00 her time, or "plan tonight") the coordinator asks every
+family agent in parallel who can be called first tonight and sets `contacts.on_call` through
+`PUT /api/pillows/{id}/roster/{contact}` (Guardian: the last on-call contact stays on). Night Watch
+only uses `on_call` for the ORDER of the ladder, so agents can make help come sooner, never later.
+The backend never calls the agents; with them off, everything above section 7 is unchanged.
 
 ## 8. Stretch: Settle
 

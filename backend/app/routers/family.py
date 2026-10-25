@@ -23,13 +23,17 @@ from app.crud.night_log import (
     list_trips_between,
     log_action,
 )
-from app.crud.residents import update_resident
+from app.crud.residents import list_contacts_in_order, set_contact_on_call, update_resident
 from app.schemas.family import (
     Brief,
     BriefCreate,
     Goodnight,
     GoodnightCreate,
     NightReport,
+    OnCallResult,
+    OnCallUpdate,
+    Roster,
+    RosterContact,
     SettingsPatch,
     SettingsResult,
 )
@@ -38,6 +42,7 @@ router = APIRouter(prefix="/pillows/{pillow_id}", tags=["family"])
 
 BRIEF_AGENT = "morning_brief"
 FAMILY_AGENT = "family_agent"
+ROSTER_AGENT = "watch_roster"  # the Fetch.ai coordinator
 GOODNIGHT_TYPES = ["goodnight_queued", "goodnight_played"]
 SETTINGS_KEYS = ("checkin_timeout_min", "quiet_start", "quiet_end")  # residents columns
 _guardian = Guardian()  # config checks need no per-resident settings
@@ -128,3 +133,40 @@ async def goodnight_played(pillow: PillowDep, db: SupabaseDep) -> Goodnight | No
         return None
     await add_event(db, pillow.id, "goodnight_played", clock.time(), pending)
     return Goodnight(**pending)
+
+
+@router.get("/roster", dependencies=[Depends(require_checkin_token)])
+async def read_roster(pillow: PillowDep, db: SupabaseDep) -> Roster:
+    """The resident's contacts in alert order, for the Fetch.ai coordinator's evening roster."""
+    resident = await resident_of(db, pillow)
+    contacts = await list_contacts_in_order(db, resident["id"])
+    return Roster(
+        resident=resident["preferred_name"], timezone=resident["timezone"],
+        contacts=[RosterContact(contact_id=c["id"], name=(c.get("full_name") or "").strip() or c["id"],
+                                on_call=c.get("on_call", True), quiet_start=c.get("quiet_start"),
+                                quiet_end=c.get("quiet_end")) for c in contacts],
+    )
+
+
+@router.put("/roster/{contact_id}", dependencies=[Depends(require_checkin_token)])
+async def set_on_call(
+    pillow: PillowDep, contact_id: str, update: OnCallUpdate, db: SupabaseDep
+) -> OnCallResult:
+    """Put a contact on or off call for tonight. Night Watch tries on-call contacts first but still
+    alerts everyone, and the Guardian never lets the last on-call contact go off call."""
+    resident = await resident_of(db, pillow)
+    contacts = await list_contacts_in_order(db, resident["id"])
+    contact = next((c for c in contacts if c["id"] == contact_id), None)
+    if contact is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"{contact_id} does not look after {pillow.id}")
+    verdict = _guardian.check_on_call(contacts, contact_id, update.on_call)
+    if verdict.allowed:
+        await set_contact_on_call(db, contact_id, update.on_call)
+    name = contact.get("full_name") or contact_id
+    await log_action(db, pillow.id, ROSTER_AGENT,
+                     intent=f"{name} {'on' if update.on_call else 'off'} call tonight: {update.reason}",
+                     tool="on_call", args={"contact_id": contact_id, "on_call": update.on_call},
+                     guardian=verdict.label, reason=verdict.reason or None)
+    stored = update.on_call if verdict.allowed else contact.get("on_call", True)
+    return OnCallResult(contact_id=contact_id, on_call=stored, guardian=verdict.label,
+                        reason=verdict.reason or None)

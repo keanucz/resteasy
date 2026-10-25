@@ -1,5 +1,9 @@
 # The public server on the VPS: the backend plus the calhacks-pillow tunnel that serves it as
 # https://pillow.keanuc.net. Run by deploy/deploy.sh; see deploy/README.md.
+#
+# The Fetch.ai agents (agents/fetch/README.md) are opt-in: they start only with COMPOSE_PROFILES=fetch
+# in deploy/.env on the VPS. They call the backend's API like any client; the backend never calls them,
+# so stopping them changes nothing about the pillow, Night Watch or the alerts.
 name: pillow
 
 services:
@@ -33,3 +37,47 @@ services:
       - /opt/pillow/tunnel.json:/etc/cloudflared/tunnel.json:ro  # the secret; never in git
     depends_on:
       - backend
+
+  fetch-coordinator:
+    profiles: [fetch]
+    build: ../agents/fetch
+    command: ["python", "/app/coordinator_agent.py"]
+    env_file: /opt/pillow/fetch-coordinator.env  # AGENT_SEED, CHECKIN_TOKEN, AGENTVERSE_API_KEY
+    environment:
+      PILLOW_SERVER: http://backend:8000
+    volumes:
+      - fetch-coordinator:/data
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  fetch-family-1:
+    profiles: [fetch]
+    build: ../agents/fetch
+    command: ["python", "/app/family_agent.py"]
+    env_file: /opt/pillow/fetch-family-1.env  # + CONTACT_ID, CONTACT_NAME, COORDINATOR_ADDRESS, ANTHROPIC_API_KEY
+    environment:
+      PILLOW_SERVER: http://backend:8000
+    volumes:
+      - fetch-family-1:/data
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  fetch-family-2:
+    profiles: [fetch]
+    build: ../agents/fetch
+    command: ["python", "/app/family_agent.py"]
+    env_file: /opt/pillow/fetch-family-2.env
+    environment:
+      PILLOW_SERVER: http://backend:8000
+    volumes:
+      - fetch-family-2:/data
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+volumes:
+  fetch-coordinator:
+  fetch-family-1:
+  fetch-family-2:

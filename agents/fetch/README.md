@@ -1,44 +1,100 @@
 ![tag:innovationlab](https://img.shields.io/badge/innovationlab-3D8BD3)
 ![tag:hackathon](https://img.shields.io/badge/hackathon-5F43F1)
 
-# Pillow family agent
+# Agentic pillow: the family's agents
 
-**Agent name:** `pillow-family-agent`
-**Agent address:** _printed on start-up (`family agent address: agent1q...`); paste it here after the first run_
+A bedside pillow watches over an older person who lives alone and gets up in the night. The pillow
+itself runs on plain, predictable code: if she isn't back in bed in time, it checks on her by voice,
+then alerts her family one after another until someone answers. **These agents are the family's
+side.** Each family member has their own agent, and the pillow has a coordinator that talks to all of
+them.
 
-The adult child of an older person who lives alone talks to their parent's bedside pillow here, in
-ASI:One. No app needed for the whole workflow:
+| Agent | Name | Address |
+|---|---|---|
+| Pillow coordinator | `pillow-coordinator-mum` | _set at deploy: `coordinator for mum: agent1q...` in its log_ |
+| Sarah's agent | `pillow-family-sarah` | _set at deploy_ |
+| Second family member's agent | `pillow-family-<name>` | _set at deploy_ |
 
-| Say | The agent does |
+All three are uAgents on Agentverse (Agent Chat Protocol, mailbox), reachable from ASI:One. They use
+Claude (`claude-opus-5-5`) for language, and plain code for every decision that matters.
+
+## What you can say to your agent (in ASI:One)
+
+| Say | What happens |
 |---|---|
-| "How was Mum's night?" | reads last night (trips, how long, whether she answered the pillow, who was alerted) and the Morning Brief |
-| "Is she in bed right now?" | live pillow state |
-| "Send Mum a goodnight message: sleep well, love you" | queues it; the pillow plays it in a calm voice when she next lies down |
-| "Set quiet hours to 23:00 to 07:00" / "Give her 25 minutes before you check in" | changes the setting, within the Guardian's bounds |
-| "What exactly did the pillow do last night?" | the agent log, step by step, with the Guardian's allowed / blocked verdicts |
+| "How was Mum's night?" | last night from the pillow (in bed, asleep, trips, check-ins, alerts, anything unusual), as a card |
+| "Send Mum a goodnight" | a form card; the pillow plays your words when she next lies down |
+| "I'm in Denver Thu to Sun, make sure Mum's covered" | a **plan**: your away nights, a goodnight for each night, maybe a setting, shown as one Confirm / Cancel card |
+| "Give her 25 minutes before it checks on her" | the same: a plan you confirm. The pillow's Guardian keeps it between 10 and 30 minutes |
+| "Who's on call tonight?" | the family roster, in alert order |
+| "What exactly did the pillow do last night?" | the agent log, step by step, with the Guardian's allowed or blocked verdicts |
 
-Behind the chat: Claude (`claude-opus-5-5`) reads the message and calls one of five tools. The
-tools only call the pillow's backend API (`coord/CONTRACT.md`, `backend/README.md`), which runs a
-plain-code Guardian on every change, so the agent cannot do anything the pillow itself wouldn't
-allow: no diagnoses, no out-of-range settings, no messages it can't vouch for.
+**Goals become plans, and nothing changes until you confirm.** Claude works out every step a goal
+needs, but every change is only queued. You see the whole plan on a review card (or reply yes or no),
+and only then does plain code carry it out through the pillow's API, which runs the Guardian on each
+step.
+
+## The evening roster: agents asking agents
+
+At 21:00 in her timezone (or when you ask the coordinator "plan tonight"), the coordinator asks every
+family member's agent **at the same time**: "can your person be called first tonight?" Each agent
+answers from what its person told it (the away dates in its memory). The coordinator then puts the
+available people on call and the away ones off call, and reports who is first tonight.
+
+    coordinator --AvailabilityRequest--> Sarah's agent, Tom's agent   (in parallel, 30 s to answer)
+    each agent  --AvailabilityReply-->   coordinator                  ("away: in Denver")
+    coordinator --PUT /roster/{contact}-> pillow API + Guardian       (on/off call, logged)
+
+**Why it's safe:** the pillow only uses `on_call` to decide who it tries *first*. It still alerts
+every family member in the end, so a wrong, late or missing roster changes the order of help but
+never withholds it. The Guardian never lets the last on-call person go off call. If an agent doesn't
+answer, its person is left as they were. If every agent is down, the pillow keeps last night's roster
+and works exactly as before.
+
+Protocol `pillow-watch-roster` 0.1.0 (`models.py`): `JoinRoster` (family agent → coordinator, says who
+it speaks for; the coordinator accepts it only for people who really look after this pillow),
+`AvailabilityRequest`, `AvailabilityReply`.
 
 ## Run it
 
+Locally, each agent in its own terminal:
+
 ```bash
-export AGENT_SEED='a long private phrase'      # the agent's identity; keep it the same between runs
+export CHECKIN_TOKEN=...            # backend/.env: the agents' token for the pillow API
+export PILLOW_ID=mum                # default
+AGENT_SEED='coordinator private phrase' uv run agents/fetch/coordinator_agent.py
+# prints: coordinator for mum: agent1q...
+
 export ANTHROPIC_API_KEY=sk-ant-...
-export CHECKIN_TOKEN=...                        # same value as backend/.env (settings changes)
-export PILLOW_SERVER=https://pillow.keanuc.net  # default
-uv run agents/fetch/family_agent.py
+AGENT_SEED='sarah private phrase' CONTACT_ID=<contacts.id> CONTACT_NAME=Sarah \
+  COORDINATOR_ADDRESS=agent1q... uv run agents/fetch/family_agent.py
 ```
 
-First run: open the **Local Agent Inspector** link from the log, click **Connect**, choose
-**Mailbox**, **Finish**. The agent then appears under your Agentverse local agents, publishes the
-Agent Chat Protocol manifest and this README, and can be found and chatted with in ASI:One (search
-for "pillow family agent"). It has to stay running to answer.
+Then open each agent's **Inspector** link from its log, click **Connect**, choose **Mailbox**. Or set
+`AGENTVERSE_API_KEY` and the agent connects its own mailbox at start-up (`agentverse.py`); this is how
+the agents connect on the VPS, which has no browser.
 
-## Protocol
+On the VPS they run in Docker next to the backend (`deploy/compose.yml`, profile `fetch`), switched
+on by `COMPOSE_PROFILES=fetch` in `deploy/.env`. Each reads its env file from `/opt/pillow`:
+`fetch-coordinator.env`, `fetch-family-1.env`, `fetch-family-2.env`.
 
-Agent Chat Protocol (`uagents_core.contrib.protocols.chat`, `AgentChatProtocol 0.3.0`). Every
-incoming `ChatMessage` is acknowledged, answered once with a `TextContent` and closed with
-`EndSessionContent`. Short per-sender history (6 turns) is kept in agent storage.
+| Variable | Agent | What |
+|---|---|---|
+| `AGENT_SEED` | all | private phrase = the agent's identity; never change it, never commit it |
+| `CHECKIN_TOKEN` | all | the pillow API's agent token (same as `backend.env`) |
+| `AGENTVERSE_API_KEY` | all | connects the mailbox without the Inspector |
+| `PILLOW_ID` | all | default `mum` |
+| `ROSTER_AT` | coordinator | default `21:00`, her time |
+| `CONTACT_ID`, `CONTACT_NAME` | family | who this agent speaks for (`contacts.id`) |
+| `COORDINATOR_ADDRESS` | family | the coordinator's `agent1q...` |
+| `ANTHROPIC_API_KEY` | family | Claude |
+| `RESIDENT_NAME` | family | how she's named in replies, default `Mum` |
+
+For a local test without Agentverse, set `AGENT_ENDPOINT=http://127.0.0.1:<port>/submit` and a
+different `AGENT_PORT` per agent.
+
+## Switching it off
+
+The agents are clients of the pillow's API and nothing more. The backend never calls them or waits
+for them. Stop them (or remove the `fetch` profile) and the pillow, Night Watch, the check-in voice,
+the alerts and the family app carry on unchanged.

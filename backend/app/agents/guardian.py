@@ -210,6 +210,19 @@ class Guardian:
             return Verdict(False, "; ".join(reasons), clean)
         return Verdict(True)
 
+    # ---------- on-call roster (Fetch.ai coordinator) ----------
+
+    def check_on_call(self, contacts: list[dict[str, Any]], contact_id: str, on_call: bool) -> Verdict:
+        """Agents may take a contact off call, but never the last one: someone is always tried first.
+
+        Off call only changes the order; Night Watch still alerts every contact in the end."""
+        if on_call:
+            return Verdict(True)
+        others = [c for c in contacts if c["id"] != contact_id and c.get("on_call", True)]
+        if not others:
+            return Verdict(False, "would leave nobody on call; at least one contact stays on call")
+        return Verdict(True)
+
     # ---------- helpers ----------
 
     def _local(self, ts: float) -> datetime:
