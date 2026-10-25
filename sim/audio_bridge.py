@@ -159,7 +159,8 @@ class Board:
                 q.put(b"talk\n")
 
     poster: "StatePoster | None" = None  # set by main() with --server
-    mic_gate = None  # FailoverBoard: a callable saying whether this link's mic audio counts
+    link: str | None = None  # CONTRACT 1 state.link: which way the voice unit is connected
+    mic_gate = None  # FailoverBoard: a callable saying whether this is the active link (its mic and state count)
 
     def _line(self, line: str) -> None:
         """Any other text line from the board: the Uno's state ("UNO {...}") goes to the server, the
@@ -170,13 +171,18 @@ class Board:
             if self.poster is not None:
                 self.poster.imu(line)
             return
-        if self.poster is not None and line.startswith("UNO ") and self.poster.post(line):
-            return
+        if self.poster is not None and line.startswith("UNO "):
+            if self.mic_gate is not None and not self.mic_gate():
+                return  # a late line from the link on its way out: the active one posts
+            if self.poster.post(line, self.link):
+                return
         print(f"board: {line}", flush=True)
 
 
 class SerialBoard(Board):
     """USB serial: text lines, audio as base64 s16le."""
+
+    link = "usb"
 
     def __init__(self, path: str, baud: int) -> None:
         super().__init__()
@@ -246,6 +252,8 @@ class HotspotBoard(SerialBoard):
     """The laptop's hotspot: the voice unit dials this TCP port and speaks the USB serial lines.
     One connection at a time; a newer one (the board rebooted) replaces the old."""
 
+    link = "hotspot"
+
     def __init__(self, host: str, port: int) -> None:
         super().__init__(f"{host}:{port}", 0)
         self.addr = (host, port)
@@ -292,6 +300,8 @@ class HotspotBoard(SerialBoard):
 class BleBoard(Board):
     """Bluetooth LE: one GATT service, audio as 16 kHz mu-law. Runs its own asyncio loop in a thread;
     command() and speak() hand work to it from the socket threads."""
+
+    link = "ble"
 
     def __init__(self, name: str) -> None:
         super().__init__()
@@ -448,10 +458,12 @@ class StatePoster:
         if motion is not None:
             self.imu_motion, self.imu_at = motion, time.monotonic()
 
-    def post(self, line: str) -> bool:
+    def post(self, line: str, link: str | None = None) -> bool:
         state = uno_line_to_state(line, pillow_id=self.pillow_id, ts=round(time.time(), 2))
         if state is None:
             return False
+        if link is not None:
+            state["link"] = link
         if state["motion"] is None and time.monotonic() - self.imu_at < IMU_FRESH_S:
             state["motion"] = self.imu_motion  # the pillow node has no IMU: the voice unit's
         with contextlib.suppress(queue.Empty):
