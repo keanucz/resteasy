@@ -123,7 +123,7 @@ def test_family_ack_stops_the_ladder():
 
 def test_tap_during_checkin_cancels_it():
     nw = NightWatch()
-    nw.state, nw._left_at = State.CHECK_IN, NIGHT
+    nw.state, nw._left_at, nw._on_a_trip = State.CHECK_IN, NIGHT, True
     acts = nw.observe({"ts": NIGHT + 1, "head_on": False, "keys": {"fine": True}})
     assert any(isinstance(a, CancelCheckin) for a in acts) and nw.state is State.UP
 
@@ -367,3 +367,19 @@ def test_turning_the_cooldown_off_asks_again_at_once():
     assert not any(isinstance(a, StartCheckin) for a in nw.observe({"ts": done + 60, "head_on": False}))
     nw.cfg = replace(nw.cfg, checkin_cooldown_min=0)
     assert any(isinstance(a, StartCheckin) for a in nw.observe({"ts": done + 61, "head_on": False}))
+
+
+def test_fine_after_an_alert_from_awake_goes_back_to_awake():
+    # A distress reply to a daytime reminder, then "I'm fine": no trip out of bed to watch
+    nw = NightWatch(NightWatchConfig(), DEMO_TIMINGS)
+    nw.distress_heard(DAY, "She said: \"help\"")
+    assert nw.state is State.ESCALATING
+    nw.fine_pressed(DAY + 30)
+    assert nw.state is State.AWAKE
+    later = [a for s in range(1, 300) for a in nw.tick(DAY + 30 + s)]
+    assert not any(isinstance(a, StartCheckin) for a in later)
+
+
+def test_fine_after_an_alert_on_a_trip_keeps_watching_the_trip():
+    nw, done = _up_and_said_fine(NightWatchConfig())
+    assert nw.state is State.UP

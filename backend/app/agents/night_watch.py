@@ -150,6 +150,7 @@ class NightWatch:
         self._last_ts = -math.inf
         self._fine_held = False
         self._left_at = 0.0  # when her head left the pillow this trip
+        self._on_a_trip = False  # she got up at night (bed_exit), so being up is watched
         self._checkin_due = math.inf
         self._checkin_deadline = math.inf  # when a running check-in counts as failed
         self._last_checkin_at = -math.inf  # when the last check-in started or reported back
@@ -176,6 +177,7 @@ class NightWatch:
             return
         self.state = State.UP
         self._left_at = since
+        self._on_a_trip = True
         self._checkin_due = since + self._checkin_wait_s() if state is State.UP else -math.inf
 
     def observe(self, s: dict) -> list[Action]:
@@ -290,6 +292,7 @@ class NightWatch:
             return [Event(ts, "got_up", {})]
         self.state = State.UP
         self._left_at = left_at
+        self._on_a_trip = True
         self._checkin_due = left_at + self._checkin_wait_s()
         return [
             Event(ts, "bed_exit", {"left_at": left_at}),
@@ -333,6 +336,12 @@ class NightWatch:
         return out
 
     def _said_fine(self, ts: float) -> list[Action]:
+        if not self._on_a_trip:
+            # The alert came from something she said while awake or in bed, not from a trip out
+            # of bed: go back to that, rather than watching a trip that never started
+            self.state = State.IN_BED if self._head_on and self._is_night(ts) else State.AWAKE
+            self._reset_trip()
+            return []
         self.state = State.UP
         self._fine_rounds += 1
         recheck_s = self.timings.recheck_after_fine_s
@@ -432,6 +441,7 @@ class NightWatch:
 
     def _reset_trip(self) -> None:
         self._checkin_due = math.inf
+        self._on_a_trip = False
         self._fine_rounds = 0
         self._ladder, self._next_step_at, self._alerted = [], math.inf, []
 
