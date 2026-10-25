@@ -130,16 +130,20 @@ def _strict(props: dict[str, Any] | None = None, required: list[str] | None = No
             "additionalProperties": False}
 
 
+NIGHT_ARG = {"type": ["string", "null"], "description": "YYYY-MM-DD of the EVENING the night started "
+             "(a night runs 18:00 to noon, so Wednesday 3am is Tuesday's night); null = the latest night"}
+
 TOOLS: list[dict[str, Any]] = [
     {"name": "get_status", "description": "Live state now: is her head on the pillow, the night state "
      "(awake/in_bed/up/check_in/escalating), room light and temperature.", "strict": True,
      "input_schema": _strict()},
-    {"name": "get_night", "description": "Last night: summary (lay down, asleep, trips with times and "
-     "lengths, check-ins, alerts, who acknowledged, restless spells, anything unusual), the latest Morning "
-     "Brief note if one exists, and current settings. The person also sees it as a card.", "strict": True,
-     "input_schema": _strict()},
-    {"name": "get_agent_log", "description": "What the pillow's agents did last night, step by step, with "
-     "the Guardian's allowed/blocked verdicts.", "strict": True, "input_schema": _strict()},
+    {"name": "get_night", "description": "One night (last night by default): summary (lay down, asleep, "
+     "trips with times and lengths, check-ins, alerts, who acknowledged, restless spells, anything unusual), "
+     "the latest Morning Brief note if one exists, and current settings. The person also sees it as a card.",
+     "strict": True, "input_schema": _strict({"night": NIGHT_ARG})},
+    {"name": "get_agent_log", "description": "What the pillow's agents did in one night (last night by "
+     "default), step by step, with the Guardian's allowed/blocked verdicts.", "strict": True,
+     "input_schema": _strict({"night": NIGHT_ARG})},
     {"name": "get_roster", "description": "Who looks after her, in alert order, and who is on call "
      "(tried first) right now.", "strict": True, "input_schema": _strict()},
     {"name": "get_my_availability", "description": f"{CONTACT_NAME}'s away nights, from tonight on.",
@@ -280,6 +284,29 @@ async def find_reminder(http: httpx.AsyncClient, reminder_id: int) -> dict[str, 
     return next((x for x in r.json() if x["id"] == reminder_id), None)
 
 
+async def latest_night(
+    http: httpx.AsyncClient, base: str, evening: str | None = None
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """GET /night for the night starting on `evening`, or the latest one. In the evening before
+    tonight has really started (no lay-down, no trips), "her night" means last night: return that
+    one, plus a note on tonight so far."""
+    if evening:
+        r = await http.get(f"{base}/night", params={"night": date.fromisoformat(evening).isoformat()})
+        r.raise_for_status()
+        return r.json(), None
+    r = await http.get(f"{base}/night")
+    r.raise_for_status()
+    night = r.json()
+    if night["summary"].get("lay_down") or night["summary"].get("trip_count"):
+        return night, None
+    evening = date.fromisoformat(night["window_start"][:10]) - timedelta(days=1)
+    prev = await http.get(f"{base}/night", params={"night": evening.isoformat()})
+    if prev.status_code != 200:
+        return night, None
+    tonight = {"window": [night["window_start"], night["window_end"]], "note": "she hasn't lain down yet"}
+    return prev.json(), tonight
+
+
 async def call_tool(http: httpx.AsyncClient, name: str, args: dict[str, Any]) -> Any:
     base = f"{SERVER}/api/pillows/{PILLOW_ID}"
     gone = {"error": "that reminder no longer exists"}
@@ -289,17 +316,7 @@ async def call_tool(http: httpx.AsyncClient, name: str, args: dict[str, Any]) ->
         s = r.json()
         return {k: s.get(k) for k in ("night_state", "head_on", "light", "temp_c", "humidity", "state_since")}
     if name == "get_night":
-        r = await http.get(f"{base}/night")
-        r.raise_for_status()
-        night = r.json()
-        tonight = None
-        if not night["summary"].get("lay_down") and not night["summary"].get("trip_count"):
-            # Evening, and tonight hasn't really started: "how was her night" means last night
-            evening = date.fromisoformat(night["window_start"][:10]) - timedelta(days=1)
-            prev = await http.get(f"{base}/night", params={"night": evening.isoformat()})
-            if prev.status_code == 200:
-                tonight = {"window": [night["window_start"], night["window_end"]], "note": "nothing yet"}
-                night = prev.json()
+        night, tonight = await latest_night(http, base, args.get("night"))
         out = {"resident": night["resident"], "window": [night["window_start"], night["window_end"]],
                "summary": night["summary"], "settings": night["settings"]}
         if tonight:
@@ -309,10 +326,11 @@ async def call_tool(http: httpx.AsyncClient, name: str, args: dict[str, Any]) ->
             out["morning_brief"] = b.json()
         return out
     if name == "get_agent_log":
-        r = await http.get(f"{base}/night")
-        r.raise_for_status()
-        return [{k: row.get(k) for k in ("ts", "agent", "intent", "guardian", "reason")}
-                for row in r.json()["agent_log"]][-40:]
+        night, tonight = await latest_night(http, base, args.get("night"))
+        steps = [{k: row.get(k) for k in ("ts", "agent", "intent", "guardian", "reason")}
+                 for row in night["agent_log"]][-40:]
+        return {"night": [night["window_start"], night["window_end"]], "steps": steps,
+                **({"tonight_so_far": tonight} if tonight else {})}
     if name == "get_roster":
         r = await http.get(f"{base}/roster", headers=AUTH)
         r.raise_for_status()

@@ -91,3 +91,22 @@ def test_night_watch_checks_in_at_the_learned_wait(db: Client, week: TestClient)
 
     log = db.table(AGENT_LOG_TABLE).select("intent, tool").eq("pillow_id", TEST_PILLOW_ID).execute().data
     assert any(r["tool"] == "baseline" and r["intent"].startswith(f"check-in wait {wait} min") for r in log)
+
+
+def test_a_restart_does_not_log_the_same_wait_again(db: Client, week: TestClient) -> None:
+    """Each deploy restarts the backend; the learned wait is logged once, not once per restart."""
+    from app.main import app
+
+    _seed_week(db, NIGHT.replace(hour=18))
+    body = {"pillow_id": TEST_PILLOW_ID, "ts": NIGHT.timestamp(), "head_on": False, "motion": 0.05,
+            "room_motion": False, "light": 0.02, "keys": {"fine": False}}
+
+    def baseline_rows() -> int:
+        rows = db.table(AGENT_LOG_TABLE).select("tool").eq("pillow_id", TEST_PILLOW_ID).execute().data
+        return sum(r["tool"] == "baseline" for r in rows)
+
+    assert week.post(STATE_URL, json=body).status_code == 200
+    assert baseline_rows() == 1
+    with TestClient(app) as restarted:  # a fresh lifespan: a new WatchService with no memory
+        assert restarted.post(STATE_URL, json=dict(body, ts=body["ts"] + 1)).status_code == 200
+    assert baseline_rows() == 1

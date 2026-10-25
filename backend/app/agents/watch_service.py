@@ -45,6 +45,7 @@ from app.crud.commands import queue_command
 from app.crud.night_log import (
     add_event,
     add_notification,
+    latest_log_row,
     list_trips_between,
     log_action,
     open_incident,
@@ -60,6 +61,7 @@ from app.schemas.pillow_state import DeviceState
 log = logging.getLogger(__name__)
 
 AGENT = "night_watch"
+BASELINE_TOOL = "baseline"  # agent_log tool of the check-in wait notes
 CONFIG_REFRESH_S = 60  # re-read the resident's settings (pause, quiet hours) this often
 # Night Watch's alert channels -> notifications.channel
 CHANNELS = {"app": "app", "sms": "sms", "call": "call"}
@@ -233,9 +235,12 @@ class WatchService:
         w.guardian.cfg = GuardianConfig(timezone=resident["timezone"], quiet_hours=quiet_hours,
                                         step_wait_min=resident["step_wait_min"], sms_consent=consent)
         w.loaded_at = clock.monotonic()
+        if not w.wait_note:  # first load since the backend started: what was logged before it?
+            last = await latest_log_row(db, pillow.id, AGENT, tool=BASELINE_TOOL)
+            w.wait_note = last["intent"] if last else ""
         if baseline.note() != w.wait_note:
             w.wait_note = baseline.note()
-            await log_action(db, pillow.id, AGENT, intent=w.wait_note, tool="baseline",
+            await log_action(db, pillow.id, AGENT, intent=w.wait_note, tool=BASELINE_TOOL,
                              args=baseline.as_dict())
 
     # ---------- writing decisions back ----------

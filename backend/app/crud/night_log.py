@@ -184,15 +184,12 @@ async def list_agent_log_between(db: AsyncClient, pillow_id: str, start_iso: str
     return response.data
 
 
-async def latest_log_row(db: AsyncClient, pillow_id: str, agent: str) -> dict | None:
-    """The most recent agent_log row written by `agent` (e.g. the last Morning Brief), or None."""
-    response = await (
-        db.table(AGENT_LOG_TABLE)
-        .select("ts, agent, intent, args, guardian, reason")
-        .eq("pillow_id", pillow_id)
-        .eq("agent", agent)
-        .order("ts", desc=True)
-        .limit(1)
-        .execute()
-    )
+async def latest_log_row(db: AsyncClient, pillow_id: str, agent: str, tool: str | None = None) -> dict | None:
+    """The most recent agent_log row written by `agent` (e.g. the last Morning Brief), optionally
+    only rows for `tool`, or None."""
+    query = db.table(AGENT_LOG_TABLE).select("ts, agent, intent, args, guardian, reason")
+    query = query.eq("pillow_id", pillow_id).eq("agent", agent)
+    if tool is not None:
+        query = query.eq("tool", tool)
+    response = await query.order("ts", desc=True).limit(1).execute()
     return response.data[0] if response.data else None
