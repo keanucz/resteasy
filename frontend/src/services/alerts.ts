@@ -46,6 +46,17 @@ export const stopDebugAlert = (pillowId: string) =>
 export const startDebugReminder = (pillowId: string) =>
   api<{ night_state: string }>(`/pillows/${pillowId}/alert-debug/reminder`, { method: 'POST' });
 
+/** Whether the pillow waits `minutes` after a check-in before checking on her again. */
+export type CheckinCooldown = { on: boolean; minutes: number };
+
+/** Test accounts only: read the wait between check-ins. */
+export const getCheckinCooldown = (pillowId: string) =>
+  api<CheckinCooldown>(`/pillows/${pillowId}/alert-debug/cooldown`);
+
+/** Test accounts only: turn the wait between check-ins on, or off so the pillow asks every time. */
+export const setCheckinCooldown = (pillowId: string, on: boolean) =>
+  api<CheckinCooldown>(`/pillows/${pillowId}/alert-debug/cooldown`, { method: 'PUT', body: { on } });
+
 /** Send one test text or call to this person's own number now. */
 export const sendTestAlert = (channel: 'sms' | 'call') =>
   api<AlertTestResult>('/me/alerts/test', { method: 'POST', body: { channel } });

@@ -44,9 +44,11 @@ def night(db: Client, live_client: TestClient, monkeypatch: pytest.MonkeyPatch) 
     """A live client with the test pillow's night history cleared before and after."""
     monkeypatch.setattr(get_settings(), "checkin_token", CHECKIN_TOKEN)
     monkeypatch.setattr(get_settings(), "pillow_demo_timings", False)  # real timings, whatever .env says
-    resident = db.table(RESIDENTS_TABLE).select("checkin_timeout_min").eq("id", TEST_RESIDENT_ID)
+    resident = db.table(RESIDENTS_TABLE).select("checkin_timeout_min, checkin_cooldown_min").eq(
+        "id", TEST_RESIDENT_ID
+    )
     saved = resident.execute().data[0]
-    pinned = {"checkin_timeout_min": CHECKIN_WAIT_MIN}
+    pinned = {"checkin_timeout_min": CHECKIN_WAIT_MIN, "checkin_cooldown_min": 0}
     db.table(RESIDENTS_TABLE).update(pinned).eq("id", TEST_RESIDENT_ID).execute()
     _clean(db)
     yield live_client

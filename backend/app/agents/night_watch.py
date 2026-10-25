@@ -52,7 +52,7 @@ class Timings:
 # head plate, so a five-minute judging slot sees them all. Held on 2 s = in bed, so with the bridge's
 # second of lag the app shows her in bed about 3 s after the press. The check-in counts from the lift. After
 # "I'm fine" it waits a minute, so a rehearsal can't run into the second-fine family heads-up. A
-# check-in that hasn't reported within 120 s alerts family. The pillow's own check-in (up to three
+# check-in that hasn't reported within 120 s alerts family. The pillow's own check-in (up to two
 # asks, the warning, a 4 s judge each) reports first, so this only fires if the base laptop is gone;
 # 10 s and then 30 s both turned real "I'm fine"s into false alarms.
 DEMO_TIMINGS = Timings(
@@ -82,6 +82,9 @@ class NightWatchConfig:
     paused: bool = False  # she (or the owner) paused monitoring: start no new watch
     path_light: dict = field(default_factory=lambda: dict(PATH_LIGHT_ON))
     step_wait_min: float = 2  # between escalation steps
+    # After a check-in starts, no new one for this long, so the pillow doesn't keep asking (the
+    # resident's checkin_cooldown_min; the app's alert debug turns it off for a demo). 0: none
+    checkin_cooldown_min: float = 0
     # The ladder channels ("app", "sms", "call") each contact allows (Settings > Alerts in the app);
     # a contact missing here allows every channel
     channels: Mapping[str, frozenset[str]] = field(default_factory=dict)
@@ -149,6 +152,7 @@ class NightWatch:
         self._left_at = 0.0  # when her head left the pillow this trip
         self._checkin_due = math.inf
         self._checkin_deadline = math.inf  # when a running check-in counts as failed
+        self._last_checkin_at = -math.inf  # when the last check-in started or reported back
         self._fine_rounds = 0  # check-ins this trip where she said she was fine
         self._ladder: list[list[tuple[str, str]]] = []  # steps still to run: [(channel, contact)]
         self._next_step_at = math.inf
@@ -220,6 +224,7 @@ class NightWatch:
         something alarming ("help, I've fallen"), so family are phoned at once, not after the ladder."""
         if self.state is not State.CHECK_IN:
             return []  # cancelled meanwhile (back in bed, or tapped)
+        self._last_checkin_at = ts
         distress = escalate and distress
         out: list[Action] = [Event(ts, "checkin_result",
                                    {"escalate": escalate, "reason": reason, "distress": distress})]
@@ -297,12 +302,13 @@ class NightWatch:
             # She lay down before quiet hours began: start watching now, not only at the next lay-down.
             self.state = State.IN_BED
             return [Event(ts, "lay_down", {"watching": True, "late_start": True})]
-        if self.state is State.UP and ts >= self._checkin_due:
+        if self.state is State.UP and ts >= max(self._checkin_due, self._cooldown_ends()):
             # Every no-return goes through the voice check-in: it alone decides to escalate, so she
             # is always asked and warned (with a chance to cancel) before family are alarmed.
             away = round((ts - self._left_at) / 60)
             self.state = State.CHECK_IN
             self._checkin_due = math.inf
+            self._last_checkin_at = ts
             self._checkin_deadline = ts + self.timings.checkin_max_s
             return [
                 Event(ts, "no_return", {"away_min": away, "round": self._fine_rounds + 1}),
@@ -414,6 +420,11 @@ class NightWatch:
         """Whether `contact` takes alerts on `channel`."""
         allowed = self.cfg.channels.get(contact)
         return allowed is None or channel in allowed
+
+    def _cooldown_ends(self) -> float:
+        """When the next check-in may start, read from the config each time so turning the cooldown
+        off takes effect at once."""
+        return self._last_checkin_at + self.cfg.checkin_cooldown_min * 60
 
     def _tell_alerted(self, message: str) -> list[Action]:
         return [Alert(c, "sms", message) for c in self._alerted]

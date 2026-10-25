@@ -28,6 +28,19 @@ class NightStatus(BaseModel):
     night_state: str
 
 
+class CheckinCooldown(BaseModel):
+    """Alert debug: whether the pillow waits `minutes` after a check-in before checking again."""
+
+    on: bool
+    minutes: int
+
+
+class CheckinCooldownChange(BaseModel):
+    """Alert debug: turn the wait between check-ins on, or off so the pillow asks every time."""
+
+    on: bool
+
+
 class KeyPress(BaseModel):
     """A key on the bedside pad, sent by the base laptop (POST /keys)."""
 

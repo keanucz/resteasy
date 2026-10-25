@@ -118,6 +118,9 @@ ALERT_DEBUG_NOT_TEST = "Only test accounts can start or stop alerts from the app
 # The debug alert runs as if she had said this to the pillow: a real distress alert, the call agent
 # hearing her words like on any night
 ALERT_DEBUG_REASON = "She said: \"I'm feeling dizzy.\""
+# How long the pillow waits after a check-in before it checks on her again, unless alert debug
+# turns the wait off (residents.checkin_cooldown_min, 0 = ask every time)
+CHECKIN_COOLDOWN_MIN = 10
 # A one-off reminder due this minute, agreed already, so the pillow says it within a reminder tick
 DEMO_REMINDER = {
     "label": "take your evening tablets",

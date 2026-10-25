@@ -58,6 +58,9 @@ FINE_LINE = "Glad you're okay. Take your time."
 FIXED_LINES = ((FIRST_ASK, VOLUMES[0]), (FINE_LINE, 1.0))  # rendered once by the client: no wait
 
 
+MAX_TRIES = 2  # "Are you alright?" twice, then the warning; the server then waits before asking again
+
+
 class _Stopped(Exception):
     """She pressed "I'm fine" during the check-in."""
 
@@ -68,7 +71,7 @@ def run_checkin(
     *,
     judge: Judge = keyword_judge,
     contact: str = "your family",
-    max_tries: int = 3,
+    max_tries: int = MAX_TRIES,
     no_answer_s: float = 8.0,
     cancel_s: float = 15.0,
     log: Callable[[str], None] = lambda _: None,
@@ -155,7 +158,7 @@ def run_checkin(
 
 
 ALERT_ASK_EVERY_S = 120.0  # while family are being alerted, offer her a way out now and then
-ALERT_ASKS_MAX = 4  # so at most four asks, over about eight minutes
+ALERT_ASKS_MAX = 2  # so at most two asks, over about four minutes
 ALERT_LINE = "I've let {contact} know. If you're okay, just say I'm fine."
 ALERT_FINE_LINE = "Okay. I'll tell {contact} you're fine."
 
@@ -179,7 +182,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--contact", default="your family", help="who gets alerted, e.g. Sarah")
-    parser.add_argument("--tries", type=int, default=3)
+    parser.add_argument("--tries", type=int, default=MAX_TRIES)
     parser.add_argument("--no-answer-s", type=float, default=8.0)
     parser.add_argument("--cancel-s", type=float, default=15.0)
     parser.add_argument("--keywords", action="store_true", help="judge replies by keywords, not Claude")

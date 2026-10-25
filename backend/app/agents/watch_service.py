@@ -174,6 +174,12 @@ class WatchService:
             await self._apply(db, pillow.id, w, actions, before, ts)
             return str(w.nw.state)
 
+    async def reload(self, db: AsyncClient, pillow: Pillow) -> None:
+        """Re-read the pillow's settings now, not at the next refresh (a change from the app)."""
+        w = await self._watch(db, pillow)
+        async with w.lock:
+            await self._load_settings(db, pillow, w)
+
     async def tick_all(self, db: AsyncClient) -> None:
         """Run every watch's due timers, so a silent pillow or a check-in that never reports back
         still moves the ladder. Device time is extrapolated from each pillow's last report."""
@@ -250,6 +256,7 @@ class WatchService:
             quiet_hours=quiet_hours,
             paused=resident["monitoring_paused"],
             step_wait_min=resident["step_wait_min"],
+            checkin_cooldown_min=resident.get("checkin_cooldown_min") or 0,
             channels={
                 name: frozenset(ch for ch, column in CHANNEL_SWITCHES.items() if c.get(column, True))
                 for name, c in zip(w.contact_ids, contacts, strict=True)

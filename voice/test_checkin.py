@@ -62,17 +62,17 @@ def test_distress_escalates_at_once_and_tells_her():
     assert "getting Sarah" in said[-1][0] and len(said) == 2
 
 
-def test_silence_three_louder_tries_then_warning_then_escalate():
-    speak, listen, said = fake(None, None, None, None)
+def test_silence_two_louder_tries_then_warning_then_escalate():
+    speak, listen, said = fake(None, None, None)
     out = run_checkin(speak, listen, contact="Sarah")
     assert out.escalate and not out.distress and out.reason == "She didn't answer."
-    asks = [v for _, v in said[:3]]
+    asks = [v for _, v in said[:2]]
     assert asks == sorted(asks) and asks[0] < asks[-1]
-    assert "let Sarah know" in said[3][0]
+    assert "let Sarah know" in said[2][0] and len(said) == 3
 
 
 def test_fine_during_warning_cancels():
-    speak, listen, said = fake(None, None, None, "I'm fine, sorry")
+    speak, listen, said = fake(None, None, "I'm fine, sorry")
     out = run_checkin(speak, listen)
     assert not out.escalate
 
@@ -93,8 +93,8 @@ def test_confused_reorients_once_then_counts():
 def test_confused_forever_still_ends():
     speak, listen, said = fake(*["where am I?"] * 10)
     out = run_checkin(speak, listen)
-    # first ask, then 3 tries after the reorient, the warning, then nothing more
-    assert out.escalate and len(said) == 1 + 3 + 1 and "confused" in out.reason
+    # first ask, then 2 tries after the reorient, the warning, then nothing more
+    assert out.escalate and len(said) == 1 + 2 + 1 and "confused" in out.reason
 
 
 def test_judge_wording_used_for_fine_but_not_distress():
@@ -120,7 +120,7 @@ def test_reorient_line_is_fixed_not_the_judges():
 
 def test_fine_during_warning_needs_an_explicit_im_fine():
     for reply in ("Yes please, call her", "yeah"):  # agreeing to the call, not cancelling it
-        speak, listen, _ = fake(None, None, None, reply)
+        speak, listen, _ = fake(None, None, reply)
         assert run_checkin(speak, listen).escalate
 
 
