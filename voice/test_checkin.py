@@ -58,14 +58,14 @@ def test_fine_first_try_stands_down():
 def test_distress_escalates_at_once_and_tells_her():
     speak, listen, said = fake("help, I've fallen")
     out = run_checkin(speak, listen, contact="Sarah")
-    assert out.escalate and "fallen" in out.reason
+    assert out.escalate and out.distress and "fallen" in out.reason
     assert "getting Sarah" in said[-1][0] and len(said) == 2
 
 
 def test_silence_three_louder_tries_then_warning_then_escalate():
     speak, listen, said = fake(None, None, None, None)
     out = run_checkin(speak, listen, contact="Sarah")
-    assert out.escalate and out.reason == "She didn't answer."
+    assert out.escalate and not out.distress and out.reason == "She didn't answer."
     asks = [v for _, v in said[:3]]
     assert asks == sorted(asks) and asks[0] < asks[-1]
     assert "let Sarah know" in said[3][0]

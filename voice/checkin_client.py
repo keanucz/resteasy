@@ -309,7 +309,7 @@ def main() -> None:
                     if out.reason == checkin.STOPPED_REASON:
                         print(f"{stamp}  check-in stopped: she pressed I'm fine (the server knows)", flush=True)
                         continue
-                    body = {"escalate": out.escalate, "reason": out.reason[:300]}
+                    body = {"escalate": out.escalate, "reason": out.reason[:300], "distress": out.distress}
                     resp = post_result(http, f"{base}/checkin", body)
                     print(f"{stamp}  check-in {'ESCALATE' if out.escalate else 'STAND DOWN'}: "
                           f"{out.reason} -> {resp}", flush=True)

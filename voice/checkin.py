@@ -35,6 +35,7 @@ class Outcome:
     escalate: bool
     reason: str  # one plain sentence for the family message, never a diagnosis
     heard: list[str] = field(default_factory=list)
+    distress: bool = False  # she sounded in trouble: the server calls family at once
 
 
 Speak = Callable[..., None]  # speak(text, volume=...)
@@ -90,7 +91,7 @@ def run_checkin(
 
     def distress() -> Outcome:
         speak(f"Okay. I'm getting {contact} for you now. Help is coming.", volume=1.3)
-        return Outcome(True, f'She said: "{heard[-1]}"', heard)
+        return Outcome(True, f'She said: "{heard[-1]}"', heard, distress=True)
 
     def fine(v: Verdict) -> Outcome:
         speak(_usable(v.say) or "Glad you're okay. Take your time.")
