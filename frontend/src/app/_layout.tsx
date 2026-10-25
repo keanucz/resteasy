@@ -67,21 +67,25 @@ export default function RootLayout() {
 function Routes({ signedIn }: { signedIn: boolean }) {
   const { colors } = useTheme();
   const { pillowId, ready } = usePillowLink();
-  // Until /me answers, a signed-in login without a saved link may still have a pillow: wait for it
-  // rather than flash the pairing screen.
-  if (signedIn && pillowId === null && !ready) return null;
+  // Until /me answers, a signed-in login without a saved link may still have a pillow: wait on a
+  // blank screen rather than flash the pairing screen. The Stack stays mounted throughout, since
+  // unmounting the root navigator while its guards flip crashes Expo Router on iOS.
+  const where = !signedIn ? 'login' : pillowId !== null ? 'pillow' : ready ? 'connect' : 'loading';
   return (
     // One read of the pillow's data, shared by Tonight, Settings and the night screen.
     <PillowProvider pillowId={signedIn ? pillowId : null}>
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.canvas } }}>
-        <Stack.Protected guard={signedIn && pillowId !== null}>
+        <Stack.Protected guard={where === 'pillow'}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="night/[start]" />
         </Stack.Protected>
-        <Stack.Protected guard={signedIn && pillowId === null}>
+        <Stack.Protected guard={where === 'loading'}>
+          <Stack.Screen name="loading" />
+        </Stack.Protected>
+        <Stack.Protected guard={where === 'connect'}>
           <Stack.Screen name="connect" />
         </Stack.Protected>
-        <Stack.Protected guard={!signedIn}>
+        <Stack.Protected guard={where === 'login'}>
           <Stack.Screen name="login" />
         </Stack.Protected>
         {/* Every component in both schemes; open /styleguide while building screens. */}
