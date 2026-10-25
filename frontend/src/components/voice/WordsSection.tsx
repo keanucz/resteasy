@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 
 import { Button } from '@/components/Button';
@@ -7,7 +7,7 @@ import { phaseOf, PlayButton, previewError } from '@/components/PlayButton';
 import { ListRowSkeleton, SkeletonGroup } from '@/components/Skeleton';
 import { TextField } from '@/components/TextField';
 import { Disclosure } from '@/components/voice/Disclosure';
-import type { VoicePlayer } from '@/hooks/useVoicePlayer';
+import { loadOnce, type Playing, type VoicePlayer } from '@/hooks/useVoicePlayer';
 import { ApiError } from '@/services/api';
 import {
   addPronunciation,
@@ -47,41 +47,54 @@ type WordsSectionProps = {
  */
 export function WordsSection({ residentId, voiceId, player }: WordsSectionProps) {
   const [words, setWords] = useState<Pronunciation[] | null>(null);
-  const [word, setWord] = useState('');
-  const [soundsLike, setSoundsLike] = useState('');
-  const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<Pronunciation | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
 
+  const { playing, toggle } = player;
+
   useEffect(() => {
-    readPronunciations(residentId).then(setWords, () =>
-      setStatus({ kind: 'error', text: "Couldn't load the words. Check your connection and try again." }),
+    let cancelled = false;
+    readPronunciations(residentId).then(
+      (found) => {
+        if (!cancelled) setWords(found);
+      },
+      () => {
+        if (!cancelled)
+          setStatus({ kind: 'error', text: "Couldn't load the words. Check your connection and try again." });
+      },
     );
+    return () => {
+      cancelled = true;
+    };
   }, [residentId]);
 
-  const hear = (key: string, text: string) => {
-    setStatus(null);
-    player
-      .toggle(key, () => previewVoice(residentId, voiceId, text))
-      .catch((e) => setStatus({ kind: 'error', text: previewError(e) }));
-  };
+  const hear = useCallback(
+    (key: string, text: string) => {
+      setStatus(null);
+      toggle(key, () =>
+        loadOnce(`preview|${residentId}|${voiceId}|${text}`, () => previewVoice(residentId, voiceId, text)),
+      ).catch((e) => setStatus({ kind: 'error', text: previewError(e) }));
+    },
+    [residentId, voiceId, toggle],
+  );
 
-  const add = async () => {
-    setBusy(true);
-    setStatus(null);
-    try {
-      const added = await addPronunciation(residentId, word, soundsLike);
-      setWords((w) => [...(w ?? []), added]);
-      forgetPreviews();
-      setWord('');
-      setSoundsLike('');
-      setStatus({ kind: 'saved', text: `Added. The pillow says ${added.word} like "${added.sounds_like}" now.` });
-    } catch (e) {
-      setStatus({ kind: 'error', text: wordError(e) });
-    } finally {
-      setBusy(false);
-    }
-  };
+  /** Teaches the pillow the word; true when it took, so the form can clear. */
+  const add = useCallback(
+    async (word: string, soundsLike: string): Promise<boolean> => {
+      setStatus(null);
+      try {
+        const added = await addPronunciation(residentId, word, soundsLike);
+        setWords((w) => [...(w ?? []), added]);
+        forgetPreviews();
+        setStatus({ kind: 'saved', text: `Added. The pillow says ${added.word} like "${added.sounds_like}" now.` });
+        return true;
+      } catch (e) {
+        setStatus({ kind: 'error', text: wordError(e) });
+        return false;
+      }
+    },
+    [residentId],
+  );
 
   const remove = async (w: Pronunciation) => {
     setRemoving(null);
@@ -96,8 +109,6 @@ export function WordsSection({ residentId, voiceId, player }: WordsSectionProps)
     }
   };
 
-  const ready = word.trim().length > 0 && soundsLike.trim().length > 0;
-
   return (
     <View className="gap-4">
       {words === null ? (
@@ -111,59 +122,13 @@ export function WordsSection({ residentId, voiceId, player }: WordsSectionProps)
       ) : (
         <View className="gap-2.5">
           {words.map((w) => (
-            <View key={w.id} className="rounded-2xl bg-surface">
-              <View className="flex-row items-center gap-3 py-3 pl-3.5 pr-2.5">
-                <View className="flex-1 gap-0.5">
-                  <Text className="font-sans-semibold text-base text-ink">{w.word}</Text>
-                  <Text className="font-sans text-[13px] text-ink-muted">
-                    Said like &quot;{w.sounds_like}&quot;{w.created_by_name ? `. Added by ${w.created_by_name}.` : '.'}
-                  </Text>
-                </View>
-                <PlayButton what={w.word} state={phaseOf(player.playing, w.id)} onPress={() => hear(w.id, tryLine(w.word))} />
-              </View>
-              <View className="flex-row justify-end px-1 pb-1">
-                <Button variant="ghost" title="Remove" onPress={() => setRemoving(w)} />
-              </View>
-            </View>
+            <WordRow key={w.id} word={w} state={phaseOf(playing, w.id)} onHear={hear} onRemove={setRemoving} />
           ))}
         </View>
       )}
 
       <Disclosure title="Add a word">
-        <View className="gap-3 rounded-2xl border border-hairline p-4">
-          <TextField
-            label="Word"
-            value={word}
-            onChangeText={setWord}
-            placeholder="For example, Siobhan"
-            maxLength={WORD_MAX}
-            autoCapitalize="words"
-          />
-          <View className="gap-1">
-            <TextField
-              label="Say it like"
-              value={soundsLike}
-              onChangeText={setSoundsLike}
-              placeholder="shiv-AWN"
-              maxLength={SOUNDS_LIKE_MAX}
-              autoCapitalize="none"
-            />
-            <Text className="font-sans text-[13px] text-ink-muted">
-              Spell it the way it sounds, with the loud part in capitals.
-            </Text>
-          </View>
-          <View className="flex-row flex-wrap items-center gap-2">
-            <PlayButton
-              title="Hear it"
-              what="how it will sound"
-              state={phaseOf(player.playing, 'new-word')}
-              onPress={() => ready && hear('new-word', tryLine(soundsLike.trim()))}
-            />
-            <View className="flex-1">
-              <Button fullWidth title="Add word" loading={busy} disabled={!ready} onPress={add} />
-            </View>
-          </View>
-        </View>
+        <AddWord playing={playing} onHear={hear} onAdd={add} />
       </Disclosure>
       <StatusLine status={status} />
 
@@ -177,6 +142,92 @@ export function WordsSection({ residentId, voiceId, player }: WordsSectionProps)
         onConfirm={() => removing && remove(removing)}
         onCancel={() => setRemoving(null)}
       />
+    </View>
+  );
+}
+
+type WordRowProps = {
+  word: Pronunciation;
+  state: 'loading' | 'playing' | null;
+  onHear: (key: string, text: string) => void;
+  onRemove: (word: Pronunciation) => void;
+};
+
+/** One word the pillow says her way, with Play to hear it and Remove. */
+const WordRow = memo(function WordRow({ word: w, state, onHear, onRemove }: WordRowProps) {
+  return (
+    <View className="rounded-2xl bg-surface">
+      <View className="flex-row items-center gap-3 py-3 pl-3.5 pr-2.5">
+        <View className="flex-1 gap-0.5">
+          <Text className="font-sans-semibold text-base text-ink">{w.word}</Text>
+          <Text className="font-sans text-[13px] text-ink-muted">
+            Said like &quot;{w.sounds_like}&quot;{w.created_by_name ? `. Added by ${w.created_by_name}.` : '.'}
+          </Text>
+        </View>
+        <PlayButton what={w.word} state={state} onPress={() => onHear(w.id, tryLine(w.word))} />
+      </View>
+      <View className="flex-row justify-end px-1 pb-1">
+        <Button variant="ghost" title="Remove" onPress={() => onRemove(w)} />
+      </View>
+    </View>
+  );
+});
+
+type AddWordProps = {
+  playing: Playing;
+  onHear: (key: string, text: string) => void;
+  onAdd: (word: string, soundsLike: string) => Promise<boolean>;
+};
+
+/**
+ * The form for a new word. It keeps what is typed to itself, so typing doesn't redraw the list
+ * above, and what was typed stays when adding fails.
+ */
+function AddWord({ playing, onHear, onAdd }: AddWordProps) {
+  const [word, setWord] = useState('');
+  const [soundsLike, setSoundsLike] = useState('');
+  const ready = word.trim().length > 0 && soundsLike.trim().length > 0;
+
+  const add = async () => {
+    if (!(await onAdd(word, soundsLike))) return;
+    setWord('');
+    setSoundsLike('');
+  };
+
+  return (
+    <View className="gap-3 rounded-2xl border border-hairline p-4">
+      <TextField
+        label="Word"
+        value={word}
+        onChangeText={setWord}
+        placeholder="For example, Siobhan"
+        maxLength={WORD_MAX}
+        autoCapitalize="words"
+      />
+      <View className="gap-1">
+        <TextField
+          label="Say it like"
+          value={soundsLike}
+          onChangeText={setSoundsLike}
+          placeholder="shiv-AWN"
+          maxLength={SOUNDS_LIKE_MAX}
+          autoCapitalize="none"
+        />
+        <Text className="font-sans text-[13px] text-ink-muted">
+          Spell it the way it sounds, with the loud part in capitals.
+        </Text>
+      </View>
+      <View className="flex-row flex-wrap items-center gap-2">
+        <PlayButton
+          title="Hear it"
+          what="how it will sound"
+          state={phaseOf(playing, 'new-word')}
+          onPress={() => ready && onHear('new-word', tryLine(soundsLike.trim()))}
+        />
+        <View className="flex-1">
+          <Button fullWidth title="Add word" disabled={!ready} onPress={add} />
+        </View>
+      </View>
     </View>
   );
 }

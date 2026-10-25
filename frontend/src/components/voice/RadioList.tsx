@@ -29,7 +29,10 @@ export function RadioList<T extends string>({ label, options, value, onChange }:
             accessibilityRole="radio"
             accessibilityState={{ checked: selected }}
             accessibilityLabel={`${option.label}${option.meta ? `. ${option.meta}` : ''}`}
-            onPress={() => onChange(option.value)}
+            // Tapping the chosen one again changes nothing, so it sends nothing.
+            onPress={() => {
+              if (!selected) onChange(option.value);
+            }}
             className={`min-h-12 flex-row items-center gap-3 rounded-2xl border-[1.5px] bg-surface px-3.5 py-2.5 active:opacity-80 ${
               selected ? 'border-accent' : 'border-transparent'
             }`}

@@ -7,6 +7,7 @@ import { DateStrip, SpokenLine } from '@/components/ReminderForm';
 import { StatusWord } from '@/components/Status';
 import { ThemeRoot } from '@/components/ThemeRoot';
 import { TimeSelect } from '@/components/TimeSelect';
+import { useGuardedPress } from '@/hooks/useGuardedPress';
 import type { Reminder } from '@/services/reminders';
 import {
   capitalise,
@@ -179,6 +180,8 @@ type MoveChoiceProps = {
  * each saying what happens, and a quiet way out that puts it back.
  */
 export function MoveChoice({ move, name, today, onOnce, onEvery, onCancel }: MoveChoiceProps) {
+  // One guard for both choices, so a quick second tap can't stage the move twice, or both ways.
+  const { press: pick } = useGuardedPress(choose);
   if (!move) return null;
   const { slot, reminder, date, time } = move;
   const from = formatClock(slot.time);
@@ -198,12 +201,12 @@ export function MoveChoice({ move, name, today, onOnce, onEvery, onCancel }: Mov
             <Choice
               title={`Only ${thisDay(slot.date, today)}`}
               detail={`Just this once. The other days stay at ${from}.`}
-              onPress={onOnce}
+              onPress={() => pick(onOnce)}
             />
             <Choice
               title="Every time"
               detail={`From now on it plays ${repeatWords({ days, on_date: null }, today)} at ${formatClock(time)}.`}
-              onPress={onEvery}
+              onPress={() => pick(onEvery)}
             />
             <Button fullWidth variant="ghost" title="Cancel, leave it" onPress={onCancel} />
           </View>
@@ -212,6 +215,8 @@ export function MoveChoice({ move, name, today, onOnce, onEvery, onCancel }: Mov
     </Modal>
   );
 }
+
+const choose = (choice: () => void) => choice();
 
 /** One of the two choices: a big button with its consequence under it. */
 function Choice({ title, detail, onPress }: { title: string; detail: string; onPress: () => void }) {

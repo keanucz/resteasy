@@ -10,6 +10,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { DURATION, EASE, PRESS_SCALE, SPRING_PRESS } from '@/constants/motion';
+import { useGuardedPress } from '@/hooks/useGuardedPress';
 import { useTheme } from '@/hooks/useTheme';
 
 /** Shrinks a little while held and springs back on release. Opacity feedback stays under reduced motion. */
@@ -40,7 +41,8 @@ export type ButtonVariant = 'primary' | 'secondary' | 'alert' | 'ghost';
 
 type ButtonProps = {
   title: string;
-  onPress: () => void;
+  /** May return a promise: the button then shows a spinner and ignores taps until it settles. */
+  onPress: () => unknown;
   variant?: ButtonVariant;
   loading?: boolean;
   disabled?: boolean;
@@ -64,7 +66,10 @@ const LABEL: Record<ButtonVariant, string> = {
   ghost: 'text-accent-text',
 };
 
-/** The one button: rounded, 44px tall, sentence-case semibold label. Shows a spinner while `loading`. */
+/**
+ * The one button: rounded, 44px tall, sentence-case semibold label. Shows a spinner while `loading`
+ * or while an async `onPress` runs, and never runs `onPress` twice at once.
+ */
 export function Button({
   title,
   onPress,
@@ -76,7 +81,9 @@ export function Button({
 }: ButtonProps) {
   const { colors } = useTheme();
   const press = usePressScale();
-  const inactive = loading || disabled;
+  const guarded = useGuardedPress(onPress);
+  const busy = loading || guarded.pending;
+  const inactive = busy || disabled;
   const spinner = {
     primary: colors['on-accent'],
     secondary: colors.ink,
@@ -87,16 +94,16 @@ export function Button({
     <Animated.View style={[fullWidth ? { alignSelf: 'stretch' } : null, press.style]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityState={{ disabled: inactive, busy: loading }}
+        accessibilityState={{ disabled: inactive, busy }}
         disabled={inactive}
-        onPress={onPress}
+        onPress={guarded.press}
         onPressIn={press.onPressIn}
         onPressOut={press.onPressOut}
         className={`h-11 flex-row items-center justify-center gap-2 rounded-xl px-6 active:opacity-80 ${FILL[variant]} ${
           disabled ? 'opacity-40' : ''
         }`}
       >
-        {loading ? (
+        {busy ? (
           <ActivityIndicator color={spinner} />
         ) : (
           <>
@@ -112,19 +119,22 @@ export function Button({
 type IconButtonProps = {
   /** Read out by screen readers, since the button has no visible label. */
   label: string;
-  onPress: () => void;
+  onPress: () => unknown;
   children: ReactNode;
 };
 
 /** Round 44px button for a single icon. */
 export function IconButton({ label, onPress, children }: IconButtonProps) {
   const press = usePressScale();
+  const guarded = useGuardedPress(onPress);
   return (
     <Animated.View style={press.style}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={label}
-        onPress={onPress}
+        accessibilityState={{ busy: guarded.pending }}
+        disabled={guarded.pending}
+        onPress={guarded.press}
         onPressIn={press.onPressIn}
         onPressOut={press.onPressOut}
         className="size-11 items-center justify-center rounded-full bg-surface active:opacity-80"

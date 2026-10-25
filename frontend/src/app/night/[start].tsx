@@ -1,4 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
+import { useMemo } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
@@ -20,7 +21,11 @@ export default function NightScreen() {
   const showSkeleton = useDelayedLoading(pillow.loading);
   const tz = pillow.resident?.timezone ?? 'America/Los_Angeles';
 
-  const night = nightAt(Number(start), now, tz, MONTH_NIGHTS);
+  const found = nightAt(Number(start), now, tz, MONTH_NIGHTS);
+  // The same window until the night itself changes (it ends, or ages out), so the detail below
+  // doesn't work everything out again on every tick.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const night = useMemo(() => found, [found?.start, found?.over]);
 
   if (!night) {
     return (

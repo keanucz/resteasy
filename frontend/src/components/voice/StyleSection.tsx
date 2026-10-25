@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 
 import { Button } from '@/components/Button';
@@ -8,7 +8,7 @@ import { SegmentedTabs } from '@/components/Selection';
 import { TextField } from '@/components/TextField';
 import { Disclosure } from '@/components/voice/Disclosure';
 import { RadioList } from '@/components/voice/RadioList';
-import type { VoicePlayer } from '@/hooks/useVoicePlayer';
+import { loadOnce, type VoicePlayer } from '@/hooks/useVoicePlayer';
 import { ApiError } from '@/services/api';
 import { forgetPreviews, PREVIEW_MAX, previewVoice, saveStyle, type VoiceStyle } from '@/services/voice';
 
@@ -73,14 +73,24 @@ export function StyleSection({ residentId, name, voiceId, saved, emotions, isOwn
   const [status, setStatus] = useState<Status | null>(null);
 
   const draft: VoiceStyle = { speed: Number(speed), volume: Number(volume), emotion };
+  // Only the chosen tone says how it sounds, so the list stays short.
+  const tones = useMemo(
+    () => emotions.map((e) => ({ value: e, label: TONES[e]?.label ?? e, meta: e === emotion ? TONES[e]?.meta : undefined })),
+    [emotions, emotion],
+  );
   const changed =
     speed !== nearest(SPEEDS, saved.speed) || volume !== nearest(VOLUMES, saved.volume) || emotion !== saved.emotion;
   const fallbackLine = `Goodnight ${name}, the light is on to help you find your way.`;
 
   const hear = () => {
+    const text = line || fallbackLine;
     setStatus(null);
     player
-      .toggle('style', () => previewVoice(residentId, voiceId, line || fallbackLine, draft))
+      .toggle('style', () =>
+        loadOnce(`preview|${residentId}|${voiceId}|${text}|${JSON.stringify(draft)}`, () =>
+          previewVoice(residentId, voiceId, text, draft),
+        ),
+      )
       .catch((e) => setStatus({ kind: 'error', text: previewError(e) }));
   };
 
@@ -120,12 +130,7 @@ export function StyleSection({ residentId, name, voiceId, saved, emotions, isOwn
             <Text className="font-sans text-[13px] text-ink-muted">Tone works in English only.</Text>
             <RadioList
               label="Tone"
-              options={emotions.map((e) => ({
-                value: e,
-                label: TONES[e]?.label ?? e,
-                // Only the chosen tone says how it sounds, so the list stays short
-                meta: e === emotion ? TONES[e]?.meta : undefined,
-              }))}
+              options={tones}
               value={emotion}
               onChange={setEmotion}
             />

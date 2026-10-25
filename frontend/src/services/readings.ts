@@ -11,7 +11,10 @@ export type Reading = { ts: string; temp_c: number | null; head_on: boolean | nu
 const PAGE_ROWS = 1000;
 const MAX_PAGES = 3;
 
-/** Readings in [from, to), oldest first. An error or a missing table reads as "no readings". */
+/**
+ * Readings in [from, to), oldest first. Throws when the first page can't be read, so a re-read that
+ * fails never passes for an empty night; a later page that fails ends the list there.
+ */
 export async function fetchReadings(pillowId: string, from: number, to: number): Promise<Reading[]> {
   const rows: Reading[] = [];
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -23,7 +26,10 @@ export async function fetchReadings(pillowId: string, from: number, to: number):
       .lt('ts', new Date(to).toISOString())
       .order('ts')
       .range(page * PAGE_ROWS, (page + 1) * PAGE_ROWS - 1);
-    if (error || !data) break;
+    if (error || !data) {
+      if (page === 0) throw new Error(error?.message ?? 'No readings');
+      break;
+    }
     rows.push(...(data as Reading[]));
     if (data.length < PAGE_ROWS) break;
   }

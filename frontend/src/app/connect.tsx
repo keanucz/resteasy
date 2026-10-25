@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import Animated, { FadeIn, ReduceMotion } from 'react-native-reanimated';
@@ -7,7 +8,7 @@ import { AppText } from '@/components/AppText';
 import { Button } from '@/components/Button';
 import { Logo } from '@/components/Logo';
 import { SkyBackdrop } from '@/components/SkyHeader';
-import { CONNECT_STEPS } from '@/constants/pillow';
+import { CONNECT_FAILED, CONNECT_STEPS } from '@/constants/pillow';
 import { DURATION, EASE } from '@/constants/motion';
 import { RING, SKY_DETAIL } from '@/constants/sky';
 import { usePillowLink } from '@/hooks/usePillowLink';
@@ -24,8 +25,33 @@ const CONNECT_HORIZON = 290;
 export default function ConnectScreen() {
   const insets = useSafeAreaInsets();
   const { scheme, colors } = useTheme();
-  const { connect } = usePillowLink();
+  const { connect, people, refreshAccount } = usePillowLink();
   const [step, setStep] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const pair = async () => {
+    setError(null);
+    // A login that looks after nobody yet names the person first; the pillow is set up for them there.
+    // /me is read again first, so a backend that couldn't be reached never passes for a new login.
+    if (people.length === 0) {
+      const account = await refreshAccount();
+      if (!account) {
+        setError(CONNECT_FAILED);
+        return;
+      }
+      if (account.people.length === 0) {
+        router.push('/connect-name');
+        return;
+      }
+    }
+    // Awaited, so the button stays busy for the whole pairing, not just the /me read.
+    try {
+      await connect(setStep);
+    } catch (e) {
+      setStep(null);
+      setError(e instanceof Error ? e.message : CONNECT_FAILED);
+    }
+  };
 
   return (
     <View className="flex-1 bg-canvas" style={{ paddingBottom: insets.bottom + 24 }}>
@@ -59,6 +85,8 @@ export default function ConnectScreen() {
                 <ActivityIndicator size="small" color={colors['accent-text']} />
                 <Text className="font-sans text-base text-ink">{CONNECT_STEPS[step]}</Text>
               </Animated.View>
+            ) : error ? (
+              <Text className="font-sans text-sm text-danger-text">{error}</Text>
             ) : null}
           </View>
           <View className="gap-1">
@@ -66,7 +94,7 @@ export default function ConnectScreen() {
               fullWidth
               title="Connect pillow"
               loading={step !== null}
-              onPress={() => connect(setStep)}
+              onPress={pair}
             />
             <Button fullWidth variant="ghost" title="Log out" onPress={signOut} disabled={step !== null} />
           </View>

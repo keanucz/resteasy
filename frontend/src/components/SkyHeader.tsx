@@ -1,4 +1,4 @@
-import { type PropsWithChildren, type ReactNode, useEffect, useId, useMemo, useState } from 'react';
+import { memo, type PropsWithChildren, type ReactNode, useEffect, useId, useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
@@ -194,7 +194,7 @@ export function SkyBackdrop({
  * The stars, turning slowly around the pole above the screen, kept to the sky above the edge.
  * Under reduced motion they hold still.
  */
-function StarField({
+const StarField = memo(function StarField({
   width,
   ceiling,
 }: {
@@ -264,7 +264,7 @@ function StarField({
       </Animated.View>
     </View>
   );
-}
+});
 
 /**
  * Where on the edge `x` falls, and the edge's slope there in degrees. Past either end it carries on
@@ -319,7 +319,7 @@ function Perch({
  * curled up mid-arch: breathing slowly and snoring little z's while asleep, fidgeting while
  * restless. Under reduced motion it sits still.
  */
-function Traveller({
+const Traveller = memo(function Traveller({
   edge,
   width,
   progress,
@@ -383,7 +383,7 @@ function Traveller({
       <Hedgehog size={HEDGEHOG_SIZE} mood={mood} breathing />
     </Animated.View>
   );
-}
+});
 
 /** One "z" of the snore: rises from the hedgehog's head, drifting right, growing and fading. */
 function Snore({ index, color }: { index: number; color: string }) {
@@ -434,7 +434,7 @@ type SkyHeaderProps = {
  * Top of the home screen: the sky with the status as its headline. The stats placed after it sit
  * where the fade ends.
  */
-export function SkyHeader({ state, name, initials, photoUri, detail, nightProgress, onSwitchPerson }: SkyHeaderProps) {
+export const SkyHeader = memo(function SkyHeader({ state, name, initials, photoUri, detail, nightProgress, onSwitchPerson }: SkyHeaderProps) {
   const { scheme } = useTheme();
   const ink = SKY_LOOKS[state][scheme].ink;
   return (
@@ -483,4 +483,4 @@ export function SkyHeader({ state, name, initials, photoUri, detail, nightProgre
       </View>
     </SkyBackdrop>
   );
-}
+});

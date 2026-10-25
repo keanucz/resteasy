@@ -1,11 +1,12 @@
 import { scaleLinear } from 'd3-scale';
 import { arc, area, curveMonotoneX, line, pie } from 'd3-shape';
-import { type ReactNode, useCallback, useMemo, useState } from 'react';
+import { memo, type ReactNode, useCallback, useMemo, useState } from 'react';
 import { type GestureResponderEvent, Pressable, Text, useWindowDimensions, View } from 'react-native';
 import Svg, { Circle, G, Line, Path, Rect } from 'react-native-svg';
 
 import type { RibbonSegment } from '@/components/NightRibbon';
 import { useTheme } from '@/hooks/useTheme';
+import { clockTime } from '@/services/night';
 import { bucket, onPillowSpans, type Point, type Reading } from '@/services/readings';
 
 /**
@@ -48,11 +49,7 @@ function useWidth() {
   return { width, onLayout };
 }
 
-const clock = (t: number, tz: string) =>
-  new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' })
-    .format(new Date(t))
-    .replace(' AM', ' am')
-    .replace(' PM', ' pm');
+const clock = (t: number, tz: string) => clockTime(t, tz);
 
 /** 10 pm, 1 am, 4 am, 7 am: three-hour steps, so they space evenly. */
 function HourAxis({ inset = 0 }: { inset?: number }) {
@@ -126,12 +123,12 @@ const nearest = (points: Point[], t: number) =>
 type SeriesProps = { rows: Reading[]; window: ChartWindow; tz: string; height?: number };
 
 /** Bedroom temperature through the night, with the comfortable band shaded and the coldest point named. */
-export function TemperatureChart({ rows, window, tz, height = 132 }: SeriesProps) {
+export const TemperatureChart = memo(function TemperatureChart({ rows, window, tz, height = 132 }: SeriesProps) {
   const { colors } = useTheme();
   const { width, onLayout } = useWidth();
   const { at, handlers } = useScrub(width - TEMP_AXIS, window);
   const points = useMemo(() => bucket(rows, 'temp_c', window.start, window.end, TEMP_BUCKET_MIN), [rows, window]);
-  const values = points.flatMap((p) => (p.v === null ? [] : [p.v]));
+  const values = useMemo(() => points.flatMap((p) => (p.v === null ? [] : [p.v])), [points]);
 
   const shape = useMemo(() => {
     if (!width || !values.length) return null;
@@ -239,12 +236,12 @@ export function TemperatureChart({ rows, window, tz, height = 132 }: SeriesProps
       </View>
     </ChartCard>
   );
-}
+});
 
 // ---------- movement and the pillow strip ----------
 
 /** How much the pillow moved (a calm area), with a strip under it for when a head was on the pillow. */
-export function MovementChart({ rows, window, tz, height = 96 }: SeriesProps) {
+export const MovementChart = memo(function MovementChart({ rows, window, tz, height = 96 }: SeriesProps) {
   const { colors } = useTheme();
   const { width, onLayout } = useWidth();
   const { at, handlers } = useScrub(width, window);
@@ -341,7 +338,7 @@ export function MovementChart({ rows, window, tz, height = 96 }: SeriesProps) {
       </View>
     </ChartCard>
   );
-}
+});
 
 function ScrubMark({ x, y, height }: { x: number; y: number; height: number }) {
   const { colors } = useTheme();
@@ -389,7 +386,7 @@ export const hm = (min: number) => {
 };
 
 /** A donut of the night, with its legend as rows that carry the numbers. */
-export function NightShareChart({ segments }: { segments: readonly RibbonSegment[] }) {
+export const NightShareChart = memo(function NightShareChart({ segments }: { segments: readonly RibbonSegment[] }) {
   const { colors } = useTheme();
   const share = nightShare(segments);
   const total = share.asleep + share.restless + share.up;
@@ -445,7 +442,7 @@ export function NightShareChart({ segments }: { segments: readonly RibbonSegment
       )}
     </View>
   );
-}
+});
 
 // ---------- the week at a glance ----------
 
@@ -468,7 +465,7 @@ export type WeekBar = {
  * hot) gets the orange cap, explained in a key under the columns when the chart has one. Tap a column to open
  * that night. `dense` draws thin columns for a month, labelling only the bars that carry a label.
  */
-export function WeekSleepChart({
+export const WeekSleepChart = memo(function WeekSleepChart({
   bars,
   title = 'Sleep this week',
   dense = false,
@@ -544,7 +541,7 @@ export function WeekSleepChart({
       <SleepKey flagged={bars.some((b) => b.flagged)} missing={bars.some((b) => b.hours === null)} />
     </View>
   );
-}
+});
 
 /**
  * What the chart's looks mean, in words beside a small copy of each, like the Reminders key. Only the

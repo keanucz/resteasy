@@ -3,6 +3,7 @@ import { Image, Modal, Pressable, Text, View } from 'react-native';
 import { Avatar } from '@/components/Avatar';
 import { List, ListRow } from '@/components/List';
 import { ThemeRoot } from '@/components/ThemeRoot';
+import { useGuardedPress } from '@/hooks/useGuardedPress';
 import { type Person, usePillowLink } from '@/hooks/usePillowLink';
 import { useResidentPhoto } from '@/hooks/useResidentPhoto';
 
@@ -25,6 +26,11 @@ function PersonFace({ person }: { person: Person }) {
  */
 export function PeopleList({ onPicked }: { onPicked?: () => void }) {
   const { people, pillowId, select } = usePillowLink();
+  // One guard for the whole list: a quick second tap can't switch twice while the sheet closes.
+  const { press: pick } = useGuardedPress((next: string) => {
+    if (next !== pillowId) select(next);
+    onPicked?.();
+  });
   return (
     <List>
       {people.map((person) => {
@@ -36,10 +42,7 @@ export function PeopleList({ onPicked }: { onPicked?: () => void }) {
             title={person.preferred_name}
             meta={person.role === 'owner' ? 'You set up their pillow' : 'You are in their care circle'}
             trailing={showing ? <Text className="font-sans-semibold text-sm text-ink-muted">Showing</Text> : undefined}
-            onPress={() => {
-              if (!showing) select(person.pillow_id);
-              onPicked?.();
-            }}
+            onPress={() => pick(person.pillow_id)}
           />
         );
       })}

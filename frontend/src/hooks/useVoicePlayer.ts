@@ -11,6 +11,21 @@ export type VoicePlayer = {
   stop: () => void;
 };
 
+// Audio still being fetched, by what it is, so asking again before it arrives doesn't fetch (or pay for) it twice.
+const loads = new Map<string, Promise<string>>();
+
+/**
+ * Runs `load` once for `id` at a time: a second ask while the first is still out gets the same
+ * answer. `id` must say everything that changes the audio (voice, words, style).
+ */
+export function loadOnce(id: string, load: () => Promise<string>): Promise<string> {
+  const running = loads.get(id);
+  if (running) return running;
+  const next = load().finally(() => loads.delete(id));
+  loads.set(id, next);
+  return next;
+}
+
 /**
  * One player for every Play button on a screen, so only one voice sounds at a time and each
  * button can say whether it is the one playing. Plays even with the phone's silent switch on,
@@ -19,49 +34,57 @@ export type VoicePlayer = {
 export function useVoicePlayer(): VoicePlayer {
   const player = useAudioPlayer(null);
   const [playing, setPlaying] = useState<Playing>(null);
+  // The same as `playing`, read by toggle so it stays one function while sounds come and go.
+  const playingRef = useRef<Playing>(null);
   // Bumped on every start and stop, so a preview that arrives late doesn't play over a newer choice.
   const turn = useRef(0);
   // Set once the current sound has really started, so the pause before it starts isn't read as its end.
   const started = useRef(false);
+
+  const show = useCallback((next: Playing) => {
+    playingRef.current = next;
+    setPlaying(next);
+  }, []);
 
   useEffect(() => {
     const sub = player.addListener('playbackStatusUpdate', (status) => {
       if (status.playing) started.current = true;
       else if (started.current) {
         started.current = false;
-        setPlaying(null);
+        show(null);
       }
     });
     return () => sub.remove();
-  }, [player]);
+  }, [player, show]);
 
   const stop = useCallback(() => {
     turn.current++;
     started.current = false;
     player.pause();
-    setPlaying(null);
-  }, [player]);
+    show(null);
+  }, [player, show]);
 
   const toggle = useCallback(
     async (key: string, load: () => Promise<string>) => {
-      if (playing?.key === key) return stop();
+      if (playingRef.current?.key === key) return stop();
       const mine = ++turn.current;
       started.current = false;
       player.pause();
-      setPlaying({ key, phase: 'loading' });
+      show({ key, phase: 'loading' });
       try {
         const uri = await load();
         if (mine !== turn.current) return;
         await setAudioModeAsync({ playsInSilentMode: true, allowsRecording: false }).catch(() => {});
+        if (mine !== turn.current) return;
         player.replace({ uri });
         player.play();
-        setPlaying({ key, phase: 'playing' });
+        show({ key, phase: 'playing' });
       } catch (e) {
-        if (mine === turn.current) setPlaying(null);
+        if (mine === turn.current) show(null);
         throw e;
       }
     },
-    [player, playing?.key, stop],
+    [player, show, stop],
   );
 
   return useMemo(() => ({ playing, toggle, stop }), [playing, toggle, stop]);

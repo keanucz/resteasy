@@ -9,8 +9,18 @@ export function useSession(): { session: Session | null; loading: boolean } {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
+    supabase.auth.getSession().then(async ({ data }) => {
+      // The stored session is trusted until its token expires, so ask the server whether it still
+      // stands: a login revoked or deleted in Supabase drops back to the login screen straight away.
+      let stored = data.session;
+      if (stored) {
+        const { error } = await supabase.auth.getUser();
+        if (error?.status === 401 || error?.status === 403) {
+          await supabase.auth.signOut({ scope: 'local' });
+          stored = null;
+        }
+      }
+      setSession(stored);
       setLoading(false);
     });
     const { data } = supabase.auth.onAuthStateChange((_event, next) => setSession(next));

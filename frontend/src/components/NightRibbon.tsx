@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { memo, useId } from 'react';
 import { Text, View } from 'react-native';
 import Svg, { ClipPath, Defs, G, Pattern, Rect } from 'react-native-svg';
 
@@ -26,7 +26,7 @@ type NightRibbonProps = {
 const pct = (hours: number) => `${(Math.min(Math.max(hours, 0), NIGHT_HOURS) / NIGHT_HOURS) * 100}%`;
 
 /** The night so far, 10 pm to 7 am: solid in bed, hatched when restless, a thin bar when up. */
-export function NightRibbon({ segments, now }: NightRibbonProps) {
+export const NightRibbon = memo(function NightRibbon({ segments, now }: NightRibbonProps) {
   const { colors } = useTheme();
   const id = useId().replace(/:/g, '');
   const fill: Record<RibbonKind, string> = {
@@ -74,4 +74,4 @@ export function NightRibbon({ segments, now }: NightRibbonProps) {
       </View>
     </View>
   );
-}
+});

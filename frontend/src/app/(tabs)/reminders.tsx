@@ -1,5 +1,5 @@
 import { useLocalSearchParams } from 'expo-router';
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, Text, View } from 'react-native';
 import Animated, { useAnimatedRef, useScrollOffset } from 'react-native-reanimated';
 
@@ -61,6 +61,14 @@ const byTime = (a: Slot, b: Slot) => (a.date + a.time).localeCompare(b.date + b.
 
 type Notice = { message: string; detail?: string };
 
+let shownWeek: { monday: string; days: string[] } | null = null;
+
+/** The week's seven dates, the same array until the week changes, so the grid's blocks don't all redraw. */
+function weekDays(monday: string): string[] {
+  if (shownWeek?.monday !== monday) shownWeek = { monday, days: Array.from({ length: 7 }, (_, i) => addDays(monday, i)) };
+  return shownWeek.days;
+}
+
 /**
  * Reminders: what the pillow will say to her and when. First the next one, word for word, and the
  * button to add one; then every reminder (tap to change it), or the week to drag them around on.
@@ -81,7 +89,7 @@ export default function RemindersScreen() {
   const [view, setView] = useState<Lens>(params.view === 'week' ? 'week' : 'list');
   const [weekOffset, setWeekOffset] = useState(0);
   const monday = addDays(weekStart(today), weekOffset * 7);
-  const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+  const days = weekDays(monday);
   const nextEnd = addDays(today, NEXT_DAYS - 1);
   const start = monday < today ? monday : today;
   const end = addDays(monday, 6) > nextEnd ? addDays(monday, 6) : nextEnd;
@@ -117,10 +125,11 @@ export default function RemindersScreen() {
   const next = upcoming.find((s) => s.consent === 'agreed') ?? upcoming.find((s) => s.consent === 'pending');
 
   /** A move, staged: shown now, sent when the Undo window closes. */
+  const { stage } = data;
   const stageMove = useCallback(
     (message: string, preview: (slots: Slot[]) => Slot[], commit: () => Promise<unknown>) =>
-      data.stage({ message, detail: `${name} will be asked again before it plays.`, preview, commit }),
-    [data, name],
+      stage({ message, detail: `${name} will be asked again before it plays.`, preview, commit }),
+    [stage, name],
   );
 
   const onMove = useCallback(
@@ -191,7 +200,7 @@ export default function RemindersScreen() {
       if (!pillowId || !reminder) return;
       setSlotOpen(null);
       const day = thisDay(slot.date, today);
-      data.stage({
+      stage({
         message: slot.recurring ? `Skipped ${day}` : 'Cancelled',
         detail: `${name} won't hear “${slot.label}” ${day.replace(/^this /, 'on ')}.`,
         preview: (slots) => slots.filter((s) => slotKey(s) !== slotKey(slot)),
@@ -201,16 +210,17 @@ export default function RemindersScreen() {
             : deleteReminder(pillowId, reminder.id),
       });
     },
-    [byId, pillowId, today, data, name],
+    [byId, pillowId, today, stage, name],
   );
 
   const onDone = (message: string, detail?: string) => {
     setForm(null);
     setNotice({ message, detail });
     setRing((r) => r + 1);
-    data.refresh();
-    pillow.refresh();
+    void data.refresh();
+    void pillow.refresh();
   };
+  const openForm = useCallback((reminder: Reminder) => setForm({ reminder }), []);
 
   const toast: ReactNode = dragTarget ? (
     <Toast
@@ -231,7 +241,10 @@ export default function RemindersScreen() {
     <Toast message={notice.message} detail={notice.detail} />
   ) : null;
 
-  const empty = !data.loading && !data.error && data.reminders.length === 0;
+  // A failed read before anything landed gets the error card; after that, what was read stays on
+  // screen with the error above it.
+  const failed = data.error !== null && !data.loaded;
+  const empty = !data.loading && !failed && data.reminders.length === 0;
 
   return (
     <View className="flex-1 bg-canvas">
@@ -241,10 +254,15 @@ export default function RemindersScreen() {
         scrollEnabled={dragTarget === null}
         refreshControl={<RefreshControl refreshing={false} onRefresh={data.refresh} />}
       >
-        <Header name={name} ring={ring} resting={data.error !== null} />
+        <Header name={name} ring={ring} resting={failed} />
 
         <View className="-mt-2 gap-8 px-4">
-          {data.error ? (
+          {data.error && !failed ? (
+            <Text accessibilityLiveRegion="polite" className="font-sans text-sm text-danger-text">
+              {data.error}
+            </Text>
+          ) : null}
+          {failed && data.error ? (
             <ErrorCard text={data.error} onRetry={data.refresh} />
           ) : showSkeleton ? (
             <SkeletonGroup>
@@ -279,15 +297,15 @@ export default function RemindersScreen() {
                     reminders={data.reminders}
                     name={name}
                     today={today}
-                    onOpen={(r) => setForm({ reminder: r })}
+                    onOpen={openForm}
                   />
                 ) : (
                   <View className="gap-3">
                     <WeekNav
                       monday={monday}
                       current={weekOffset === 0}
-                      onPrev={() => setWeekOffset(weekOffset - 1)}
-                      onNext={() => setWeekOffset(weekOffset + 1)}
+                      onPrev={() => setWeekOffset((w) => w - 1)}
+                      onNext={() => setWeekOffset((w) => w + 1)}
                       onToday={() => setWeekOffset(0)}
                     />
                     <WeekGrid
@@ -493,7 +511,7 @@ function WeekNav({
 }
 
 /** Every reminder, to change or pause, with her consent in words on each that isn't yet a yes. */
-function AllReminders({
+const AllReminders = memo(function AllReminders({
   reminders,
   name,
   today,
@@ -505,7 +523,10 @@ function AllReminders({
   onOpen: (r: Reminder) => void;
 }) {
   const { colors } = useTheme();
-  const sorted = [...reminders].sort((a, b) => a.time_of_day.localeCompare(b.time_of_day));
+  const sorted = useMemo(
+    () => [...reminders].sort((a, b) => a.time_of_day.localeCompare(b.time_of_day)),
+    [reminders],
+  );
   return (
     <View className="gap-3">
       <List>
@@ -536,7 +557,7 @@ function AllReminders({
       </View>
     </View>
   );
-}
+});
 
 /** No reminders yet: a nudge towards a good first one (the hedgehog waits with its bell up top). */
 function EmptyCard({ name }: { name: string }) {

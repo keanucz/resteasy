@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 type StatTileProps = {
@@ -9,7 +9,7 @@ type StatTileProps = {
 };
 
 /** Small label over a big value. Lay several out in a `flex-row gap-2.5` row. */
-export function StatTile({ label, value, detail }: StatTileProps) {
+export const StatTile = memo(function StatTile({ label, value, detail }: StatTileProps) {
   return (
     <View className="flex-1 gap-2 rounded-2xl bg-surface p-3.5">
       <Text className="font-sans text-xs text-ink-muted">{label}</Text>
@@ -17,7 +17,7 @@ export function StatTile({ label, value, detail }: StatTileProps) {
       {detail ? <Text className="-mt-1 font-sans text-xs text-ink-muted">{detail}</Text> : null}
     </View>
   );
-}
+});
 
 type SummaryCardProps = {
   /** A short heading, usually with one <StatusWord>: "A quiet night". */
@@ -47,7 +47,7 @@ type DataTableProps = {
 };
 
 /** Striped table: every other row sits on a surface band. The first column is bold. */
-export function DataTable({ columns, rows, onRowPress, rowLabel }: DataTableProps) {
+export const DataTable = memo(function DataTable({ columns, rows, onRowPress, rowLabel }: DataTableProps) {
   return (
     <View accessibilityRole="list">
       <View className="flex-row px-3 pb-1.5">
@@ -86,4 +86,4 @@ export function DataTable({ columns, rows, onRowPress, rowLabel }: DataTableProp
       })}
     </View>
   );
-}
+});

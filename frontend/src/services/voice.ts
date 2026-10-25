@@ -170,7 +170,13 @@ export function forgetPreviews() {
  * Copies a voice from `clip` and returns it. The caller has the speaker's agreement (consent is
  * required). `accent` is the speaker's own accent, when known.
  */
-export async function cloneVoice(residentId: string, clip: Clip, name: string, accent?: string): Promise<Voice> {
+export async function cloneVoice(
+  residentId: string,
+  clip: Clip,
+  name: string,
+  accent?: string,
+  signal?: AbortSignal,
+): Promise<Voice> {
   const form = new FormData();
   if (Platform.OS === 'web') {
     form.append('clip', await (await fetch(clip.uri)).blob(), clip.name);
@@ -181,7 +187,7 @@ export async function cloneVoice(residentId: string, clip: Clip, name: string, a
   form.append('name', name.trim().slice(0, VOICE_NAME_MAX));
   form.append('consent', 'true');
   if (accent) form.append('accent', accent);
-  const response = await authedFetch(`${base(residentId)}/clones`, { method: 'POST', body: form });
+  const response = await authedFetch(`${base(residentId)}/clones`, { method: 'POST', body: form, signal });
   return (await response.json()) as Voice;
 }
 
@@ -195,9 +201,16 @@ export async function readAccents(residentId: string): Promise<Accent[]> {
   return api<Accent[]>(`${base(residentId)}/accents`);
 }
 
+/** Making an accent copy means a Cartesia copy plus a spoken sample, which can outlast a normal save. */
+const ACCENT_COPY_TIMEOUT_MS = 90_000;
+
 /** A copy of `voiceId` speaking with `accent`, with its sample ready; one she has already is returned. */
 export async function copyWithAccent(residentId: string, voiceId: string, accent: string): Promise<Voice> {
-  return api<Voice>(`${base(residentId)}/accents`, { method: 'POST', body: { voice_id: voiceId, accent } });
+  return api<Voice>(`${base(residentId)}/accents`, {
+    method: 'POST',
+    body: { voice_id: voiceId, accent },
+    timeoutMs: ACCENT_COPY_TIMEOUT_MS,
+  });
 }
 
 /** The words the pillow says her way. */

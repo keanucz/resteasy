@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { ActivityIndicator, Pressable, Text } from 'react-native';
 
 import { PlayIcon, StopIcon } from '@/components/TabIcons';
@@ -25,7 +26,13 @@ type PlayButtonProps = {
  * Play, and Stop while its sound is loading or playing: the fill turns solid and the label says
  * Stop, so which voice is sounding is plain at a glance. Same width either way, so nothing moves.
  */
-export function PlayButton({ what, state, onPress, title = 'Play', fullWidth = false }: PlayButtonProps) {
+export const PlayButton = memo(function PlayButton({
+  what,
+  state,
+  onPress,
+  title = 'Play',
+  fullWidth = false,
+}: PlayButtonProps) {
   const { colors } = useTheme();
   const on = state !== null;
   return (
@@ -50,7 +57,7 @@ export function PlayButton({ what, state, onPress, title = 'Play', fullWidth = f
       </Text>
     </Pressable>
   );
-}
+});
 
 /** The phase of `key`'s sound on the shared player, or null when something else (or nothing) is playing. */
 export const phaseOf = (playing: Playing, key: string) => (playing?.key === key ? playing.phase : null);

@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { type ReactNode, useMemo, useState } from 'react';
+import { memo, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, Text, View } from 'react-native';
 
 import { Button } from '@/components/Button';
@@ -15,7 +15,9 @@ import { StatusWord } from '@/components/Status';
 import { BellIcon, PhoneIcon, PillIcon } from '@/components/TabIcons';
 import { MONTH_NIGHTS, RIBBON_HOURS, WEEK_NIGHTS } from '@/constants/pillow';
 import { useDelayedLoading } from '@/hooks/useDelayedLoading';
-import { useNow, usePillow } from '@/hooks/usePillow';
+import { useGuardedPress } from '@/hooks/useGuardedPress';
+import { useNow, usePillow, usePillowState } from '@/hooks/usePillow';
+import { usePillowCheck } from '@/hooks/usePillowCheck';
 import { usePillowLink } from '@/hooks/usePillowLink';
 import { useResidentPhoto } from '@/hooks/useResidentPhoto';
 import { useTheme } from '@/hooks/useTheme';
@@ -23,11 +25,14 @@ import { api } from '@/services/api';
 import {
   appState,
   clockTime,
+  type EventRow,
+  formatter,
   type IncidentRow,
   isFlagged,
   latestNight,
   nightFacts,
   nightTitle,
+  type NightWindow,
   ribbonNow,
   type ReminderToday,
   shortDay,
@@ -47,6 +52,20 @@ const REMINDER_WORD: Record<ReminderToday['status'], { word: string; state?: 'as
   missed: { word: 'Not confirmed', state: 'up' },
 };
 
+/** How long "I'm on it" waits for the alert to say someone is on it before asking for another tap. */
+const ACK_CONFIRM_MS = 15_000;
+
+const openNight = (start: number) => router.push({ pathname: '/night/[start]', params: { start: String(start) } });
+
+/**
+ * `night`, or the last one returned while it is the same night: a fresh window comes back on every
+ * tick, and everything worked out from it only needs doing again when the night itself changes.
+ */
+function useSameNight(night: NightWindow): NightWindow {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => night, [night.start, night.over]);
+}
+
 /**
  * Tonight: the sky says how she is (and the hedgehog keeps her company on the arch), then anything
  * that needs you and today's reminders, then the latest night in full, the week and the month as
@@ -55,57 +74,91 @@ const REMINDER_WORD: Record<ReminderToday['status'], { word: string; state?: 'as
 export default function TonightScreen() {
   const { pillowId, people } = usePillowLink();
   const pillow = usePillow();
+  const { events, incidents } = pillow;
   const [picking, setPicking] = useState(false);
   const now = useNow();
   const showSkeleton = useDelayedLoading(pillow.loading);
   const tz = pillow.resident?.timezone ?? 'America/Los_Angeles';
   const name = pillow.resident?.preferred_name ?? 'Mum';
-  const photo = useResidentPhoto(pillow.resident?.id ?? null);
 
-  const night = latestNight(pillow.events, now, tz);
+  const night = useSameNight(latestNight(events, now, tz));
   const title = nightTitle(night, now, tz);
-  const state = appState(pillow.state, pillow.events, now);
-  const week = weekSummaries(pillow.events, pillow.incidents, night, WEEK_NIGHTS, tz, name);
-  const reminders = todaysReminders(pillow.reminders, pillow.occurrences, now, tz);
-  const live = pillow.incidents.find((i) => i.status === 'open' || i.status === 'acknowledged');
-  const hour = ribbonNow(night, now);
-
-  const open = (start: number) => router.push({ pathname: '/night/[start]', params: { start: String(start) } });
-  const bars: WeekBar[] = [...week].reverse().map((n) => {
-    const minutes = sleptMinutes(pillow.events, n.window);
-    return {
-      key: n.key,
-      label: shortDay(n.window, tz),
-      hours: minutes ? minutes / 60 : null,
-      flagged: isFlagged(n.tone),
-      onPress: () => open(n.key),
-    };
-  });
-  const facts = week.map((n) => nightFacts(pillow.events, n.window, tz));
-  const month = useMemo(
-    () => monthOverview(pillow.events, pillow.incidents, night, tz, name),
-    // `night` changes identity every tick; its start is what matters.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [pillow.events, pillow.incidents, night.start, night.over, tz, name],
+  const week = useMemo(() => weekSummaries(events, incidents, night, WEEK_NIGHTS, tz, name), [events, incidents, night, tz, name]);
+  const reminders = useMemo(
+    () => todaysReminders(pillow.reminders, pillow.occurrences, now, tz),
+    [pillow.reminders, pillow.occurrences, now, tz],
   );
+  const live = useMemo(() => incidents.find((i) => i.status === 'open' || i.status === 'acknowledged'), [incidents]);
+
+  // A quick second tap on a night (or on another one) is dropped, so a night never opens twice.
+  const { press: open } = useGuardedPress(openNight);
+  const bars: WeekBar[] = useMemo(
+    () =>
+      [...week].reverse().map((n) => {
+        const minutes = sleptMinutes(events, n.window);
+        return {
+          key: n.key,
+          label: shortDay(n.window, tz),
+          hours: minutes ? minutes / 60 : null,
+          flagged: isFlagged(n.tone),
+          onPress: () => open(n.key),
+        };
+      }),
+    [week, events, tz, open],
+  );
+  const facts = useMemo(() => week.map((n) => nightFacts(events, n.window, tz)), [week, events, tz]);
+  const month = useMemo(() => monthOverview(events, incidents, night, tz, name), [events, incidents, night, tz, name]);
+  const monthBars = useMemo(() => month.bars.map((b) => ({ ...b, onPress: () => open(b.key) })), [month, open]);
+  const rows = useMemo(
+    () =>
+      week.map((n, i) => [
+        shortDay(n.window, tz),
+        facts[i].inBed ?? '–',
+        // Getting up once is ordinary: the word only turns amber on a night the charts flag.
+        facts[i].trips && isFlagged(n.tone) ? (
+          <Text key="up" className="text-sm">
+            <StatusWord state="up">{facts[i].tripsWord}</StatusWord>
+          </Text>
+        ) : facts[i].trips ? (
+          <Text key="up" className="font-sans text-sm text-ink">
+            {facts[i].tripsWord}
+          </Text>
+        ) : (
+          <Text key="no" className="font-sans text-sm text-ink-muted">
+            {facts[i].inBed ? 'No' : '–'}
+          </Text>
+        ),
+        facts[i].woke ?? '–',
+      ]),
+    [week, facts, tz],
+  );
+  const onRowPress = useCallback((i: number) => open(week[i].key), [open, week]);
+  const rowLabel = useCallback((i: number) => `${week[i].title}: ${week[i].line} Open the night.`, [week]);
+  const switchPerson = useCallback(() => setPicking(true), []);
+  const closePicker = useCallback(() => setPicking(false), []);
 
   return (
     <ScrollView
       className="flex-1 bg-canvas"
       refreshControl={<RefreshControl refreshing={false} onRefresh={pillow.refresh} />}
     >
-      <SkyHeader
-        state={state}
+      <TonightSky
+        pillowId={pillowId}
+        residentId={pillow.resident?.id ?? null}
         name={name}
-        initials={name.slice(0, 1)}
-        photoUri={photo ?? undefined}
-        nightProgress={hour === undefined ? undefined : hour / RIBBON_HOURS}
-        detail={pillow.loading ? undefined : stateDetail(state, pillow.state, pillow.events, tz, now)}
-        onSwitchPerson={people.length > 1 ? () => setPicking(true) : undefined}
+        night={night}
+        events={events}
+        tz={tz}
+        loading={pillow.loading}
+        onSwitchPerson={people.length > 1 ? switchPerson : undefined}
       />
       <View className="-mt-2 gap-8 px-4">
-        {pillow.error ? <Text className="font-sans text-sm text-danger-text">{pillow.error}</Text> : null}
-        {live && pillowId ? <AlertCard pillowId={pillowId} name={name} incident={live} tz={tz} /> : null}
+        {pillow.error ? (
+          <Text accessibilityLiveRegion="polite" className="font-sans text-sm text-danger-text">
+            {pillow.error}
+          </Text>
+        ) : null}
+        {live && pillowId ? <AlertCard key={live.id} pillowId={pillowId} name={name} incident={live} tz={tz} /> : null}
 
         {reminders.length ? (
           <Section title="Reminders today">
@@ -137,47 +190,69 @@ export default function TonightScreen() {
             <StatTile label="Up a night" value={month.tripsPerNight} />
             <StatTile label="Alerts" value={month.alerts} />
           </View>
-          <WeekSleepChart
-            title="Sleep, last 28 nights"
-            dense
-            bars={month.bars.map((b) => ({ ...b, onPress: () => open(b.key) }))}
-          />
+          <WeekSleepChart title="Sleep, last 28 nights" dense bars={monthBars} />
         </Section>
 
         <Section title="Night by night">
           <DataTable
-            columns={['Night', 'In bed', 'Got up', 'Woke']}
-            rows={week.map((n, i) => [
-              shortDay(n.window, tz),
-              facts[i].inBed ?? '–',
-              // Getting up once is ordinary: the word only turns amber on a night the charts flag.
-              facts[i].trips && isFlagged(n.tone) ? (
-                <Text key="up" className="text-sm">
-                  <StatusWord state="up">{facts[i].tripsWord}</StatusWord>
-                </Text>
-              ) : facts[i].trips ? (
-                <Text key="up" className="font-sans text-sm text-ink">
-                  {facts[i].tripsWord}
-                </Text>
-              ) : (
-                <Text key="no" className="font-sans text-sm text-ink-muted">
-                  {facts[i].inBed ? 'No' : '–'}
-                </Text>
-              ),
-              facts[i].woke ?? '–',
-            ])}
-            onRowPress={(i) => open(week[i].key)}
-            rowLabel={(i) => `${week[i].title}: ${week[i].line} Open the night.`}
+            columns={NIGHT_COLUMNS}
+            rows={rows}
+            onRowPress={onRowPress}
+            rowLabel={rowLabel}
           />
         </Section>
       </View>
       <View className="mt-12">
         <Hills />
       </View>
-      <PeopleSheet visible={picking} onClose={() => setPicking(false)} />
+      <PeopleSheet visible={picking} onClose={closePicker} />
     </ScrollView>
   );
 }
+
+const NIGHT_COLUMNS = ['Night', 'In bed', 'Got up', 'Woke'];
+
+/**
+ * The sky with her state. The only part of Tonight that follows the pillow's heartbeat, so the
+ * rest of the screen doesn't re-render every time the pillow checks in.
+ */
+const TonightSky = memo(function TonightSky({
+  pillowId,
+  residentId,
+  name,
+  night,
+  events,
+  tz,
+  loading,
+  onSwitchPerson,
+}: {
+  pillowId: string | null;
+  residentId: string | null;
+  name: string;
+  night: NightWindow;
+  events: EventRow[];
+  tz: string;
+  loading: boolean;
+  onSwitchPerson?: () => void;
+}) {
+  const row = usePillowState();
+  const now = useNow();
+  const photo = useResidentPhoto(residentId);
+  const state = appState(row, events, now);
+  const ping = usePillowCheck(pillowId, state === 'offline');
+  const hour = ribbonNow(night, now);
+  return (
+    <SkyHeader
+      state={state}
+      name={name}
+      initials={name.slice(0, 1)}
+      photoUri={photo ?? undefined}
+      nightProgress={hour === undefined ? undefined : hour / RIBBON_HOURS}
+      detail={loading ? undefined : stateDetail(state, row, events, tz, now, ping)}
+      onSwitchPerson={onSwitchPerson}
+    />
+  );
+});
 
 /** An alert in progress: what's happening, and the one thing to do about it. */
 function AlertCard({
@@ -191,21 +266,33 @@ function AlertCard({
   incident: IncidentRow;
   tz: string;
 }) {
-  const [pending, setPending] = useState(false);
+  const { refresh } = usePillow();
+  // Told the pillow: the button keeps spinning until the alert itself says someone is on it.
+  const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const acked = incident.status === 'acknowledged';
 
+  // The pillow only takes an ack while it is calling round; if the alert never changes, say so
+  // rather than spin for good.
+  useEffect(() => {
+    if (!sent || acked) return;
+    const wait = setTimeout(() => {
+      setSent(false);
+      setError(`The pillow didn't confirm. Try again, or call ${name}.`);
+    }, ACK_CONFIRM_MS);
+    return () => clearTimeout(wait);
+  }, [sent, acked, name]);
+
   const ack = async () => {
-    setPending(true);
     setError(null);
     try {
       const me = await api<{ contact_id: string | null }>('/me');
       if (!me.contact_id) throw new Error(`This login isn't one of ${name}'s contacts yet.`);
       await api(`/pillows/${pillowId}/ack`, { method: 'POST', body: { contact_id: me.contact_id } });
+      setSent(true);
+      void refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : `Couldn't tell the pillow. Try again, or call ${name}.`);
-    } finally {
-      setPending(false);
     }
   };
 
@@ -225,8 +312,12 @@ function AlertCard({
           ? `Acknowledged at ${clockTime(incident.acked_at ?? incident.opened_at, tz)}. The pillow has told ${name} help is coming.`
           : `${name} didn't answer the pillow's check-in. Family were alerted at ${clockTime(incident.opened_at, tz)}.`}
       </Text>
-      {error ? <Text className="font-sans text-sm text-danger-text">{error}</Text> : null}
-      {acked ? null : <Button fullWidth variant="alert" title="I'm on it" loading={pending} onPress={ack} />}
+      {error ? (
+        <Text accessibilityLiveRegion="polite" className="font-sans text-sm text-danger-text">
+          {error}
+        </Text>
+      ) : null}
+      {acked ? null : <Button fullWidth variant="alert" title="I'm on it" loading={sent} onPress={ack} />}
     </Card>
   );
 }
@@ -277,7 +368,7 @@ function monthOverview(
   name: string,
 ) {
   const nights = weekSummaries(events, incidents, night, MONTH_NIGHTS, tz, name).reverse();
-  const dayMonth = new Intl.DateTimeFormat('en-GB', { timeZone: tz, day: 'numeric', month: 'short' });
+  const dayMonth = formatter('dayMonth', tz, { day: 'numeric', month: 'short' }, 'en-GB');
   let slept = 0;
   let sleptNights = 0;
   let trips = 0;

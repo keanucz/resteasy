@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 
 import { Button } from '@/components/Button';
@@ -7,48 +7,67 @@ import { phaseOf, PlayButton, previewError } from '@/components/PlayButton';
 import { ListRowSkeleton, SkeletonGroup } from '@/components/Skeleton';
 import { Disclosure } from '@/components/voice/Disclosure';
 import { RadioList } from '@/components/voice/RadioList';
-import type { VoicePlayer } from '@/hooks/useVoicePlayer';
-import { type Accent, copyWithAccent, readAccents, sampleUri, type Voice } from '@/services/voice';
+import { loadOnce, type VoicePlayer } from '@/hooks/useVoicePlayer';
+import { type Accent, copyWithAccent, sampleUri, type Voice } from '@/services/voice';
+
+const LOAD_FAILED: Status = { kind: 'error', text: "Couldn't load the accents. Check your connection and try again." };
 
 type AccentSectionProps = {
   residentId: string;
+  /** The accents to offer, read once by the page; null while loading. */
+  accents: Accent[] | null;
+  accentsFailed: boolean;
   name: string;
   /** The voice she hears now, the one a copy is made of. */
   voice: Voice;
   player: VoicePlayer;
   onMade: (voice: Voice) => void;
-  onUse: (voiceId: string) => void;
+  onUse: (voiceId: string) => unknown;
 };
 
 /**
  * Give the voice she hears another accent: a new copy that speaks with it, while the original
  * stays. Shown to the owner only, since a copy costs voice credits and only the owner can use it.
  */
-export function AccentSection({ residentId, name, voice, player, onMade, onUse }: AccentSectionProps) {
-  const [accents, setAccents] = useState<Accent[] | null>(null);
+export function AccentSection({
+  residentId,
+  accents,
+  accentsFailed,
+  name,
+  voice,
+  player,
+  onMade,
+  onUse,
+}: AccentSectionProps) {
   const [picked, setPicked] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [made, setMade] = useState<Voice | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
 
-  useEffect(() => {
-    readAccents(residentId).then(setAccents, () =>
-      setStatus({ kind: 'error', text: "Couldn't load the accents. Check your connection and try again." }),
-    );
-  }, [residentId]);
-
+  const { toggle, stop } = player;
+  const options = useMemo(() => accents?.map((a) => ({ value: a.id, label: a.name })) ?? [], [accents]);
   const accent = accents?.find((a) => a.id === picked) ?? null;
   // A copy keeps the voice it came from, so another accent starts from that voice's name too.
   const baseName = voice.source === 'accent' ? voice.name.split(',')[0] : voice.name;
 
-  const play = (v: Voice) =>
-    player.toggle(v.id, () => sampleUri(residentId, v)).catch((e) => setStatus({ kind: 'error', text: previewError(e) }));
+  const play = useCallback(
+    (v: Voice) =>
+      toggle(v.id, () => loadOnce(`sample|${v.id}`, () => sampleUri(residentId, v))).catch((e) =>
+        setStatus({ kind: 'error', text: previewError(e) }),
+      ),
+    [residentId, toggle],
+  );
+
+  const choose = useCallback((id: string) => {
+    setPicked(id);
+    setMade(null);
+  }, []);
 
   const make = async () => {
     setAsking(false);
-    if (!accent) return;
-    player.stop();
+    if (!accent || busy) return;
+    stop();
     setBusy(true);
     setStatus(null);
     setMade(null);
@@ -65,8 +84,8 @@ export function AccentSection({ residentId, name, voice, player, onMade, onUse }
   };
 
   if (!accents) {
-    return status ? (
-      <StatusLine status={status} />
+    return accentsFailed ? (
+      <StatusLine status={LOAD_FAILED} />
     ) : (
       <SkeletonGroup>
         <View className="gap-2.5">
@@ -82,12 +101,9 @@ export function AccentSection({ residentId, name, voice, player, onMade, onUse }
       <Disclosure title="Accent" value={accent?.name ?? 'Choose one'}>
         <RadioList
           label="Accent"
-          options={accents.map((a) => ({ value: a.id, label: a.name }))}
+          options={options}
           value={picked}
-          onChange={(id) => {
-            setPicked(id);
-            setMade(null);
-          }}
+          onChange={choose}
         />
       </Disclosure>
       <Button

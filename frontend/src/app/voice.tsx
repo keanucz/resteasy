@@ -1,5 +1,5 @@
 import { Redirect, router } from 'expo-router';
-import { type ReactNode, useCallback, useEffect, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
@@ -18,10 +18,12 @@ import { usePillow } from '@/hooks/usePillow';
 import { usePillowLink } from '@/hooks/usePillowLink';
 import { useSession } from '@/hooks/useSession';
 import { useTheme } from '@/hooks/useTheme';
-import { useVoicePlayer } from '@/hooks/useVoicePlayer';
+import { loadOnce, useVoicePlayer } from '@/hooks/useVoicePlayer';
 import { useVoices } from '@/hooks/useVoices';
 import { ApiError } from '@/services/api';
-import { type Accent, deleteClone, readAccents, sampleUri, type Voice } from '@/services/voice';
+import { type Accent, deleteClone, readAccents, sampleUri, type Voice, type VoiceStyle } from '@/services/voice';
+
+const NO_ACCENTS: Accent[] = [];
 
 /** Why removing a family voice failed. */
 function removeError(e: unknown): string {
@@ -44,27 +46,45 @@ export default function CustomVoiceScreen() {
   const voices = useVoices(name);
   const { residentId, choice, failed, isOwner, reload, choose, add, setChoice } = voices;
   const player = useVoicePlayer();
-  const [accents, setAccents] = useState<Accent[]>([]);
+  const { toggle, stop } = player;
+  // Read once here for both the accent section and the clone sheet; null while loading.
+  const [accents, setAccents] = useState<Accent[] | null>(null);
+  const [accentsFailed, setAccentsFailed] = useState(false);
   const [cloning, setCloning] = useState(false);
   const [removing, setRemoving] = useState<Voice | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
 
   useEffect(() => {
-    if (residentId) readAccents(residentId).then(setAccents, () => setAccents([]));
+    if (!residentId) return;
+    let cancelled = false;
+    readAccents(residentId).then(
+      (found) => {
+        if (cancelled) return;
+        setAccents(found);
+        setAccentsFailed(false);
+      },
+      () => {
+        if (!cancelled) setAccentsFailed(true);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
   }, [residentId]);
 
-  // Stop whatever is playing when leaving the page.
-  useEffect(() => () => player.stop(), [player]);
+  // Stop whatever is playing when leaving the page. `stop` stays the same function, so this only
+  // runs on leaving (keyed on the whole player, it stopped every sound the moment it started).
+  useEffect(() => stop, [stop]);
 
   const play = useCallback(
     (voice: Voice) => {
       if (!residentId) return;
       setStatus(null);
-      player
-        .toggle(voice.id, () => sampleUri(residentId, voice))
-        .catch((e) => setStatus({ kind: 'error', text: previewError(e) }));
+      toggle(voice.id, () => loadOnce(`sample|${voice.id}`, () => sampleUri(residentId, voice))).catch((e) =>
+        setStatus({ kind: 'error', text: previewError(e) }),
+      );
     },
-    [residentId, player],
+    [residentId, toggle],
   );
 
   const use = useCallback(
@@ -78,15 +98,21 @@ export default function CustomVoiceScreen() {
   const remove = async (voice: Voice) => {
     setRemoving(null);
     if (!residentId) return;
-    if (player.playing?.key === voice.id) player.stop();
+    if (player.playing?.key === voice.id) stop();
     try {
       await deleteClone(residentId, voice.id);
       setStatus({ kind: 'saved', text: `Removed ${voice.name}.` });
-      reload();
+      // Removing the voice she hears makes the backend pick another, so only then read the list again.
+      if (voice.id === choice?.current) await reload();
+      else setChoice((c) => ({ ...c, voices: c.voices.filter((v) => v.id !== voice.id) }));
     } catch (e) {
       setStatus({ kind: 'error', text: removeError(e) });
     }
   };
+
+  const savedStyle = useCallback((style: VoiceStyle) => setChoice((c) => ({ ...c, style })), [setChoice]);
+
+  const own = useMemo(() => choice?.voices.filter((v) => v.source !== 'stock') ?? [], [choice]);
 
   // useSession reads the stored session again on every mount, so it starts empty: only a session
   // known to be missing goes to the login (redirecting sooner bounced the page straight back).
@@ -94,7 +120,6 @@ export default function CustomVoiceScreen() {
   if (!pillowId) return <Redirect href="/" />;
 
   const current = choice?.voices.find((v) => v.id === choice.current);
-  const own = choice?.voices.filter((v) => v.source !== 'stock') ?? [];
 
   return (
     <ScrollView
@@ -167,7 +192,7 @@ export default function CustomVoiceScreen() {
               title="Add a family voice"
               icon={<MicIconInk />}
               onPress={() => {
-                player.stop();
+                stop();
                 setCloning(true);
               }}
             />
@@ -183,7 +208,7 @@ export default function CustomVoiceScreen() {
               emotions={choice.emotions}
               isOwner={isOwner}
               player={player}
-              onSaved={(style) => setChoice((c) => ({ ...c, style }))}
+              onSaved={savedStyle}
             />
           </Section>
 
@@ -202,6 +227,8 @@ export default function CustomVoiceScreen() {
             >
               <AccentSection
                 residentId={residentId}
+                accents={accents}
+                accentsFailed={accentsFailed}
                 name={name}
                 voice={current}
                 player={player}
@@ -216,7 +243,7 @@ export default function CustomVoiceScreen() {
             name={name}
             residentId={residentId}
             player={player}
-            accents={accents}
+            accents={accents ?? NO_ACCENTS}
             canUse={isOwner}
             onClose={() => setCloning(false)}
             onAdded={add}
@@ -264,6 +291,7 @@ function MicIconInk() {
   return <MicIcon color={colors.ink} size={20} />;
 }
 
+/** Back to Settings; IconButton drops a second tap, so it never goes back twice. */
 function BackButton() {
   const { colors } = useTheme();
   return (

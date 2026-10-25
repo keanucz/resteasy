@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { Text, View } from 'react-native';
 
 import { Card } from '@/components/Card';
@@ -24,13 +24,14 @@ import { nightClimate, signedDegrees } from '@/services/readings';
 
 /** An hour before the ribbon starts, so the chart's first point has the room as she went to bed. */
 const LEAD_IN_MS = 60 * 60 * 1000;
+const TIMELINE_COLUMNS = ['Time', 'What happened'];
 
 /**
  * One night in full: what happened in a sentence, the ribbon, the numbers, the bedroom's
  * temperature, how much the pillow moved, how the night was spent and every event. The night
  * screen shows it for any night; Tonight shows it for the latest one.
  */
-export function NightDetail({
+export const NightDetail = memo(function NightDetail({
   night,
   title,
   showSkeleton,
@@ -49,11 +50,33 @@ export function NightDetail({
   const window = useMemo(() => nightWindow(night.ribbonStart), [night.ribbonStart]);
   const readings = useReadings(pillowId, window.start - LEAD_IN_MS, window.end, !night.over);
 
-  const summary = summariseNight(pillow.events, pillow.incidents, night, title, name);
-  const segments = ribbonSegments(pillow.events, night, now);
-  const stats = nightStats(pillow.events, night, now);
-  const climate = nightClimate(readings.rows);
-  const timeline = nightTimeline(pillow.events, night, tz);
+  const { events, incidents } = pillow;
+  const summary = useMemo(
+    () => summariseNight(events, incidents, night, title, name),
+    [events, incidents, night, title, name],
+  );
+  // A past night ends at its own end, so only a live one needs working out again as time passes.
+  const until = night.over ? night.end : now;
+  const segments = useMemo(() => ribbonSegments(events, night, until), [events, night, until]);
+  const stats = useMemo(() => nightStats(events, night, until), [events, night, until]);
+  const climate = useMemo(() => nightClimate(readings.rows), [readings.rows]);
+  const timeline = useMemo(() => nightTimeline(events, night, tz), [events, night, tz]);
+  const timelineRows = useMemo(
+    () =>
+      timeline.map((e) => [
+        e.time,
+        e.notable ? (
+          <Text key={e.key} className="text-sm">
+            <StatusWord state="up">{e.what}</StatusWord>
+          </Text>
+        ) : (
+          <Text key={e.key} className="font-sans text-sm text-ink">
+            {e.what}
+          </Text>
+        ),
+      ]),
+    [timeline],
+  );
 
   return (
     <View className="gap-8">
@@ -112,21 +135,7 @@ export function NightDetail({
           What the pillow noticed
         </Text>
         {timeline.length ? (
-          <DataTable
-            columns={['Time', 'What happened']}
-            rows={timeline.map((e) => [
-              e.time,
-              e.notable ? (
-                <Text key={e.key} className="text-sm">
-                  <StatusWord state="up">{e.what}</StatusWord>
-                </Text>
-              ) : (
-                <Text key={e.key} className="font-sans text-sm text-ink">
-                  {e.what}
-                </Text>
-              ),
-            ])}
-          />
+          <DataTable columns={TIMELINE_COLUMNS} rows={timelineRows} />
         ) : (
           <Text className="font-sans text-base text-ink-muted">
             {night.over ? 'Nothing from the pillow that night.' : 'Nothing from the pillow yet tonight.'}
@@ -135,4 +144,4 @@ export function NightDetail({
       </View>
     </View>
   );
-}
+});

@@ -70,6 +70,10 @@ function Routes({ signedIn }: { signedIn: boolean }) {
   // Until /me answers, a signed-in login without a saved link may still have a pillow: wait on a
   // blank screen rather than flash the pairing screen. The Stack stays mounted throughout, since
   // unmounting the root navigator while its guards flip crashes Expo Router on iOS.
+  // Every screen except the styleguide belongs to exactly one guard. A guarded screen sends the user
+  // to the first unguarded one, picked by name length, so a short unguarded screen ("voice") would
+  // catch every redirect: "/voice" sent a login without a pillow back to "/", which sent it to
+  // "/voice" again, until React stopped the loop.
   const where = !signedIn ? 'login' : pillowId !== null ? 'pillow' : ready ? 'connect' : 'loading';
   return (
     // One read of the pillow's data, shared by Tonight, Settings and the night screen.
@@ -78,12 +82,14 @@ function Routes({ signedIn }: { signedIn: boolean }) {
         <Stack.Protected guard={where === 'pillow'}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="night/[start]" />
+          <Stack.Screen name="voice" />
         </Stack.Protected>
         <Stack.Protected guard={where === 'loading'}>
           <Stack.Screen name="loading" />
         </Stack.Protected>
         <Stack.Protected guard={where === 'connect'}>
           <Stack.Screen name="connect" />
+          <Stack.Screen name="connect-name" />
         </Stack.Protected>
         <Stack.Protected guard={where === 'login'}>
           <Stack.Screen name="login" />

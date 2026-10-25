@@ -8,6 +8,8 @@ import { addDays, daysBetween, expandCalendar, normaliseReminder, type Slot, toS
 
 /** How long a move or skip waits, undoable, before it goes to the pillow. */
 export const UNDO_MS = 7000;
+/** Paging through weeks quickly reads only the week it stops on. */
+const RANGE_SETTLE_MS = 250;
 
 /**
  * A change shown at once but sent only once the undo window closes, so undoing it costs nothing
@@ -27,7 +29,9 @@ export type RemindersData = {
   reminders: Reminder[];
   slots: Slot[];
   loading: boolean;
-  /** Set when the reminders could not be read at all, in words. */
+  /** True once a read has landed, so a later failure keeps showing it. */
+  loaded: boolean;
+  /** Set when the last read failed, in words; what was read before stays. */
   error: string | null;
   refresh: () => Promise<void>;
   /** The change waiting out its undo window, if any. */
@@ -74,6 +78,7 @@ export function useReminders(
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [staged, setStaged] = useState<Staged | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -81,6 +86,18 @@ export function useReminders(
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The latest read, so a slow answer for an old week never replaces a newer one.
   const readId = useRef(0);
+  // The read in flight and its range; asking again for that range reads once more after it.
+  const running = useRef<{ key: string; again: boolean; promise: Promise<void> } | null>(null);
+  // The calendar as last shown, so a change that fails to send can be put back.
+  const slotsRef = useRef<Slot[]>([]);
+  // Changes go to the pillow one after another, in the order they were made.
+  const sending = useRef<Promise<void>>(Promise.resolve());
+  const rangeKey = `${pillowId}|${start}|${end}|${tz}`;
+
+  const showSlots = useCallback((next: Slot[]) => {
+    slotsRef.current = next;
+    setSlots(next);
+  }, []);
 
   const todayStatus = useMemo(
     () => new Map(today.occurrences.map((o) => [o.reminder_id, o.status])),
@@ -107,55 +124,96 @@ export function useReminders(
     }
   }, [pillowId, start, end, tz, today.date, todayStatus]);
 
-  /** Shows a read, unless a newer one has started since. */
-  const apply = useCallback((id: number, result: Awaited<ReturnType<typeof read>>) => {
-    if (id !== readId.current) return;
-    if ('error' in result) setError(result.error);
-    else {
-      setReminders(result.list);
-      setSlots(result.days);
-      setError(null);
-    }
-    setLoading(false);
-  }, []);
+  const readRef = useRef(read);
+  useEffect(() => {
+    readRef.current = read;
+  }, [read]);
 
-  const refresh = useCallback(async () => {
-    if (!pillowId) return;
-    const id = ++readId.current;
-    apply(id, await read());
-  }, [pillowId, read, apply]);
+  /**
+   * Reads the range `key` names and shows it, unless a newer read has started since. Never rejects.
+   * One read per range at a time: asking while it runs reads once more when it lands.
+   */
+  const load = useCallback(
+    (key: string): Promise<void> => {
+      const current = running.current;
+      if (current?.key === key) {
+        current.again = true;
+        return current.promise;
+      }
+      const id = ++readId.current;
+      const entry = { key, again: false, promise: Promise.resolve() };
+      entry.promise = (async () => {
+        do {
+          entry.again = false;
+          const result = await readRef.current();
+          if (id !== readId.current) return;
+          if ('error' in result) setError(result.error);
+          else {
+            setReminders(result.list);
+            showSlots(result.days);
+            setError(null);
+            setLoaded(true);
+          }
+          setLoading(false);
+        } while (entry.again);
+      })().finally(() => {
+        if (running.current === entry) running.current = null;
+      });
+      running.current = entry;
+      return entry.promise;
+    },
+    [showSlots],
+  );
+
+  const refresh = useCallback(() => (pillowId ? load(rangeKey) : Promise.resolve()), [pillowId, load, rangeKey]);
+  const refreshRef = useRef(refresh);
+  useEffect(() => {
+    refreshRef.current = refresh;
+  }, [refresh]);
 
   useEffect(() => {
     if (!pillowId) return;
-    const id = ++readId.current;
-    read().then((result) => apply(id, result));
-  }, [pillowId, read, apply]);
+    // The first read goes at once; a new week waits a moment in case another tap is on its way.
+    // Bumping the read now drops a read for the old week or pillow that is still on its way.
+    const first = readId.current === 0;
+    readId.current += 1;
+    const wait = setTimeout(() => void load(rangeKey), first ? 0 : RANGE_SETTLE_MS);
+    return () => clearTimeout(wait);
+  }, [pillowId, read, load, rangeKey]);
 
-  /** Sends the staged change now (its window closed, or another change replaces it). */
-  const send = useCallback(async () => {
+  /** Sends the staged change now (its window closed, or another change replaces it). Never rejects. */
+  const send = useCallback((): Promise<void> => {
     const change = stagedRef.current;
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
     stagedRef.current = null;
-    if (!change) return;
+    if (!change) return sending.current;
     // Keep the change on screen while it goes, so nothing jumps back until the fresh read lands.
-    setSlots((current) => change.preview(current));
+    const before = slotsRef.current;
+    showSlots(change.preview(before));
     setStaged(null);
-    try {
-      await change.commit();
-    } catch {
-      setSendError("Couldn't send that change to the pillow. Nothing was changed, so try again.");
-    }
-    await refresh();
-  }, [refresh]);
+    sending.current = sending.current
+      .then(async () => {
+        try {
+          await change.commit();
+        } catch {
+          // Put the calendar back, so a change that never reached the pillow doesn't show as made.
+          showSlots(before);
+          setSendError("Couldn't send that change to the pillow. Nothing was changed, so try again.");
+        }
+        await refreshRef.current();
+      })
+      .catch(() => {});
+    return sending.current;
+  }, [showSlots]);
 
   const stage = useCallback(
     (change: Staged) => {
-      if (stagedRef.current) send();
+      if (stagedRef.current) void send();
       stagedRef.current = change;
       setStaged(change);
       setSendError(null);
-      timer.current = setTimeout(send, UNDO_MS);
+      timer.current = setTimeout(() => void send(), UNDO_MS);
     },
     [send],
   );
@@ -183,17 +241,22 @@ export function useReminders(
   }, []);
 
   const shown = useMemo(() => (staged ? staged.preview(slots) : slots), [staged, slots]);
+  const clearSendError = useCallback(() => setSendError(null), []);
 
-  return {
-    reminders,
-    slots: shown,
-    loading,
-    error,
-    refresh,
-    staged,
-    stage,
-    undo,
-    sendError,
-    clearSendError: useCallback(() => setSendError(null), []),
-  };
+  return useMemo(
+    () => ({
+      reminders,
+      slots: shown,
+      loading,
+      loaded,
+      error,
+      refresh,
+      staged,
+      stage,
+      undo,
+      sendError,
+      clearSendError,
+    }),
+    [reminders, shown, loading, loaded, error, refresh, staged, stage, undo, sendError, clearSendError],
+  );
 }

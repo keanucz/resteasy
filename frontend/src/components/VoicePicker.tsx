@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 
 import { Button } from '@/components/Button';
@@ -9,8 +9,9 @@ import { phaseOf, previewError } from '@/components/PlayButton';
 import { ListRowSkeleton, SkeletonGroup } from '@/components/Skeleton';
 import { ChevronIcon } from '@/components/TabIcons';
 import { VoiceRow } from '@/components/voice/VoiceRow';
+import { useGuardedPress } from '@/hooks/useGuardedPress';
 import { useTheme } from '@/hooks/useTheme';
-import { useVoicePlayer } from '@/hooks/useVoicePlayer';
+import { loadOnce, useVoicePlayer } from '@/hooks/useVoicePlayer';
 import { useVoices } from '@/hooks/useVoices';
 import { sampleUri, type Voice } from '@/services/voice';
 
@@ -19,21 +20,21 @@ import { sampleUri, type Voice } from '@/services/voice';
  * ready-made sample (instant, no voice service call). The owner taps a voice to choose it.
  * Family voices, accents, how it speaks and names it should say right live on the Custom voice page.
  */
-export function VoicePicker({ name }: { name: string }) {
+export const VoicePicker = memo(function VoicePicker({ name }: { name: string }) {
   const { colors } = useTheme();
   const { residentId, choice, failed, isOwner, reload, choose } = useVoices(name);
-  const player = useVoicePlayer();
+  const { playing, toggle, stop } = useVoicePlayer();
   const [status, setStatus] = useState<Status | null>(null);
 
   const play = useCallback(
     (voice: Voice) => {
       if (!residentId) return;
       setStatus(null);
-      player
-        .toggle(voice.id, () => sampleUri(residentId, voice))
-        .catch((e) => setStatus({ kind: 'error', text: previewError(e) }));
+      toggle(voice.id, () => loadOnce(`sample|${voice.id}`, () => sampleUri(residentId, voice))).catch((e) =>
+        setStatus({ kind: 'error', text: previewError(e) }),
+      );
     },
-    [residentId, player],
+    [residentId, toggle],
   );
 
   const pick = useCallback(
@@ -42,6 +43,21 @@ export function VoicePicker({ name }: { name: string }) {
       setStatus(await choose(voiceId));
     },
     [choose],
+  );
+
+  // A double tap opens the page once.
+  const openCustom = useGuardedPress(() => {
+    stop();
+    router.push('/voice');
+  });
+
+  const { current, stock, own } = useMemo(
+    () => ({
+      current: choice?.voices.find((v) => v.id === choice.current),
+      stock: choice?.voices.filter((v) => v.source === 'stock') ?? [],
+      own: choice?.voices.filter((v) => v.source !== 'stock') ?? [],
+    }),
+    [choice],
   );
 
   if (failed) {
@@ -68,9 +84,6 @@ export function VoicePicker({ name }: { name: string }) {
     );
   }
 
-  const current = choice.voices.find((v) => v.id === choice.current);
-  const stock = choice.voices.filter((v) => v.source === 'stock');
-  const own = choice.voices.filter((v) => v.source !== 'stock');
   const row = (voice: Voice) => (
     <VoiceRow
       key={voice.id}
@@ -78,7 +91,7 @@ export function VoicePicker({ name }: { name: string }) {
       name={name}
       selected={voice.id === choice.current}
       canChoose={isOwner}
-      playing={choice.legacy ? undefined : phaseOf(player.playing, voice.id)}
+      playing={choice.legacy ? undefined : phaseOf(playing, voice.id)}
       onChoose={pick}
       onPlay={play}
     />
@@ -130,12 +143,9 @@ export function VoicePicker({ name }: { name: string }) {
           title="Custom voice"
           meta="Family voices, speed and tone, names to say right, accents."
           trailing={<ChevronIcon color={colors['ink-muted']} />}
-          onPress={() => {
-            player.stop();
-            router.push('/voice');
-          }}
+          onPress={openCustom.press}
         />
       )}
     </View>
   );
-}
+});

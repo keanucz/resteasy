@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { Button } from '@/components/Button';
@@ -22,7 +23,7 @@ type VoiceRowProps = {
   canChoose: boolean;
   /** Its sample's phase; undefined when samples aren't available. */
   playing: 'loading' | 'playing' | null | undefined;
-  onChoose: (id: string) => void;
+  onChoose: (id: string) => unknown;
   onPlay: (voice: Voice) => void;
   onRemove?: (voice: Voice) => void;
 };
@@ -32,7 +33,16 @@ type VoiceRowProps = {
  * tapping the name chooses it; everyone else sees no check and only listens, so nothing can be
  * tapped that would then be refused. "In use" sits on the name's line, so a row never changes size.
  */
-export function VoiceRow({ voice, name, selected, canChoose, playing, onChoose, onPlay, onRemove }: VoiceRowProps) {
+export const VoiceRow = memo(function VoiceRow({
+  voice,
+  name,
+  selected,
+  canChoose,
+  playing,
+  onChoose,
+  onPlay,
+  onRemove,
+}: VoiceRowProps) {
   const { colors } = useTheme();
   const meta = voice.source === 'stock' ? voice.description : madeBy(voice);
   const label = (
@@ -81,4 +91,4 @@ export function VoiceRow({ voice, name, selected, canChoose, playing, onChoose, 
       ) : null}
     </View>
   );
-}
+});

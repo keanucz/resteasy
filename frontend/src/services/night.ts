@@ -13,6 +13,7 @@ import {
 import type { PillowState } from '@/constants/status';
 import type { RibbonSegment } from '@/components/NightRibbon';
 import type { Occurrence, Reminder } from '@/hooks/usePillow';
+import type { PillowPing } from '@/services/ping';
 
 export type NightState = 'awake' | 'in_bed' | 'up' | 'check_in' | 'escalating';
 
@@ -43,10 +44,30 @@ const DAY_MS = 24 * HOUR_MS;
 
 // ---------- time in her timezone ----------
 
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
+/**
+ * One formatter per kind and timezone, made once: building an Intl.DateTimeFormat is slow on the
+ * phone, and a month of nights asks for hundreds of dates.
+ */
+export function formatter(
+  kind: string,
+  tz: string,
+  options: Intl.DateTimeFormatOptions,
+  locale = 'en-US',
+): Intl.DateTimeFormat {
+  const key = `${kind}|${locale}|${tz}`;
+  let f = formatters.get(key);
+  if (!f) {
+    f = new Intl.DateTimeFormat(locale, { timeZone: tz, ...options });
+    formatters.set(key, f);
+  }
+  return f;
+}
+
 /** Year, month, day, hour and minute of `ms` on the resident's clock. */
 function partsIn(ms: number, tz: string) {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
+  const parts = formatter('parts', tz, {
     hourCycle: 'h23',
     year: 'numeric',
     month: 'numeric',
@@ -79,11 +100,7 @@ function atHour(dayMs: number, hour: number, tz: string, addDays = 0): number {
 
 /** "3:12 am", on her clock. */
 export function clockTime(iso: string | number, tz: string): string {
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    hour: 'numeric',
-    minute: '2-digit',
-  })
+  return formatter('clock', tz, { hour: 'numeric', minute: '2-digit' })
     .format(new Date(iso))
     .replace(' AM', ' am')
     .replace(' PM', ' pm');
@@ -91,10 +108,7 @@ export function clockTime(iso: string | number, tz: string): string {
 
 /** "Thursday", on her clock. */
 function weekday(ms: number, tz: string): string {
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    weekday: 'long',
-  }).format(new Date(ms));
+  return formatter('weekday', tz, { weekday: 'long' }).format(new Date(ms));
 }
 
 /** "3h 18m" or "42m". */
@@ -155,13 +169,40 @@ export function pastNights(night: NightWindow, count: number, tz: string): Night
   });
 }
 
-const within = (rows: EventRow[], w: NightWindow) =>
-  rows
-    .filter((e) => {
-      const t = Date.parse(e.device_ts);
-      return t >= w.start && t < w.end;
-    })
-    .sort((a, b) => Date.parse(a.device_ts) - Date.parse(b.device_ts));
+type Timed = { rows: EventRow[]; times: number[] };
+
+/** Each list of events sorted once, with its times parsed, for as long as that list is on screen. */
+const timed = new WeakMap<EventRow[], Timed>();
+
+function timedOf(all: EventRow[]): Timed {
+  let t = timed.get(all);
+  if (!t) {
+    const rows = all
+      .map((e) => ({ e, t: Date.parse(e.device_ts) }))
+      .sort((a, b) => a.t - b.t);
+    t = { rows: rows.map((r) => r.e), times: rows.map((r) => r.t) };
+    timed.set(all, t);
+  }
+  return t;
+}
+
+/** The first index whose time is at or after `t`. */
+function firstAt(times: number[], t: number): number {
+  let lo = 0;
+  let hi = times.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (times[mid] < t) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** The night's events, oldest first. */
+const within = (all: EventRow[], w: NightWindow) => {
+  const { rows, times } = timedOf(all);
+  return rows.slice(firstAt(times, w.start), firstAt(times, w.end));
+};
 
 // ---------- the status headline ----------
 
@@ -182,21 +223,28 @@ export function appState(row: PillowStateRow | null, events: EventRow[], now: nu
   }
 }
 
-/** The line under the headline: when this state began, in plain words. */
+/**
+ * The line under the headline: when this state began, in plain words. Offline, `ping` (the app's
+ * own check every few seconds) says which part of the pillow isn't answering.
+ */
 export function stateDetail(
   state: PillowState,
   row: PillowStateRow | null,
   events: EventRow[],
   tz: string,
   now: number,
+  ping: PillowPing | null = null,
 ): string {
   if (!row) return 'Waiting for the pillow to say hello.';
   const since = clockTime(row.state_since, tz);
   const latest = (type: string) => [...events].reverse().find((e) => e.event_type === type);
   switch (state) {
-    case 'offline':
-      return `Last heard from ${duration(now - Date.parse(row.last_seen_at))} ago, at ${clockTime(row.last_seen_at, tz)}.
-Check it's plugged in and the Wi-Fi is on.`;
+    case 'offline': {
+      const heard = `Last heard from ${duration(now - Date.parse(row.last_seen_at))} ago, at ${clockTime(row.last_seen_at, tz)}.`;
+      if (ping?.active) return `${heard}\nIt's answering again. Catching up now.`;
+      if (ping?.node_alive) return `${heard}\nThe pillow is on, but its bedside speaker isn't answering. Check it's plugged in.`;
+      return `${heard}\nCheck it's plugged in and the Wi-Fi is on. Checking again every few seconds.`;
+    }
     case 'asleep': {
       const asleep = latest('asleep');
       const lay = latest('lay_down');
@@ -450,13 +498,7 @@ export function todaysReminders(
   now: number,
   tz: string,
 ): ReminderToday[] {
-  const day =
-    WEEKDAY_ISO[
-      new Intl.DateTimeFormat('en-US', {
-        timeZone: tz,
-        weekday: 'short',
-      }).format(new Date(now))
-    ];
+  const day = WEEKDAY_ISO[formatter('short', tz, { weekday: 'short' }).format(new Date(now))];
   const { hour, minute } = partsIn(now, tz);
   const nowHHMM = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
   return reminders
@@ -493,19 +535,12 @@ export function nightTitle(w: NightWindow, now: number, tz: string): string {
 
 /** "21 October". */
 export function nightDate(w: NightWindow, tz: string): string {
-  return new Intl.DateTimeFormat('en-GB', {
-    timeZone: tz,
-    day: 'numeric',
-    month: 'long',
-  }).format(new Date(w.start));
+  return formatter('date', tz, { day: 'numeric', month: 'long' }, 'en-GB').format(new Date(w.start));
 }
 
 /** "Tue". */
 export function shortDay(w: NightWindow, tz: string): string {
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    weekday: 'short',
-  }).format(new Date(w.start));
+  return formatter('short', tz, { weekday: 'short' }).format(new Date(w.start));
 }
 
 /** The week table's columns: when she went to bed, how often she got up, when she woke. */

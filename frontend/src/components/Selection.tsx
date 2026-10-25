@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Pressable, Switch, Text, View } from 'react-native';
 
 import { useTheme } from '@/hooks/useTheme';
@@ -10,7 +11,7 @@ type ToggleProps = {
 };
 
 /** On/off switch in the accent colour with a white thumb. */
-export function Toggle({ value, onValueChange, label }: ToggleProps) {
+export const Toggle = memo(function Toggle({ value, onValueChange, label }: ToggleProps) {
   const { colors } = useTheme();
   return (
     <Switch
@@ -24,7 +25,7 @@ export function Toggle({ value, onValueChange, label }: ToggleProps) {
       ios_backgroundColor={colors.hairline}
     />
   );
-}
+});
 
 type ChipProps = {
   label: string;
@@ -53,7 +54,7 @@ type SegmentedTabsProps<T extends string> = {
 };
 
 /** Contained segmented control for switching views (Night, Week, Month). */
-export function SegmentedTabs<T extends string>({ options, value, onChange }: SegmentedTabsProps<T>) {
+function SegmentedTabsImpl<T extends string>({ options, value, onChange }: SegmentedTabsProps<T>) {
   return (
     <View accessibilityRole="tablist" className="flex-row rounded-[10px] bg-surface p-[3px]">
       {options.map((option) => {
@@ -63,7 +64,10 @@ export function SegmentedTabs<T extends string>({ options, value, onChange }: Se
             key={option.value}
             accessibilityRole="tab"
             accessibilityState={{ selected }}
-            onPress={() => onChange(option.value)}
+            // The open tab tapped again changes nothing, so it sends nothing.
+            onPress={() => {
+              if (!selected) onChange(option.value);
+            }}
             className={`min-h-11 flex-1 items-center justify-center rounded-lg ${selected ? 'bg-ink/15' : ''}`}
           >
             <Text className={`font-sans-semibold text-[13px] ${selected ? 'text-ink' : 'text-ink-muted'}`}>
@@ -75,6 +79,9 @@ export function SegmentedTabs<T extends string>({ options, value, onChange }: Se
     </View>
   );
 }
+
+/** Re-renders only when its options, value or handler change; generic, so typed through a cast. */
+export const SegmentedTabs = memo(SegmentedTabsImpl) as typeof SegmentedTabsImpl;
 
 type CheckboxProps = {
   label: string;
