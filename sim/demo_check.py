@@ -9,16 +9,21 @@
               the usual 22:00-07:00, so otherwise the pillow ignores the demo
   3. tunnel   exactly one connector on calhacks-pillow, and it's the VPS (linux). Needs Keanu's
               cloudflared login; skipped elsewhere
-  4. bridge   sim/audio_bridge.py is up on 127.0.0.1:8765
-  5. chime    POST a `buzz` command to the server; the bridge picks it up and the voice unit plays
+  4. bridge   sim/audio_bridge.py is up (--bridge, else PILLOW_AUDIO_BRIDGE, else 127.0.0.1:8765)
+  5. hardware POST /ping: the pillow node and the voice unit both answer, and over which link
+              (usb > hotspot > ble; ble works but its state updates are slow)
+  6. sensors  temperature and humidity (the node's DHT11) are reported, not null
+  7. plate    press the head plate: head_on goes true, then false when you let go. --yes skips it
+  8. chime    POST a `buzz` command to the server; the bridge picks it up and the voice unit plays
               it. You confirm you heard it
-  6. speech   a Cartesia line spoken by the voice unit (voice/voice.py, PILLOW_AUDIO=pillow). You
+  9. speech   a Cartesia line spoken by the voice unit (voice/voice.py, PILLOW_AUDIO=pillow). You
               confirm you heard it
 
 Start the bridge first, as for the demo:
-  uv run sim/audio_bridge.py --serial /dev/ttyACM0 --server https://pillow.keanuc.net --pillow-id mum
+  uv run sim/audio_bridge.py --hotspot 10.42.0.1:47801 --serial /dev/ttyACM0 --listen 127.0.0.1:8799 \
+      --server https://pillow.keanuc.net --pillow-id mum
 then, with CARTESIA_API_KEY set:
-  uv run sim/demo_check.py              # --yes: don't ask whether you heard it
+  uv run sim/demo_check.py --bridge 127.0.0.1:8799   # --yes: don't ask whether you heard it
 """
 
 from __future__ import annotations
@@ -42,8 +47,9 @@ import voice
 
 TUNNEL = "5a23a49f-52a1-426d-a08c-03c21a1a9be6"  # calhacks-pillow; by id, the name can resolve wrong
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12} ")
-BRIDGE = ("127.0.0.1", 8765)
+BRIDGE_DEFAULT = "127.0.0.1:8765"
 SPEECH = "Good morning. This is the pillow's check before the demo."
+PLATE_WAIT_S = 15  # to press, then to let go; state arrives every ~0.5-1.5 s over USB or the hotspot
 CHIME_WAIT_S = 4  # the bridge polls every 0.5 s; ~1.5 s from POST to sound through the VPS
 
 results: list[tuple[str, bool | None, str]] = []  # (step, passed or None = skipped, detail)
@@ -111,14 +117,79 @@ def check_tunnel() -> None:
         record("tunnel", False, f"{len(connectors)} connectors ({rows}): kill the laptop one (coord/TUNNEL.md)")
 
 
-def check_bridge() -> bool:
+def check_bridge(bridge: str) -> bool:
+    host, _, port = bridge.rpartition(":")
     try:
-        socket.create_connection(BRIDGE, timeout=2).close()
-        record("bridge", True, f"audio_bridge on {BRIDGE[0]}:{BRIDGE[1]}")
+        socket.create_connection((host, int(port)), timeout=2).close()
+        record("bridge", True, f"audio_bridge on {bridge}")
         return True
     except OSError:
         record("bridge", False, "audio_bridge not running: start it (see the top of this file)")
         return False
+
+
+def check_hardware(server: str, pillow_id: str) -> bool:
+    try:
+        r = httpx.post(f"{server}/api/pillows/{pillow_id}/ping", timeout=15)  # waits ~4 s for fresh state
+        r.raise_for_status()
+        ping = r.json()
+    except (httpx.HTTPError, json.JSONDecodeError) as err:
+        record("hardware", False, f"POST /ping: {err}")
+        return False
+    link = ping.get("link")
+    if not ping.get("voice_unit_alive"):
+        record("hardware", False, "no fresh state from the voice unit: is the bridge connected to it?")
+        return False
+    if not ping.get("node_alive"):
+        record("hardware", False, f"voice unit on {link}, but the pillow node is silent: power it, it pairs by itself")
+        return False
+    note = " (slow state updates: plug the voice unit into USB)" if link == "ble" else ""
+    record("hardware", True, f"pillow node and voice unit both answer, link {link}{note}")
+    return True
+
+
+def read_state(server: str, pillow_id: str) -> dict:
+    r = httpx.get(f"{server}/api/pillows/{pillow_id}/state", timeout=10)
+    r.raise_for_status()
+    return r.json()
+
+
+def check_sensors(server: str, pillow_id: str) -> None:
+    try:
+        state = read_state(server, pillow_id)
+    except (httpx.HTTPError, json.JSONDecodeError) as err:
+        record("sensors", False, f"GET /state: {err}")
+        return
+    t, h = state.get("temp_c"), state.get("humidity")
+    if t is None or h is None:
+        record("sensors", False, "temp/humidity null: DHT11 on GPIO7 unplugged, or the node runs older firmware")
+    else:
+        record("sensors", True, f"{t} C, {h}% humidity, motion {state.get('motion')}")
+
+
+def wait_head(server: str, pillow_id: str, want: bool) -> bool:
+    deadline = time.monotonic() + PLATE_WAIT_S
+    while time.monotonic() < deadline:
+        try:
+            if read_state(server, pillow_id).get("head_on") is want:
+                return True
+        except (httpx.HTTPError, json.JSONDecodeError):
+            pass
+        time.sleep(0.5)
+    return False
+
+
+def check_plate(server: str, pillow_id: str, assume_yes: bool) -> None:
+    if assume_yes:
+        record("plate", None, "skipped with --yes (it needs a hand on the pillow)")
+        return
+    input("      press the head plate (a hand on the pillow), then press Enter ")
+    if not wait_head(server, pillow_id, True):
+        record("plate", False, f"head_on stayed false for {PLATE_WAIT_S} s: check the foil sheets and GPIO4/GND")
+        return
+    print("      head_on true. Now let go...", flush=True)
+    ok = wait_head(server, pillow_id, False)
+    record("plate", ok, "head_on went true, then false" if ok else "head_on stuck true: the foil sheets touch")
 
 
 def check_chime(server: str, pillow_id: str, assume_yes: bool) -> None:
@@ -155,15 +226,22 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--server", default="https://pillow.keanuc.net")
     ap.add_argument("--pillow-id", default="mum")
-    ap.add_argument("--yes", action="store_true", help="don't ask whether you heard the chime and voice")
+    ap.add_argument("--bridge", default=os.environ.get("PILLOW_AUDIO_BRIDGE") or BRIDGE_DEFAULT,
+                    help="audio_bridge's --listen address (also where voice.py speaks)")
+    ap.add_argument("--yes", action="store_true",
+                    help="don't ask whether you heard the chime and voice; skip the plate press")
     args = ap.parse_args()
     server = args.server.rstrip("/")
+    os.environ["PILLOW_AUDIO_BRIDGE"] = args.bridge  # voice.speak reads it per call
 
     server_ok = check_server(server, args.pillow_id)
     if server_ok:
         check_watch(server, args.pillow_id)
     check_tunnel()
-    if check_bridge():
+    if check_bridge(args.bridge):
+        if server_ok and check_hardware(server, args.pillow_id):
+            check_sensors(server, args.pillow_id)
+            check_plate(server, args.pillow_id, args.yes)
         if server_ok:
             check_chime(server, args.pillow_id, args.yes)
         check_speech(args.yes)
