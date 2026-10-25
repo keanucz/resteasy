@@ -207,7 +207,7 @@ def test_the_warning_is_the_last_thing_she_hears():
     ("please call Sarah for me", True),
     ("I didn't bleed properly", False),  # venue chatter Claude read as distress: gentle ladder
     ("I'm scared", False),
-    ("I feel dizzy", False),
+    ("I feel dizzy", True),
 ])
 def test_only_an_explicit_call_for_help_phones_family_at_once(reply, calls_now):
     speak, listen, said = fake(reply)
@@ -291,3 +291,25 @@ def test_distress_is_reported_before_she_is_told_help_is_coming():
     out = run_checkin(speak_logged, listen, report=lambda o: events.append(("report", o.escalate)))
     assert out.escalate and out.distress
     assert events[-2] == ("report", True) and "Help is coming" in events[-1][1]
+
+
+@pytest.mark.parametrize("reply", ["I'm feeling really dizzy.", "I'm extremely dizzy, I think I'm gonna throw up",
+                                   "I feel faint", "I'm feeling really sick"])
+def test_dizzy_or_faint_phones_family_at_once(reply):
+    speak, listen, said = fake(reply)
+    out = run_checkin(speak, listen)
+    assert out.escalate and out.distress
+
+
+def test_not_dizzy_is_not_a_call_for_help():
+    from judge import asked_for_help
+
+    assert not asked_for_help("I'm not dizzy, I'm fine") and not asked_for_help("I don't feel sick")
+
+
+def test_demo_pace_asks_once_then_warns():
+    from checkin import DEMO_PACE
+
+    speak, listen, said = fake(None, None)
+    out = run_checkin(speak, listen, **DEMO_PACE)
+    assert out.escalate and len(said) == 2  # one ask, then the warning
