@@ -3,9 +3,10 @@
 from datetime import time
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, PlainSerializer, field_validator
+from pydantic import BaseModel, Field, PlainSerializer, StringConstraints, field_validator
 
 from app.agents.guardian import CONFIG_BOUNDS
+from app.core.app_constants import RESIDENT_NAME_MAX
 from app.core.voice_constants import VOICE_IDS
 
 TIMEOUT_MIN, TIMEOUT_MAX = CONFIG_BOUNDS["checkin_timeout_min"]
@@ -32,6 +33,12 @@ class Account(BaseModel):
     contact_id: str | None
     full_name: str | None
     pillows: list[AccountPillow]
+
+
+class NewPillow(BaseModel):
+    """"Connect pillow" on a fresh sign-up: who the pillow is for, as the app should call them."""
+
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=RESIDENT_NAME_MAX)]
 
 
 class Voice(BaseModel):

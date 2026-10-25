@@ -5,11 +5,14 @@ from typing import Any
 from postgrest.exceptions import APIError
 from supabase import AsyncClient
 
+from app.core.app_constants import OWNER_ROLE
 from app.crud.crud_constants import (
     CONTACTS_TABLE,
     JOIN_PRIORITY_TRIES,
     PILLOWS_TABLE,
     RESIDENT_CONTACTS_TABLE,
+    RESIDENTS_TABLE,
+    UNIQUE_VIOLATION,
 )
 from app.crud.supabase_query import fetch_one
 
@@ -96,3 +99,27 @@ async def join_household(db: AsyncClient, user_id: str, full_name: str, resident
         except APIError:  # another sign-up took that priority first
             if attempt == JOIN_PRIORITY_TRIES - 1:
                 raise
+
+
+async def create_household(
+    db: AsyncClient, user_id: str, contact_name: str, resident_name: str, pillow_id: str
+) -> bool:
+    """Set up pillow `pillow_id` for a new resident called `resident_name`, with the login as their
+    owner and first contact (its own contact row if it has none). False, with nothing left behind,
+    when that pillow is already registered."""
+    names = {"full_name": resident_name, "preferred_name": resident_name}
+    resident = (await db.table(RESIDENTS_TABLE).insert(names).execute()).data[0]
+    try:
+        await db.table(PILLOWS_TABLE).insert({"id": pillow_id, "resident_id": resident["id"]}).execute()
+    except APIError as err:
+        await db.table(RESIDENTS_TABLE).delete().eq("id", resident["id"]).execute()
+        if err.code == UNIQUE_VIOLATION:
+            return False
+        raise
+    contact = await get_contact_for_user(db, user_id)
+    if contact is None:
+        row = {"full_name": contact_name, "user_id": user_id, "on_call": False}
+        contact = (await db.table(CONTACTS_TABLE).insert(row).execute()).data[0]
+    link = {"resident_id": resident["id"], "contact_id": contact["id"], "priority": 1, "role": OWNER_ROLE}
+    await db.table(RESIDENT_CONTACTS_TABLE).insert(link).execute()
+    return True

@@ -40,6 +40,13 @@ DEFAULT_NOTIFY_PILLOW_IDS = ["mum"]
 
 # The demo household's pillow (Margaret's); a fresh sign-up joins it as a plain contact on connect
 DEMO_PILLOW_ID = "mum"
+# The id the real boards' bridge posts as (sim/audio_bridge.py --pillow-id). "Connect pillow" on a
+# login that looks after nobody creates it, for the person the login names (POST /api/me/pillows)
+REAL_PILLOW_ID = "pillow-1"
+# Longest name the app may give the person a pillow is for
+RESIDENT_NAME_MAX = 60
+# Detail returned with a 409 when another login has already set the real pillow up
+PILLOW_TAKEN = "This pillow is already set up by someone else"
 # A fresh sign-up's name when their email gives none to borrow
 NEW_HELPER_NAME = "Family helper"
 # Detail returned with a 404 when the demo pillow (or its resident) is missing from the database

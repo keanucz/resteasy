@@ -11,15 +11,24 @@ from app.core.app_constants import (
     DEMO_PILLOW_MISSING,
     FAMILY_APP_AGENT,
     NEW_HELPER_NAME,
+    OWNER_ROLE,
+    PILLOW_TAKEN,
+    REAL_PILLOW_ID,
     SETTINGS_CHANGE_INTENT,
 )
 from app.core.dependencies import PillowDep, SupabaseDep, UserIdDep, require_role, resident_of
 from app.core.voice_constants import VOICES
-from app.crud.accounts import get_contact_for_user, join_household, list_account_pillows
+from app.crud.accounts import (
+    create_household,
+    get_contact_for_user,
+    get_link_for_user,
+    join_household,
+    list_account_pillows,
+)
 from app.crud.night_log import log_action
 from app.crud.pillows import get_pillow
 from app.crud.residents import update_resident
-from app.schemas.account import Account, AccountPillow, Preferences, PreferencesPatch, Voice
+from app.schemas.account import Account, AccountPillow, NewPillow, Preferences, PreferencesPatch, Voice
 
 router = APIRouter(tags=["account"])
 
@@ -47,10 +56,33 @@ async def join_demo(user_id: UserIdDep, db: SupabaseDep) -> Account:
     pillow = await get_pillow(db, DEMO_PILLOW_ID)
     if pillow is None or pillow.resident_id is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=DEMO_PILLOW_MISSING)
-    user = (await db.auth.admin.get_user_by_id(user_id)).user
-    name = (user.email or "").split("@")[0].strip() or NEW_HELPER_NAME
-    await join_household(db, user_id, name, str(pillow.resident_id))
+    await join_household(db, user_id, await _name_from_email(db, user_id), str(pillow.resident_id))
     return await read_account(user_id, db)
+
+
+@router.post("/me/pillows")
+async def create_pillow(user_id: UserIdDep, new: NewPillow, db: SupabaseDep) -> Account:
+    """"Connect pillow" on a login that looks after nobody: set the real pillow up for the person it
+    names, with the login as their owner. It starts empty: only what the boards send from now on.
+    Safe to repeat for the same owner (the name is updated); 409 once another login has set it up."""
+    pillow = await get_pillow(db, REAL_PILLOW_ID)
+    if pillow is not None:
+        link = await get_link_for_user(db, user_id, str(pillow.resident_id)) if pillow.resident_id else None
+        if link is None or link["role"] != OWNER_ROLE:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail=PILLOW_TAKEN)
+        names = {"full_name": new.name, "preferred_name": new.name}
+        await update_resident(db, str(pillow.resident_id), names)
+        return await read_account(user_id, db)
+    contact_name = await _name_from_email(db, user_id)
+    if not await create_household(db, user_id, contact_name, new.name, REAL_PILLOW_ID):
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=PILLOW_TAKEN)
+    return await read_account(user_id, db)
+
+
+async def _name_from_email(db: SupabaseDep, user_id: str) -> str:
+    """A new contact's name, borrowed from the login's email."""
+    user = (await db.auth.admin.get_user_by_id(user_id)).user
+    return (user.email or "").split("@")[0].strip() or NEW_HELPER_NAME
 
 
 @router.get("/voices")

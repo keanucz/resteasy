@@ -1,5 +1,6 @@
 """Account API: the app's own login, offline checks, then a round trip against live Supabase."""
 
+import secrets
 from collections.abc import Iterator
 
 import pytest
@@ -8,7 +9,7 @@ from pydantic import ValidationError
 from supabase import Client
 
 from app.core.voice_constants import DEFAULT_VOICE_ID, VOICE_IDS
-from app.crud.crud_constants import CONTACTS_TABLE
+from app.crud.crud_constants import CONTACTS_TABLE, PILLOWS_TABLE, RESIDENTS_TABLE
 from app.routers import account as account_router
 from app.schemas.account import PreferencesPatch
 from tests.conftest import _throwaway_login
@@ -96,3 +97,42 @@ def test_a_fresh_signup_joins_the_demo_household_once(client: TestClient, fresh_
     again = client.post("/api/me/join-demo", headers=auth).json()
     assert again["contact_id"] == me["contact_id"] and len(again["pillows"]) == 1
     assert client.get(PREFS_URL, headers=auth).status_code == 200
+
+
+@pytest.fixture
+def real_pillow_id(db: Client, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    """A throwaway id standing in for the real pillow; the pillow and resident it gets are removed."""
+    pillow_id = f"test-new-{secrets.token_hex(4)}"
+    monkeypatch.setattr(account_router, "REAL_PILLOW_ID", pillow_id)
+    try:
+        yield pillow_id
+    finally:
+        row = db.table(PILLOWS_TABLE).select("resident_id").eq("id", pillow_id).execute().data
+        db.table(PILLOWS_TABLE).delete().eq("id", pillow_id).execute()
+        if row:
+            db.table(RESIDENTS_TABLE).delete().eq("id", row[0]["resident_id"]).execute()
+
+
+def test_connect_creates_the_pillow_for_the_named_person(client: TestClient, db: Client, real_pillow_id: str):
+    with _throwaway_login(db) as (user_id, token), _throwaway_login(db) as (other_id, other):
+        try:
+            auth = {"Authorization": f"Bearer {token}"}
+            assert client.post("/api/me/pillows", json={"name": "  "}, headers=auth).status_code == 422
+
+            me = client.post("/api/me/pillows", json={"name": " Halina "}, headers=auth).json()
+            [pillow] = me["pillows"]
+            assert (pillow["pillow_id"], pillow["role"], pillow["preferred_name"]) == (
+                real_pillow_id,
+                "owner",
+                "Halina",
+            )
+
+            # The owner may send it again (a retry, or a changed name); anyone else is turned away
+            again = client.post("/api/me/pillows", json={"name": "Babcia"}, headers=auth).json()
+            assert [p["preferred_name"] for p in again["pillows"]] == ["Babcia"]
+            taken = client.post(
+                "/api/me/pillows", json={"name": "X"}, headers={"Authorization": f"Bearer {other}"}
+            )
+            assert taken.status_code == 409
+        finally:
+            db.table(CONTACTS_TABLE).delete().in_("user_id", [user_id, other_id]).execute()
