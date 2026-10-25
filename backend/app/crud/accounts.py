@@ -43,12 +43,11 @@ async def list_account_pillows(db: AsyncClient, contact_id: str) -> list[dict[st
     ]
 
 
-async def get_role_for_user(db: AsyncClient, user_id: str, resident_id: str) -> str | None:
-    """The role ('owner' or 'contact') of the login's contact for this resident, or None if not linked."""
-    link = await fetch_one(
+async def get_link_for_user(db: AsyncClient, user_id: str, resident_id: str) -> dict[str, Any] | None:
+    """How the login's contact looks after this resident (role, contact_id), or None if not linked."""
+    return await fetch_one(
         db.table(RESIDENT_CONTACTS_TABLE)
-        .select("role, contacts!inner(user_id)")
+        .select("role, contact_id, contacts!inner(user_id)")
         .eq("resident_id", resident_id)
         .eq("contacts.user_id", user_id)
     )
-    return link["role"] if link else None

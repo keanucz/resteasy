@@ -1,5 +1,6 @@
 """App-wide constants that are not environment specific."""
 
+from datetime import time, timedelta
 from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -53,3 +54,38 @@ PHOTO_MAX_BYTES = 5 * 1024 * 1024
 PHOTO_WRONG_TYPE = "The photo must be a JPEG, PNG or WebP image"
 PHOTO_EMPTY = "The photo file is empty"
 PHOTO_TOO_LARGE = "The photo must be 5 MB or smaller"
+
+# Reminders (the Routine agent). What an occurrence is for: say the reminder, or ask her consent
+REMIND_PURPOSE = "remind"
+CONSENT_PURPOSE = "consent"
+# reminders.consent: nothing plays until she agrees, asked by the pillow itself
+CONSENT_PENDING = "pending"
+CONSENT_AGREED = "agreed"
+CONSENT_DECLINED = "declined"
+# Changing any of these asks her again: she agrees to what is said and when
+CONSENT_RESET_FIELDS = frozenset({"label", "kind", "time_of_day", "days", "on_date"})
+# When the pillow asks about a pending reminder, in her timezone: from 09:00 for 12 hours (never at
+# night), held like any reminder until she is up for the day, again an hour after no answer
+CONSENT_ASK_AT = time(9, 0)
+CONSENT_ASK_WINDOW = timedelta(hours=12)
+CONSENT_RETRY_AFTER = timedelta(hours=1)
+# Who asks, when the family member who set the reminder up is unknown
+FAMILY_FALLBACK_NAME = "Your family"
+# Longest range GET /reminders/calendar expands, in days (two months)
+CALENDAR_MAX_DAYS = 62
+# Spoken names, independent of the server's locale (ISO weekday 1 = Monday)
+WEEKDAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+MONTH_NAMES = (
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)

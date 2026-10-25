@@ -14,8 +14,18 @@ AGENT_LOG_TABLE = "agent_log"
 REMINDERS_TABLE = "reminders"
 REMINDER_OCCURRENCES_TABLE = "reminder_occurrences"
 
-# Conflict target that makes creating a reminder's occurrence for a due time idempotent
-OCCURRENCE_KEY = "reminder_id,due_at"
+# Conflict target that makes creating a reminder's occurrence for a due time and purpose idempotent
+OCCURRENCE_KEY = "reminder_id,due_at,purpose"
+# Postgres error code for a unique violation (a slot already claimed under the old two-column key)
+UNIQUE_VIOLATION = "23505"
+
+# A reminder with the name of the family member who set it up
+REMINDER_COLUMNS = "*, creator:contacts(full_name)"
+# An occurrence with what the API says about its reminder
+OCCURRENCE_COLUMNS = (
+    "*, reminders!inner(resident_id, label, kind, confirm, time_of_day, days, on_date, "
+    "creator:contacts(full_name))"
+)
 
 # Conflict target for the one-row-per-pillow upsert into pillow_state
 PILLOW_STATE_KEY = "pillow_id"

@@ -2,42 +2,55 @@
 
 from typing import Any
 
-from supabase import AsyncClient
+from supabase import AsyncClient, PostgrestAPIError
 
+from app.core.app_constants import CONSENT_PENDING
 from app.crud.crud_constants import (
+    OCCURRENCE_COLUMNS,
     OCCURRENCE_KEY,
+    REMINDER_COLUMNS,
     REMINDER_OCCURRENCES_TABLE,
     REMINDERS_TABLE,
+    UNIQUE_VIOLATION,
 )
 from app.crud.supabase_query import fetch_one
 
 OPEN = ["waiting", "due"]  # occurrence statuses still being worked on
 
 
-async def list_reminders(db: AsyncClient, resident_id: str) -> list[dict[str, Any]]:
-    """The resident's reminders, earliest in the day first."""
-    response = await (
-        db.table(REMINDERS_TABLE).select("*").eq("resident_id", resident_id).order("time_of_day").execute()
-    )
-    return response.data
+async def list_reminders(
+    db: AsyncClient, resident_id: str, active_only: bool = False
+) -> list[dict[str, Any]]:
+    """The resident's reminders (only the active ones, when `active_only`), earliest in the day
+    first, each with the name of who set it up."""
+    query = db.table(REMINDERS_TABLE).select(REMINDER_COLUMNS).eq("resident_id", resident_id)
+    if active_only:
+        query = query.eq("active", True)
+    return (await query.order("time_of_day").order("id").execute()).data
 
 
 async def get_reminder(db: AsyncClient, resident_id: str, reminder_id: int) -> dict[str, Any] | None:
-    """One of the resident's reminders, or None (also when it belongs to someone else)."""
+    """One of the resident's reminders with who set it up, or None (also when it belongs to
+    someone else)."""
     return await fetch_one(
-        db.table(REMINDERS_TABLE).select("*").eq("id", reminder_id).eq("resident_id", resident_id)
+        db.table(REMINDERS_TABLE)
+        .select(REMINDER_COLUMNS)
+        .eq("id", reminder_id)
+        .eq("resident_id", resident_id)
     )
 
 
 async def create_reminder(db: AsyncClient, resident_id: str, fields: dict[str, Any]) -> dict[str, Any]:
+    """Insert a reminder and return it as `get_reminder` does."""
     response = await db.table(REMINDERS_TABLE).insert({"resident_id": resident_id, **fields}).execute()
-    return response.data[0]
+    return await get_reminder(db, resident_id, response.data[0]["id"])
 
 
 async def update_reminder(
     db: AsyncClient, resident_id: str, reminder_id: int, fields: dict[str, Any]
 ) -> dict[str, Any] | None:
-    """Change a reminder; None if the resident has no such reminder."""
+    """Change a reminder and return it as `get_reminder` does; None if the resident has no such
+    reminder."""
     response = await (
         db.table(REMINDERS_TABLE)
         .update(fields)
@@ -45,13 +58,25 @@ async def update_reminder(
         .eq("resident_id", resident_id)
         .execute()
     )
-    return response.data[0] if response.data else None
+    return await get_reminder(db, resident_id, reminder_id) if response.data else None
 
 
 async def delete_reminder(db: AsyncClient, resident_id: str, reminder_id: int) -> bool:
     """Delete a reminder (its occurrences go with it); False if there was none."""
     response = await (
         db.table(REMINDERS_TABLE).delete().eq("id", reminder_id).eq("resident_id", resident_id).execute()
+    )
+    return bool(response.data)
+
+
+async def set_consent(db: AsyncClient, reminder_id: int, consent: str, at_iso: str) -> bool:
+    """Record her answer, unless the reminder is no longer waiting for one. True if recorded."""
+    response = await (
+        db.table(REMINDERS_TABLE)
+        .update({"consent": consent, "consent_at": at_iso})
+        .eq("id", reminder_id)
+        .eq("consent", CONSENT_PENDING)
+        .execute()
     )
     return bool(response.data)
 
@@ -68,14 +93,20 @@ async def list_active_reminders(db: AsyncClient) -> list[dict[str, Any]]:
     return [r for r in response.data if r["residents"] and r["residents"]["pillows"]]
 
 
-async def claim_occurrence(db: AsyncClient, reminder_id: int, due_at_iso: str) -> None:
-    """Create the occurrence for this due time unless it already exists (safe to repeat)."""
-    row = {"reminder_id": reminder_id, "due_at": due_at_iso}
-    await (
-        db.table(REMINDER_OCCURRENCES_TABLE)
-        .upsert(row, on_conflict=OCCURRENCE_KEY, ignore_duplicates=True)
-        .execute()
-    )
+async def claim_occurrence(db: AsyncClient, reminder_id: int, due_at_iso: str, purpose: str) -> None:
+    """Create the occurrence for this due time and purpose unless it already exists (safe to
+    repeat). Until the old (reminder_id, due_at) key is dropped, a slot of the other purpose at
+    the same time counts as taken."""
+    row = {"reminder_id": reminder_id, "due_at": due_at_iso, "purpose": purpose}
+    try:
+        await (
+            db.table(REMINDER_OCCURRENCES_TABLE)
+            .upsert(row, on_conflict=OCCURRENCE_KEY, ignore_duplicates=True)
+            .execute()
+        )
+    except PostgrestAPIError as error:
+        if error.code != UNIQUE_VIOLATION:
+            raise
 
 
 async def list_open_occurrences(db: AsyncClient, reminder_ids: list[int]) -> list[dict[str, Any]]:
@@ -93,20 +124,29 @@ async def list_open_occurrences(db: AsyncClient, reminder_ids: list[int]) -> lis
 
 
 async def list_occurrences(
-    db: AsyncClient, resident_id: str, since_iso: str | None = None, status: str | None = None
+    db: AsyncClient,
+    resident_id: str,
+    since_iso: str | None = None,
+    until_iso: str | None = None,
+    status: str | None = None,
+    purpose: str | None = None,
 ) -> list[dict[str, Any]]:
-    """The resident's occurrences (due at or after `since`, in `status`), oldest first, each with
-    its reminder."""
+    """The resident's occurrences due in [since, until), in `status`, for `purpose`, oldest first,
+    each with its reminder."""
     query = (
         db.table(REMINDER_OCCURRENCES_TABLE)
-        .select("*, reminders!inner(resident_id, label, kind, confirm)")
+        .select(OCCURRENCE_COLUMNS)
         .eq("reminders.resident_id", resident_id)
         .order("due_at")
     )
     if since_iso is not None:
         query = query.gte("due_at", since_iso)
+    if until_iso is not None:
+        query = query.lt("due_at", until_iso)
     if status is not None:
         query = query.eq("status", status)
+    if purpose is not None:
+        query = query.eq("purpose", purpose)
     return (await query.execute()).data
 
 

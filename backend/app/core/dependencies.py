@@ -1,6 +1,7 @@
 """FastAPI dependencies shared across routers."""
 
 import secrets
+from dataclasses import dataclass
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -24,7 +25,7 @@ from app.core.app_constants import (
     SUPABASE_NOT_CONFIGURED,
 )
 from app.core.config import get_settings
-from app.crud.accounts import get_role_for_user
+from app.crud.accounts import get_link_for_user
 from app.crud.pillows import get_pillow
 from app.crud.residents import get_resident
 from app.schemas.pillow import Pillow
@@ -114,11 +115,13 @@ async def current_user_id(db: SupabaseDep, authorization: Annotated[str | None, 
 UserIdDep = Annotated[str, Depends(current_user_id)]
 
 
-async def require_role(db: AsyncClient, user_id: str, resident_id: str, *, owner: bool) -> None:
-    """403 unless the login's contact looks after this resident (as the owner, when `owner`)."""
-    role = await get_role_for_user(db, user_id, resident_id)
-    if role is None or (owner and role != OWNER_ROLE):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=NOT_OWNER if role else NOT_LINKED)
+async def require_role(db: AsyncClient, user_id: str, resident_id: str, *, owner: bool) -> dict[str, Any]:
+    """The login's link to this resident (role, contact_id); 403 unless their contact looks after
+    her (as the owner, when `owner`)."""
+    link = await get_link_for_user(db, user_id, resident_id)
+    if link is None or (owner and link["role"] != OWNER_ROLE):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail=NOT_OWNER if link else NOT_LINKED)
+    return link
 
 
 async def existing_resident(resident_id: UUID, db: SupabaseDep) -> dict[str, Any]:
@@ -147,6 +150,24 @@ async def owned_resident(
 
 ViewedResidentDep = Annotated[dict[str, Any], Depends(viewed_resident)]
 OwnedResidentDep = Annotated[dict[str, Any], Depends(owned_resident)]
+
+
+@dataclass(frozen=True)
+class CareLogin:
+    """A signed-in member of the pillow's resident's care circle: her row and their contact id."""
+
+    resident: dict[str, Any]
+    contact_id: str
+
+
+async def pillow_care_login(user_id: UserIdDep, resident: ResidentDep, db: SupabaseDep) -> CareLogin:
+    """The resident of the pillow in the path, for a login that looks after her (owner or contact):
+    401 without a login, 403 when it isn't linked to her."""
+    link = await require_role(db, user_id, resident["id"], owner=False)
+    return CareLogin(resident=resident, contact_id=link["contact_id"])
+
+
+CareLoginDep = Annotated[CareLogin, Depends(pillow_care_login)]
 
 
 async def photo_upload(file: UploadFile) -> PhotoUpload:

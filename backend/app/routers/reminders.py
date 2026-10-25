@@ -1,18 +1,22 @@
 """Reminders router: the family app sets reminders up, the laptop speaks the due ones.
 
-Reads and the app's writes are open like the rest of the app API (e.g. POST /goodnight). A label is
-spoken to her, so it passes the Guardian's text check. Only the laptop, with the shared agent token,
-may report how a reminder went.
+Setting a reminder up, changing or deleting it, and the calendar take the app's Supabase login of
+anyone who looks after her (owner or contact). The lists the laptop and the app already poll stay
+open like the rest of the pillow API. A label is spoken to her, so it passes the Guardian's text
+check. Only the laptop, with the shared agent token, may report how a reminder went.
 """
 
 from datetime import datetime
+from typing import Annotated
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.agents.guardian import Guardian
-from app.agents.reminders import spoken_line
+from app.agents.reminders import due_reminders, reminder_calendar
+from app.core.app_constants import REMIND_PURPOSE
 from app.core.dependencies import (
+    CareLoginDep,
     PillowDep,
     ReminderServiceDep,
     ResidentDep,
@@ -21,6 +25,8 @@ from app.core.dependencies import (
 )
 from app.crud import reminders as crud
 from app.schemas.reminder import (
+    CalendarEntry,
+    CalendarRange,
     DueReminder,
     Occurrence,
     Reminder,
@@ -48,33 +54,47 @@ def _not_found(reminder_id: int) -> HTTPException:
 @router.get("")
 async def list_reminders(resident: ResidentDep, db: SupabaseDep) -> list[Reminder]:
     """Every reminder of the pillow's resident, earliest in the day first."""
-    return [Reminder(**r) for r in await crud.list_reminders(db, resident["id"])]
+    return [Reminder.from_row(r) for r in await crud.list_reminders(db, resident["id"])]
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def create_reminder(reminder: ReminderCreate, resident: ResidentDep, db: SupabaseDep) -> Reminder:
-    """Set up a reminder: spoken as "<name>, it's time to <label>." on the chosen days."""
+async def create_reminder(reminder: ReminderCreate, login: CareLoginDep, db: SupabaseDep) -> Reminder:
+    """Set up a reminder, spoken as "<name>, it's time to <label>." on `on_date` or on the chosen
+    days, once she agrees: the pillow asks her first (consent "pending")."""
     _screen(reminder.label)
-    return Reminder(**await crud.create_reminder(db, resident["id"], reminder.model_dump(mode="json")))
+    fields = reminder.to_fields(created_by=login.contact_id)
+    return Reminder.from_row(await crud.create_reminder(db, login.resident["id"], fields))
+
+
+@router.get("/calendar")
+async def read_calendar(
+    days: Annotated[CalendarRange, Query()], login: CareLoginDep, db: SupabaseDep
+) -> list[CalendarEntry]:
+    """Every time an active reminder plays from `start` to `end` (inclusive, at most 62 days, her
+    timezone), with how each went, earliest first."""
+    return await reminder_calendar(db, login.resident, days.start, days.end)
 
 
 @router.patch("/{reminder_id}")
 async def update_reminder(
-    reminder_id: int, patch: ReminderUpdate, resident: ResidentDep, db: SupabaseDep
+    reminder_id: int, patch: ReminderUpdate, login: CareLoginDep, db: SupabaseDep
 ) -> Reminder:
-    """Change a reminder; `active: false` pauses it."""
+    """Change a reminder; `active: false` pauses it. Changing what is said or when asks her again."""
     _screen(patch.label)
-    fields = patch.model_dump(mode="json", exclude_none=True)
-    row = (await crud.update_reminder(db, resident["id"], reminder_id, fields) if fields
-           else await crud.get_reminder(db, resident["id"], reminder_id))
-    if row is None:
+    resident_id = login.resident["id"]
+    current = await crud.get_reminder(db, resident_id, reminder_id)
+    if current is None:
         raise _not_found(reminder_id)
-    return Reminder(**row)
+    fields = patch.to_fields(Reminder.from_row(current))
+    row = await crud.update_reminder(db, resident_id, reminder_id, fields) if fields else current
+    if row is None:  # deleted meanwhile
+        raise _not_found(reminder_id)
+    return Reminder.from_row(row)
 
 
 @router.delete("/{reminder_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_reminder(reminder_id: int, resident: ResidentDep, db: SupabaseDep) -> Response:
-    if not await crud.delete_reminder(db, resident["id"], reminder_id):
+async def delete_reminder(reminder_id: int, login: CareLoginDep, db: SupabaseDep) -> Response:
+    if not await crud.delete_reminder(db, login.resident["id"], reminder_id):
         raise _not_found(reminder_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -84,18 +104,19 @@ async def list_today(resident: ResidentDep, db: SupabaseDep) -> list[Occurrence]
     """Today's reminders that have fallen due so far, with how each went, for the app."""
     tz = ZoneInfo(resident["timezone"])
     midnight = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
-    rows = await crud.list_occurrences(db, resident["id"], since_iso=midnight.isoformat())
-    return [Occurrence(**row, **{k: row["reminders"][k] for k in ("label", "kind", "confirm")})
-            for row in rows]
+    rows = await crud.list_occurrences(
+        db, resident["id"], since_iso=midnight.isoformat(), purpose=REMIND_PURPOSE
+    )
+    return [
+        Occurrence(**row, **{k: row["reminders"][k] for k in ("label", "kind", "confirm")}) for row in rows
+    ]
 
 
 @router.get("/due")
 async def list_due(resident: ResidentDep, db: SupabaseDep) -> list[DueReminder]:
-    """What the laptop should say now (buzzer already queued), oldest first."""
-    rows = await crud.list_occurrences(db, resident["id"], status="due")
-    return [DueReminder(occurrence_id=row["id"], text=spoken_line(resident["preferred_name"],
-                                                                  row["reminders"]["label"]),
-                        confirm=row["reminders"]["confirm"]) for row in rows]
+    """What the laptop should say now (buzzer already queued), oldest first: reminders, and the
+    question whether she agrees to a new one."""
+    return await due_reminders(db, resident)
 
 
 @router.post("/{occurrence_id}/result", dependencies=[Depends(require_checkin_token)])
