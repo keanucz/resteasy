@@ -298,7 +298,7 @@ class WatchService:
         contact_id = w.contact_ids.get(a.contact)
         if w.incident_id is None or contact_id is None:
             return "logged only: no open incident or no contact on record"
-        await add_notification(db, w.incident_id, contact_id, CHANNELS[a.channel])
+        await add_notification(db, w.incident_id, contact_id, CHANNELS[a.channel], a.message)
         return None
 
 

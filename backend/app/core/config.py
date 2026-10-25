@@ -8,6 +8,7 @@ from app.core.app_constants import (
     DEFAULT_APP_NAME,
     DEFAULT_CORS_ORIGINS,
     DEFAULT_ENVIRONMENT,
+    DEFAULT_NOTIFY_PILLOW_IDS,
     ENV_FILE,
 )
 
@@ -26,6 +27,14 @@ class Settings(BaseSettings):
     checkin_token: str = ""
     # Claude, for the Family Liaison's wording (app/agents/liaison.py); empty = fixed messages only
     anthropic_api_key: str = ""
+    # Family alerts to real phones (app/notify): the iMessage sidecar (deploy/imessage) and Twilio
+    # for SMS fallback and calls. Each is optional; with neither, sms/call rows stay queued.
+    imessage_url: str = ""
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_from_number: str = ""
+    # Pillows whose alerts reach real phones; test pillows' rows are never sent
+    notify_pillow_ids: list[str] = DEFAULT_NOTIFY_PILLOW_IDS
 
     @property
     def supabase_configured(self) -> bool:

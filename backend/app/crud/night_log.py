@@ -3,12 +3,14 @@
 from datetime import UTC, datetime
 from typing import Any
 
+from postgrest.exceptions import APIError
 from supabase import AsyncClient
 
 from app.crud.crud_constants import (
     AGENT_LOG_TABLE,
     EVENTS_TABLE,
     INCIDENTS_TABLE,
+    MISSING_COLUMN,
     NIGHT_TRIPS_VIEW,
     NOTIFICATIONS_TABLE,
 )
@@ -38,10 +40,48 @@ async def update_incident(db: AsyncClient, incident_id: int, fields: dict[str, A
     await db.table(INCIDENTS_TABLE).update(fields).eq("id", incident_id).execute()
 
 
-async def add_notification(db: AsyncClient, incident_id: int, contact_id: str, channel: str) -> None:
-    """Record a message to a contact as queued; a sender (Twilio, not built) delivers it."""
-    row = {"incident_id": incident_id, "contact_id": contact_id, "channel": channel}
-    await db.table(NOTIFICATIONS_TABLE).insert(row).execute()
+async def add_notification(
+    db: AsyncClient, incident_id: int, contact_id: str, channel: str, message: str | None = None
+) -> None:
+    """Record a message to a contact as queued; app/notify's sender delivers sms and call rows."""
+    row = {"incident_id": incident_id, "contact_id": contact_id, "channel": channel, "message": message}
+    try:
+        await db.table(NOTIFICATIONS_TABLE).insert(row).execute()
+    except APIError as err:
+        if err.code != MISSING_COLUMN:
+            raise
+        # The message column's migration isn't applied yet: queue it without the words, never drop it
+        del row["message"]
+        await db.table(NOTIFICATIONS_TABLE).insert(row).execute()
+
+
+async def list_sendable_notifications(
+    db: AsyncClient, channels: list[str], pillow_ids: list[str], since_iso: str
+) -> list[dict]:
+    """Queued notifications on these channels and pillows created since `since_iso`, oldest first,
+    with the contact's phone and consent and the incident's pillow and summary."""
+    response = await (
+        db.table(NOTIFICATIONS_TABLE)
+        .select(
+            "id, incident_id, channel, message, created_at, contacts(full_name, phone, sms_consent), "
+            "incidents!inner(pillow_id, summary)"
+        )
+        .eq("status", "queued")
+        .in_("channel", channels)
+        .in_("incidents.pillow_id", pillow_ids)
+        .gte("created_at", since_iso)
+        .order("created_at")
+        .execute()
+    )
+    return response.data
+
+
+async def finish_notification(
+    db: AsyncClient, notification_id: int, status: str, provider_ref: str | None, error: str | None
+) -> None:
+    """Mark a notification sent or failed, with the provider's reference and any error."""
+    fields = {"status": status, "provider_ref": provider_ref, "error": error}
+    await db.table(NOTIFICATIONS_TABLE).update(fields).eq("id", notification_id).execute()
 
 
 async def log_action(

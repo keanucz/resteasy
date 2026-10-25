@@ -32,6 +32,12 @@ NIGHT_WATCH_TICK_S = 5
 # Seconds between runs of the reminder schedule (the Routine agent)
 REMINDERS_TICK_S = 15
 
+# Seconds between runs of the notifications sender (app/notify)
+NOTIFY_TICK_S = 5
+
+# The one real pillow whose alerts go to real phones (NOTIFY_PILLOW_IDS overrides)
+DEFAULT_NOTIFY_PILLOW_IDS = ["mum"]
+
 # Detail returned with a 503 when CHECKIN_TOKEN is not set (POST /checkin fails closed)
 CHECKIN_TOKEN_NOT_CONFIGURED = "CHECKIN_TOKEN is not configured on this server"
 

@@ -17,9 +17,11 @@ from app.core.app_constants import (
     CORS_ALLOW_HEADERS,
     CORS_ALLOW_METHODS,
     NIGHT_WATCH_TICK_S,
+    NOTIFY_TICK_S,
     REMINDERS_TICK_S,
 )
 from app.core.config import get_settings
+from app.notify.sender import NotificationSender
 from app.routers import api_router
 
 log = logging.getLogger(__name__)
@@ -36,11 +38,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.night_watch = WatchService(Liaison.from_api_key(settings.anthropic_api_key))
     app.state.reminders = ReminderService(app.state.night_watch)
+    app.state.notifier = NotificationSender.from_settings(settings)
     tickers = (
         [asyncio.create_task(_tick_night_watch(app)), asyncio.create_task(_tick_reminders(app))]
         if app.state.supabase is not None
         else []
     )
+    if app.state.supabase is not None and app.state.notifier.enabled:
+        tickers.append(asyncio.create_task(_tick_notify(app)))
     yield
     for ticker in tickers:
         ticker.cancel()
@@ -61,6 +66,16 @@ async def _tick_reminders(app: FastAPI) -> None:
             await app.state.reminders.tick(app.state.supabase)
         except Exception:
             log.exception("Reminder tick failed")
+
+
+async def _tick_notify(app: FastAPI) -> None:
+    """Send queued family texts and calls; an error skips one round, never stops the loop."""
+    while True:
+        await asyncio.sleep(NOTIFY_TICK_S)
+        try:
+            await app.state.notifier.tick(app.state.supabase)
+        except Exception:
+            log.exception("Notification tick failed")
 
 
 def create_app() -> FastAPI:

@@ -10,6 +10,8 @@ EVENTS_TABLE = "events"
 NIGHT_TRIPS_VIEW = "night_trips"  # each bed_exit paired with the next bed_return
 INCIDENTS_TABLE = "incidents"
 NOTIFICATIONS_TABLE = "notifications"
+# PostgREST's error code for a column the schema cache does not know (a migration not applied yet)
+MISSING_COLUMN = "PGRST204"
 AGENT_LOG_TABLE = "agent_log"
 REMINDERS_TABLE = "reminders"
 REMINDER_OCCURRENCES_TABLE = "reminder_occurrences"
