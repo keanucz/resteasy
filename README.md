@@ -328,4 +328,4 @@ and it shouldn't replace emergency services or professional care.
 ## Team
 
 Built at Cal Hacks 13.0 by Keanu Czirjak (hardware and firmware), Adam Kassam (agents and voice),
-Szymon Arciszewski (backend, notifications and the app) and Adyan Ullah (pillow node and settle).
+Szymon Arciszewski (backend, notifications and the app) and Adyan Ullah (hardware + video).
